@@ -1,0 +1,50 @@
+{
+  "name": "read-aloud-tab",
+  "version": "1.0.0",
+  "description": "Read web page content aloud using text-to-speech",
+  "scripts": {
+    "dev": "webpack --mode=development --env browser=chrome --watch",
+    "build:chrome": "webpack --mode=production --env browser=chrome",
+    "build:firefox": "webpack --mode=production --env browser=firefox",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.{ts,tsx}",
+    "format": "prettier --write src/**/*.{ts,tsx}",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/firefox-webext-browser": "^120.0.4",
+    "@types/jest": "^29.5.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "html-webpack-plugin": "^5.6.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "prettier": "^3.3.3",
+    "style-loader": "^4.0.0",
+    "ts-jest": "^29.2.4",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.5.4",
+    "webpack": "^5.93.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "keywords": ["chrome-extension", "firefox-addon", "text-to-speech", "accessibility"],
+  "author": "Your Name",
+  "license": "MIT"
+}
