@@ -13,6 +13,7 @@ module.exports = (env, argv) => {
       background: './src/background/index.ts',
       content: './src/content/index.ts',
       popup: './src/popup/index.tsx',
+      options: './src/options/index.tsx',
     },
     output: {
       path: path.resolve(__dirname, `dist/${browser}`),
@@ -56,6 +57,11 @@ module.exports = (env, argv) => {
         template: 'src/popup/index.html',
         filename: 'popup.html',
         chunks: ['popup'],
+      }),
+      new HtmlPlugin({
+        template: 'src/options/index.html',
+        filename: 'options.html',
+        chunks: ['options'],
       }),
     ],
     // Service Workerのためのtarget設定

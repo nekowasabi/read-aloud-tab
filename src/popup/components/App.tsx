@@ -1,157 +1,164 @@
-import React, { useState, useEffect } from 'react';
-import { TTSState, TTSSettings } from '../../shared/types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { TTSSettings, QueueStatus } from '../../shared/types';
 import { StorageManager } from '../../shared/utils/storage';
 import ControlButtons from './ControlButtons';
 import SettingsPanel from './SettingsPanel';
 import StatusDisplay from './StatusDisplay';
+import TabQueueList from './TabQueueList';
+import useTabQueue from '../hooks/useTabQueue';
+import { SerializedTabInfo } from '../../shared/messages';
+
+const DEFAULT_SETTINGS: TTSSettings = {
+  rate: 1.0,
+  pitch: 1.0,
+  volume: 1.0,
+  voice: null,
+};
 
 export default function App() {
-  const [ttsState, setTtsState] = useState<TTSState>({
-    isReading: false,
-    isPaused: false,
-    currentTabId: null,
-    progress: 0,
-  });
+  const {
+    state: queueState,
+    isConnected,
+    error: queueError,
+    progressByTab,
+    addTab,
+    removeTab,
+    reorderTabs,
+    skipNext,
+    skipPrevious,
+    control,
+    updateSettings,
+  } = useTabQueue();
 
-  const [settings, setSettings] = useState<TTSSettings>({
-    rate: 1.0,
-    pitch: 1.0,
-    volume: 1.0,
-    voice: '',
-  });
-
-  const [currentTab, setCurrentTab] = useState<chrome.tabs.Tab | null>(null);
+  const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
+  const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    initializeApp();
-    setupMessageListener();
+    let mounted = true;
+
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (mounted && tabs[0]) {
+          setActiveTab(tabs[0]);
+        }
+
+        const savedSettings = await StorageManager.getSettings();
+        if (mounted) {
+          setSettings(savedSettings);
+        }
+      } catch (initError) {
+        console.error('Failed to initialize popup:', initError);
+        if (mounted) {
+          setError('初期化に失敗しました');
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    })();
 
     return () => {
-      // クリーンアップ
-      chrome.runtime.onMessage.removeListener(handleMessage);
+      mounted = false;
     };
   }, []);
 
-  const initializeApp = async () => {
-    try {
-      setIsLoading(true);
-
-      // 現在のタブを取得
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]) {
-        setCurrentTab(tabs[0]);
-      }
-
-      // 設定を読み込み
-      const savedSettings = await StorageManager.getSettings();
-      setSettings(savedSettings);
-
-      // 現在の状態を取得
-      const response = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
-      if (response && typeof response === 'object') {
-        setTtsState(response);
-      }
-
-    } catch (error) {
-      console.error('Failed to initialize app:', error);
-      setError('アプリケーションの初期化に失敗しました');
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (queueError) {
+      setError(queueError);
     }
-  };
+  }, [queueError]);
 
-  const setupMessageListener = () => {
-    chrome.runtime.onMessage.addListener(handleMessage);
-  };
+  const activeQueueTab: SerializedTabInfo | null = useMemo(() => {
+    if (!queueState) return null;
+    return queueState.tabs[queueState.currentIndex] ?? null;
+  }, [queueState]);
 
-  const handleMessage = (message: any, sender: any, sendResponse: any) => {
-    if (message.type === 'STATUS_UPDATE') {
-      setTtsState(message.state);
-    }
-  };
+  const activeProgress = useMemo(() => {
+    if (!activeQueueTab) return 0;
+    return progressByTab[activeQueueTab.tabId] ?? (queueState?.status === 'reading' ? 0 : 0);
+  }, [activeQueueTab, progressByTab, queueState?.status]);
 
-  const handleStart = async () => {
-    if (!currentTab?.id) {
-      setError('有効なタブが見つかりません');
+  const handleAddCurrentTab = useCallback(async () => {
+    if (!activeTab || typeof activeTab.id !== 'number' || !activeTab.url) {
+      setError('追加できるタブが見つかりません');
       return;
     }
 
     try {
-      setIsLoading(true);
-      setError(null);
-
-      const response = await chrome.runtime.sendMessage({
-        type: 'START_READING',
-        tabId: currentTab.id,
-        settings: settings,
+      await addTab({
+        tabId: activeTab.id,
+        url: activeTab.url,
+        title: activeTab.title || activeTab.url,
       });
+    } catch (commandError) {
+      console.error('Failed to add tab to queue:', commandError);
+      const message = commandError instanceof Error ? commandError.message : 'キューへの追加に失敗しました';
+      setError(message);
+    }
+  }, [activeTab, addTab]);
 
-      if (!response?.success) {
-        throw new Error(response?.error || '読み上げの開始に失敗しました');
+  const handleRemoveTab = useCallback(
+    async (tabId: number) => {
+      try {
+        await removeTab(tabId);
+      } catch (commandError) {
+        const message = commandError instanceof Error ? commandError.message : 'キューからの削除に失敗しました';
+        setError(message);
       }
+    },
+    [removeTab],
+  );
 
-    } catch (error) {
-      console.error('Failed to start reading:', error);
-      const errorMessage = error instanceof Error ? error.message : '読み上げの開始に失敗しました';
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handlePause = async () => {
-    try {
-      const response = await chrome.runtime.sendMessage({ type: 'PAUSE_READING' });
-      if (!response?.success) {
-        throw new Error(response?.error || '一時停止に失敗しました');
+  const handleReorder = useCallback(
+    async (from: number, to: number) => {
+      try {
+        await reorderTabs(from, to);
+      } catch (commandError) {
+        const message = commandError instanceof Error ? commandError.message : 'キューの並び替えに失敗しました';
+        setError(message);
       }
-    } catch (error) {
-      console.error('Failed to pause reading:', error);
-      setError('一時停止に失敗しました');
-    }
-  };
+    },
+    [reorderTabs],
+  );
 
-  const handleResume = async () => {
-    try {
-      const response = await chrome.runtime.sendMessage({ type: 'RESUME_READING' });
-      if (!response?.success) {
-        throw new Error(response?.error || '再開に失敗しました');
+  const handleControl = useCallback(
+    async (action: 'start' | 'pause' | 'resume' | 'stop') => {
+      try {
+        await control(action);
+      } catch (commandError) {
+        const message = commandError instanceof Error ? commandError.message : '操作に失敗しました';
+        setError(message);
       }
-    } catch (error) {
-      console.error('Failed to resume reading:', error);
-      setError('再開に失敗しました');
-    }
-  };
+    },
+    [control],
+  );
 
-  const handleStop = async () => {
-    try {
-      const response = await chrome.runtime.sendMessage({ type: 'STOP_READING' });
-      if (!response?.success) {
-        throw new Error(response?.error || '停止に失敗しました');
+  const handleSettingsChange = useCallback(
+    async (newSettings: TTSSettings) => {
+      try {
+        const validated = StorageManager.validateSettings(newSettings);
+        setSettings(validated);
+        await StorageManager.saveSettings(validated);
+        await updateSettings(validated);
+      } catch (saveError) {
+        console.error('Failed to save settings:', saveError);
+        const message = saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
+        setError(message);
       }
-    } catch (error) {
-      console.error('Failed to stop reading:', error);
-      setError('停止に失敗しました');
-    }
-  };
+    },
+    [updateSettings],
+  );
 
-  const handleSettingsChange = async (newSettings: TTSSettings) => {
-    try {
-      const validatedSettings = StorageManager.validateSettings(newSettings);
-      setSettings(validatedSettings);
-      await StorageManager.saveSettings(validatedSettings);
-    } catch (error) {
-      console.error('Failed to save settings:', error);
-      setError('設定の保存に失敗しました');
-    }
-  };
+  const clearError = useCallback(() => setError(null), []);
 
-  const clearError = () => {
-    setError(null);
-  };
+  const queueStatus: QueueStatus = queueState?.status ?? 'idle';
+  const queueTabs = queueState?.tabs ?? [];
+  const queueIndex = queueState?.currentIndex ?? 0;
 
   if (isLoading) {
     return (
@@ -178,27 +185,59 @@ export default function App() {
       </header>
 
       {error && (
-        <div className="error-message">
+        <div className="error-message" role="alert">
           <span>{error}</span>
           <button onClick={clearError} className="error-close">×</button>
         </div>
       )}
 
-      {currentTab && (
-        <StatusDisplay
-          tab={currentTab}
-          ttsState={ttsState}
-        />
-      )}
+      <div className="actions-row">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleAddCurrentTab}
+          disabled={!activeTab}
+        >
+          キューに追加
+        </button>
+      </div>
+
+      <StatusDisplay
+        activeTab={activeQueueTab}
+        fallbackTab={activeTab}
+        status={queueStatus}
+        progress={activeProgress}
+        isConnected={isConnected}
+      />
 
       <ControlButtons
-        isReading={ttsState.isReading}
-        isPaused={ttsState.isPaused}
-        onStart={handleStart}
-        onPause={handlePause}
-        onResume={handleResume}
-        onStop={handleStop}
-        disabled={isLoading}
+        isReading={queueStatus === 'reading'}
+        isPaused={queueStatus === 'paused'}
+        onStart={() => handleControl('start')}
+        onPause={() => handleControl('pause')}
+        onResume={() => handleControl('resume')}
+        onStop={() => handleControl('stop')}
+        disabled={!isConnected || queueTabs.length === 0}
+      />
+
+      <TabQueueList
+        tabs={queueTabs}
+        currentIndex={queueIndex}
+        status={queueStatus}
+        onRemoveTab={handleRemoveTab}
+        onReorder={handleReorder}
+        onSkipNext={() => {
+          skipNext().catch((commandError) => {
+            const message = commandError instanceof Error ? commandError.message : '次のタブへの移動に失敗しました';
+            setError(message);
+          });
+        }}
+        onSkipPrevious={() => {
+          skipPrevious().catch((commandError) => {
+            const message = commandError instanceof Error ? commandError.message : '前のタブへの移動に失敗しました';
+            setError(message);
+          });
+        }}
       />
 
       {showSettings && (

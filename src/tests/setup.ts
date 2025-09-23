@@ -14,11 +14,29 @@ const mockChrome = {
   },
   runtime: {
     sendMessage: jest.fn().mockResolvedValue({}),
+    connect: jest.fn(() => ({
+      name: 'test-port',
+      postMessage: jest.fn(),
+      onMessage: {
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      },
+      onDisconnect: {
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      },
+      disconnect: jest.fn(),
+    })),
     onMessage: {
       addListener: jest.fn(),
       removeListener: jest.fn(),
     },
     lastError: null,
+  },
+  commands: {
+    onCommand: {
+      addListener: jest.fn(),
+    },
   },
 };
 

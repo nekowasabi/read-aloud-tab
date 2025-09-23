@@ -13,13 +13,14 @@
     "test:watch": "jest --watch"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.0",
     "@types/chrome": "^0.0.268",
     "@types/firefox-webext-browser": "^120.0.4",
     "@types/jest": "^29.5.12",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@testing-library/jest-dom": "^6.4.8",
-    "@testing-library/react": "^16.0.0",
+    "@types/react-beautiful-dnd": "^13.1.2",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "copy-webpack-plugin": "^12.0.2",
@@ -42,9 +43,15 @@
   },
   "dependencies": {
     "react": "^18.3.1",
+    "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^18.3.1"
   },
-  "keywords": ["chrome-extension", "firefox-addon", "text-to-speech", "accessibility"],
+  "keywords": [
+    "chrome-extension",
+    "firefox-addon",
+    "text-to-speech",
+    "accessibility"
+  ],
   "author": "Your Name",
   "license": "MIT"
 }

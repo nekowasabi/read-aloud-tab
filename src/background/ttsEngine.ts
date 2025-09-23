@@ -1,172 +1,173 @@
-import { TTSSettings, TTSState, ExtensionError } from '../shared/types';
+import { TabInfo, TTSSettings } from '../shared/types';
+import { PlaybackController, PlaybackHooks, LoggerLike } from './tabManager';
 
-export class TTSEngine {
+interface TTSEngineOptions {
+  speech?: SpeechSynthesis;
+  createUtterance?: (text: string) => SpeechSynthesisUtterance;
+  logger?: LoggerLike;
+  defaultLang?: string;
+}
+
+export class TTSEngine implements PlaybackController {
   private utterance: SpeechSynthesisUtterance | null = null;
-  private isPaused: boolean = false;
-  private currentText: string = '';
-  private currentPosition: number = 0;
-  private totalLength: number = 0;
+  private isPaused = false;
+  private currentText = '';
+  private currentPosition = 0;
+  private totalLength = 0;
 
-  constructor(private onStateChange: (state: TTSState) => void) {
-    this.bindEvents();
-  }
+  private readonly speech: SpeechSynthesis;
+  private readonly createUtteranceFn: (text: string) => SpeechSynthesisUtterance;
+  private readonly logger: LoggerLike;
+  private readonly defaultLang: string;
 
-  private bindEvents(): void {
-    // SpeechSynthesis のグローバルイベントをリッスン
-    if (typeof speechSynthesis !== 'undefined') {
-      speechSynthesis.addEventListener('voiceschanged', () => {
-        console.log('Voices updated:', speechSynthesis.getVoices().length);
-      });
+  constructor(options: TTSEngineOptions = {}) {
+    this.speech = options.speech || (globalThis.speechSynthesis as SpeechSynthesis);
+    this.createUtteranceFn = options.createUtterance || ((text: string) => new SpeechSynthesisUtterance(text));
+    this.logger = options.logger || console;
+    this.defaultLang = options.defaultLang || 'ja-JP';
+
+    if (!this.speech) {
+      throw new Error('Web Speech API is not supported in this environment');
     }
   }
 
-  async speak(text: string, settings: TTSSettings): Promise<void> {
-    try {
-      // 既存の読み上げを停止
-      this.stop();
+  async start(tab: TabInfo, settings: TTSSettings, hooks: PlaybackHooks): Promise<void> {
+    if (!tab.content || tab.content.trim().length === 0) {
+      throw new Error('No readable content available for the selected tab');
+    }
 
-      // Web Speech API の利用可能性をチェック
-      if (!this.isWebSpeechSupported()) {
-        throw new Error('Web Speech API is not supported in this browser');
+    this.stop();
+
+    this.currentText = tab.content;
+    this.totalLength = tab.content.length;
+    this.currentPosition = 0;
+    this.isPaused = false;
+
+    const utterance = this.createUtteranceFn(tab.content);
+    utterance.text = tab.content;
+    this.utterance = utterance;
+
+    this.applySettings(utterance, settings);
+    await this.applyVoice(utterance, settings.voice);
+    this.bindUtteranceEvents(utterance, hooks);
+
+    this.speech.speak(utterance);
+  }
+
+  pause(): void {
+    if (this.speech.speaking && !this.isPaused) {
+      this.speech.pause();
+      this.isPaused = true;
+    }
+  }
+
+  resume(): void {
+    if (this.isPaused) {
+      this.speech.resume();
+      this.isPaused = false;
+    }
+  }
+
+  stop(): void {
+    if (this.speech && (this.speech.speaking || this.speech.pending)) {
+      try {
+        this.speech.cancel();
+      } catch (error) {
+        this.logger.warn('TTSEngine: cancel failed', error);
       }
-
-      this.currentText = text;
-      this.totalLength = text.length;
-      this.currentPosition = 0;
-
-      this.utterance = new SpeechSynthesisUtterance(text);
-
-      // 設定を適用
-      this.applySettings(this.utterance, settings);
-
-      // 音声を設定
-      await this.setVoice(this.utterance, settings.voice);
-
-      // イベントリスナーを設定
-      this.setupUtteranceEvents();
-
-      // 読み上げ開始
-      speechSynthesis.speak(this.utterance);
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown TTS error';
-      console.error('TTS Error:', error);
-      this.notifyError(errorMessage);
-      throw error;
     }
+    this.cleanup();
+  }
+
+  getDebugInfo(): object {
+    return {
+      isSupported: Boolean(this.speech),
+      isSpeaking: this.speech?.speaking ?? false,
+      isPending: this.speech?.pending ?? false,
+      isPaused: this.isPaused,
+      currentPosition: this.currentPosition,
+      totalLength: this.totalLength,
+      progress: this.calculateProgress(),
+    };
   }
 
   private applySettings(utterance: SpeechSynthesisUtterance, settings: TTSSettings): void {
     utterance.rate = Math.max(0.1, Math.min(10, settings.rate));
     utterance.pitch = Math.max(0, Math.min(2, settings.pitch));
     utterance.volume = Math.max(0, Math.min(1, settings.volume));
-    utterance.lang = 'ja-JP'; // デフォルトは日本語
+    utterance.lang = this.defaultLang;
   }
 
-  private async setVoice(utterance: SpeechSynthesisUtterance, voiceName: string): Promise<void> {
-    if (!voiceName) return;
+  private async applyVoice(utterance: SpeechSynthesisUtterance, voiceName: string | null | undefined): Promise<void> {
+    if (!voiceName) {
+      return;
+    }
 
-    const voices = await this.getVoices();
-    const selectedVoice = voices.find(v => v.name === voiceName);
-
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-    } else {
-      console.warn(`Voice "${voiceName}" not found. Using default voice.`);
+    try {
+      const voices = await this.getVoices();
+      const selectedVoice = voices.find((voice) => voice.name === voiceName);
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      } else {
+        this.logger.warn(`TTSEngine: voice "${voiceName}" not found. Using default voice.`);
+      }
+    } catch (error) {
+      this.logger.warn('TTSEngine: failed to fetch voices', error);
     }
   }
 
-  private setupUtteranceEvents(): void {
-    if (!this.utterance) return;
-
-    this.utterance.onstart = () => {
-      console.log('TTS: Speech started');
-      this.onStateChange({
-        isReading: true,
-        isPaused: false,
-        currentTabId: null,
-        progress: 0,
-      });
-    };
-
-    this.utterance.onend = () => {
-      console.log('TTS: Speech ended');
-      this.onStateChange({
-        isReading: false,
-        isPaused: false,
-        currentTabId: null,
-        progress: 100,
-      });
-      this.cleanup();
-    };
-
-    this.utterance.onerror = (event) => {
-      console.error('TTS: Speech error:', event.error);
-      this.notifyError(`Speech synthesis error: ${event.error}`);
-      this.cleanup();
-    };
-
-    this.utterance.onpause = () => {
-      console.log('TTS: Speech paused');
-      this.isPaused = true;
-      this.onStateChange({
-        isReading: true,
-        isPaused: true,
-        currentTabId: null,
-        progress: this.calculateProgress(),
-      });
-    };
-
-    this.utterance.onresume = () => {
-      console.log('TTS: Speech resumed');
+  private bindUtteranceEvents(utterance: SpeechSynthesisUtterance, hooks: PlaybackHooks): void {
+    utterance.onstart = () => {
       this.isPaused = false;
-      this.onStateChange({
-        isReading: true,
-        isPaused: false,
-        currentTabId: null,
-        progress: this.calculateProgress(),
-      });
     };
 
-    this.utterance.onboundary = (event) => {
-      if (event.name === 'word' || event.name === 'sentence') {
-        this.currentPosition = event.charIndex;
-        const progress = this.calculateProgress();
+    utterance.onend = () => {
+      this.cleanup();
+      hooks.onEnd();
+    };
 
-        this.onStateChange({
-          isReading: true,
-          isPaused: this.isPaused,
-          currentTabId: null,
-          progress: progress,
-        });
+    utterance.onerror = (event: any) => {
+      const error = new Error(
+        typeof event?.error === 'string' ? `Speech synthesis error: ${event.error}` : 'Unknown speech synthesis error',
+      );
+      try {
+        this.speech.cancel();
+      } catch (cancelError) {
+        this.logger.warn('TTSEngine: cancel after error failed', cancelError);
+      }
+      this.cleanup();
+      hooks.onError(error);
+    };
+
+    utterance.onpause = () => {
+      this.isPaused = true;
+    };
+
+    utterance.onresume = () => {
+      this.isPaused = false;
+    };
+
+    utterance.onboundary = (event: any) => {
+      if (typeof event?.charIndex === 'number') {
+        this.currentPosition = event.charIndex;
+        this.emitProgress(hooks);
       }
     };
   }
 
+  private emitProgress(hooks: PlaybackHooks): void {
+    if (typeof hooks.onProgress !== 'function') {
+      return;
+    }
+    hooks.onProgress(this.calculateProgress());
+  }
+
   private calculateProgress(): number {
-    if (this.totalLength === 0) return 0;
-    return Math.min(100, (this.currentPosition / this.totalLength) * 100);
-  }
-
-  pause(): void {
-    if (speechSynthesis.speaking && !this.isPaused) {
-      speechSynthesis.pause();
-      // pause イベントで状態は更新される
+    if (this.totalLength === 0) {
+      return 0;
     }
-  }
-
-  resume(): void {
-    if (this.isPaused) {
-      speechSynthesis.resume();
-      // resume イベントで状態は更新される
-    }
-  }
-
-  stop(): void {
-    if (speechSynthesis.speaking || speechSynthesis.pending) {
-      speechSynthesis.cancel();
-    }
-    this.cleanup();
+    const ratio = this.currentPosition / this.totalLength;
+    return Math.max(0, Math.min(100, ratio * 100));
   }
 
   private cleanup(): void {
@@ -177,82 +178,25 @@ export class TTSEngine {
     this.totalLength = 0;
   }
 
-  async getVoices(): Promise<SpeechSynthesisVoice[]> {
+  private async getVoices(): Promise<SpeechSynthesisVoice[]> {
     return new Promise((resolve) => {
-      const voices = speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        resolve(voices);
-      } else {
-        const listener = () => {
-          speechSynthesis.removeEventListener('voiceschanged', listener);
-          resolve(speechSynthesis.getVoices());
-        };
-        speechSynthesis.addEventListener('voiceschanged', listener);
-
-        // 最大3秒で諦める
-        setTimeout(() => {
-          speechSynthesis.removeEventListener('voiceschanged', listener);
-          resolve(speechSynthesis.getVoices());
-        }, 3000);
+      const existing = this.speech.getVoices();
+      if (existing.length > 0) {
+        resolve(existing);
+        return;
       }
+
+      const listener = () => {
+        this.speech.removeEventListener?.('voiceschanged', listener as any);
+        resolve(this.speech.getVoices());
+      };
+
+      this.speech.addEventListener?.('voiceschanged', listener as any);
+
+      setTimeout(() => {
+        this.speech.removeEventListener?.('voiceschanged', listener as any);
+        resolve(this.speech.getVoices());
+      }, 3000);
     });
-  }
-
-  async getJapaneseVoices(): Promise<SpeechSynthesisVoice[]> {
-    const allVoices = await this.getVoices();
-    return allVoices.filter(voice =>
-      voice.lang.startsWith('ja') ||
-      voice.lang.includes('JP') ||
-      voice.name.includes('Japanese')
-    );
-  }
-
-  getCurrentState(): TTSState {
-    return {
-      isReading: speechSynthesis.speaking,
-      isPaused: this.isPaused,
-      currentTabId: null,
-      progress: this.calculateProgress(),
-    };
-  }
-
-  private isWebSpeechSupported(): boolean {
-    return typeof speechSynthesis !== 'undefined' &&
-           typeof SpeechSynthesisUtterance !== 'undefined';
-  }
-
-  private notifyError(message: string): void {
-    this.onStateChange({
-      isReading: false,
-      isPaused: false,
-      currentTabId: null,
-      progress: 0,
-    });
-  }
-
-  // 読み上げ速度の動的変更
-  changeRate(newRate: number): void {
-    if (this.utterance && speechSynthesis.speaking) {
-      // 現在の読み上げを一時停止
-      const wasPlaying = !this.isPaused;
-      this.pause();
-
-      // 新しい設定で再開 (実装は複雑になるため、現在は停止して再開始を推奨)
-      console.log('Rate change requires restart. Current rate:', newRate);
-    }
-  }
-
-  // デバッグ情報を取得
-  getDebugInfo(): object {
-    return {
-      isSupported: this.isWebSpeechSupported(),
-      isSpeaking: speechSynthesis.speaking,
-      isPending: speechSynthesis.pending,
-      isPaused: this.isPaused,
-      currentPosition: this.currentPosition,
-      totalLength: this.totalLength,
-      progress: this.calculateProgress(),
-      availableVoices: speechSynthesis.getVoices().length,
-    };
   }
 }

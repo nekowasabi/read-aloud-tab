@@ -1,0 +1,755 @@
+import { ReadingQueue, TabInfo, TTSSettings } from '../shared/types';
+import {
+  loadQueue as defaultLoadQueue,
+  saveQueue as defaultSaveQueue,
+  getIgnoredDomains as defaultGetIgnoredDomains,
+  StorageManager,
+} from '../shared/utils/storage';
+import {
+  QueueStatusPayload,
+  QueueProgressPayload,
+  QueueErrorPayload,
+  QueueStatusListener,
+  QueueProgressListener,
+  QueueErrorListener,
+  QueueCommandListener,
+  QueueSkipDirection,
+  SerializedTabInfo,
+  toSerializedTabInfo,
+} from '../shared/messages';
+
+export interface PlaybackHooks {
+  onEnd: () => void;
+  onError: (error: Error) => void;
+  onProgress?: (progress: number) => void;
+}
+
+export interface PlaybackController {
+  start: (tab: TabInfo, settings: TTSSettings, hooks: PlaybackHooks) => Promise<void>;
+  pause: () => void;
+  resume: () => void;
+  stop: () => void;
+}
+
+export interface ContentResolverResult {
+  content?: string;
+  summary?: string;
+  extractedAt?: number | string | Date;
+}
+
+export type ContentResolver = (tab: TabInfo) => Promise<ContentResolverResult | null>;
+
+interface QueueStorageAdapter {
+  load: () => Promise<ReadingQueue>;
+  save: (queue: ReadingQueue) => Promise<void>;
+}
+
+export interface LoggerLike {
+  debug: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+}
+
+interface TabManagerOptions {
+  playback: PlaybackController;
+  storage?: QueueStorageAdapter;
+  getIgnoredDomains?: () => Promise<string[]>;
+  resolveContent?: ContentResolver;
+  logger?: LoggerLike;
+  now?: () => number;
+}
+
+interface AddTabOptions {
+  position?: 'start' | 'end' | number;
+  autoStart?: boolean;
+}
+
+export class TabManager {
+  private queue: ReadingQueue = {
+    tabs: [],
+    currentIndex: 0,
+    status: 'idle',
+    settings: {
+      rate: 1.0,
+      pitch: 1.0,
+      volume: 1.0,
+      voice: null,
+    },
+  };
+
+  private readonly playback: PlaybackController;
+  private readonly storage: QueueStorageAdapter;
+  private readonly fetchIgnoredDomains?: () => Promise<string[]>;
+  private readonly resolveContent?: ContentResolver;
+  private readonly logger: LoggerLike;
+  private readonly now: () => number;
+
+  private ignoredDomains: Set<string> = new Set();
+
+  private statusListeners: Set<QueueStatusListener> = new Set();
+  private progressListeners: Set<QueueProgressListener> = new Set();
+  private errorListeners: Set<QueueErrorListener> = new Set();
+  private commandListeners: Set<QueueCommandListener> = new Set();
+
+  private initialized = false;
+  private activePlaybackToken: number | null = null;
+  private playbackTokenSeq = 0;
+
+  constructor(options: TabManagerOptions) {
+    this.playback = options.playback;
+    this.storage = options.storage || {
+      load: defaultLoadQueue,
+      save: defaultSaveQueue,
+    };
+    this.fetchIgnoredDomains = options.getIgnoredDomains || defaultGetIgnoredDomains;
+    this.resolveContent = options.resolveContent;
+    this.logger = options.logger || console;
+    this.now = options.now || (() => Date.now());
+  }
+
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      this.queue = await this.storage.load();
+    } catch (error) {
+      this.logger.error('TabManager: failed to load queue from storage', error);
+      // Fallback to default empty queue
+      this.queue = {
+        tabs: [],
+        currentIndex: 0,
+        status: 'idle',
+        settings: {
+          rate: 1.0,
+          pitch: 1.0,
+          volume: 1.0,
+          voice: null,
+        },
+      };
+    }
+
+    // Ensure types are normalized
+    this.queue.tabs = this.queue.tabs.map((tab) => this.normalizeTabInfo(tab));
+    this.queue.currentIndex = this.clampIndex(this.queue.currentIndex);
+    if (!['idle', 'reading', 'paused', 'error'].includes(this.queue.status)) {
+      this.queue.status = 'idle';
+    }
+
+    if (this.fetchIgnoredDomains) {
+      try {
+        const domains = await this.fetchIgnoredDomains();
+        this.ignoredDomains = new Set(domains.map((domain) => domain.toLowerCase()));
+      } catch (error) {
+        this.logger.warn('TabManager: failed to load ignored domains', error);
+      }
+    }
+
+    this.refreshIgnoredFlags();
+
+    // Resume in idle state on startup
+    if (this.queue.status === 'reading') {
+      this.queue.status = 'idle';
+      this.activePlaybackToken = null;
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+
+    this.initialized = true;
+  }
+
+  /**
+   * Registers a listener for queue status updates. Returns an unsubscribe function.
+   */
+  addStatusListener(listener: QueueStatusListener): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  addProgressListener(listener: QueueProgressListener): () => void {
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
+  }
+
+  addErrorListener(listener: QueueErrorListener): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
+  }
+
+  addCommandListener(listener: QueueCommandListener): () => void {
+    this.commandListeners.add(listener);
+    return () => this.commandListeners.delete(listener);
+  }
+
+  getSnapshot(): QueueStatusPayload {
+    return this.createStatusPayload();
+  }
+
+  async addTab(tab: TabInfo, options: AddTabOptions = {}): Promise<void> {
+    await this.ensureInitialized();
+
+    const normalized = this.normalizeTabInfo(tab);
+    const existingIndex = this.queue.tabs.findIndex((candidate) => candidate.tabId === normalized.tabId);
+
+    if (existingIndex !== -1) {
+      this.queue.tabs.splice(existingIndex, 1);
+      if (existingIndex <= this.queue.currentIndex && this.queue.currentIndex > 0) {
+        this.queue.currentIndex -= 1;
+      }
+    }
+
+    const insertIndex = this.resolveInsertIndex(options.position);
+    this.queue.tabs.splice(insertIndex, 0, normalized);
+
+    if (this.queue.tabs.length === 1) {
+      this.queue.currentIndex = 0;
+    } else if (insertIndex <= this.queue.currentIndex) {
+      this.queue.currentIndex += 1;
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+
+    if (options.autoStart) {
+      await this.processNext(this.queue.currentIndex);
+    }
+  }
+
+  async removeTab(tabId: number): Promise<void> {
+    await this.ensureInitialized();
+
+    const index = this.queue.tabs.findIndex((tab) => tab.tabId === tabId);
+    if (index === -1) {
+      return;
+    }
+
+    const wasCurrent = index === this.queue.currentIndex;
+
+    this.queue.tabs.splice(index, 1);
+
+    if (this.queue.tabs.length === 0) {
+      await this.stopInternal(true);
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    if (index < this.queue.currentIndex) {
+      this.queue.currentIndex = Math.max(0, this.queue.currentIndex - 1);
+    } else if (this.queue.currentIndex >= this.queue.tabs.length) {
+      this.queue.currentIndex = this.queue.tabs.length - 1;
+    }
+
+    if (wasCurrent) {
+      await this.processNext(this.queue.currentIndex);
+    } else {
+      await this.persistQueue();
+      this.emitStatus();
+    }
+  }
+
+  async reorderTabs(fromIndex: number, toIndex: number): Promise<void> {
+    await this.ensureInitialized();
+
+    const clampedFrom = this.clampIndex(fromIndex);
+    const clampedTo = this.clampIndex(toIndex);
+
+    if (clampedFrom === clampedTo) {
+      return;
+    }
+
+    const [moved] = this.queue.tabs.splice(clampedFrom, 1);
+    this.queue.tabs.splice(clampedTo, 0, moved);
+
+    if (clampedFrom === this.queue.currentIndex) {
+      this.queue.currentIndex = clampedTo;
+    } else if (clampedFrom < this.queue.currentIndex && clampedTo >= this.queue.currentIndex) {
+      this.queue.currentIndex -= 1;
+    } else if (clampedFrom > this.queue.currentIndex && clampedTo <= this.queue.currentIndex) {
+      this.queue.currentIndex += 1;
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
+  async skipTab(direction: QueueSkipDirection = 'next'): Promise<void> {
+    await this.ensureInitialized();
+
+    if (this.queue.tabs.length === 0) {
+      return;
+    }
+
+    if (direction === 'next') {
+      const nextIndex = this.findNextReadableIndex(this.queue.currentIndex + 1);
+      if (nextIndex === -1) {
+        await this.stopInternal(true);
+        await this.persistQueue();
+        this.emitStatus();
+        return;
+      }
+      await this.playbackStopSafe();
+      await this.processNext(nextIndex);
+    } else {
+      const previousIndex = this.findPreviousReadableIndex(this.queue.currentIndex - 1);
+      if (previousIndex === -1) {
+        await this.stopInternal(true);
+        await this.persistQueue();
+        this.emitStatus();
+        return;
+      }
+      await this.playbackStopSafe();
+      await this.processNext(previousIndex);
+    }
+  }
+
+  async processNext(startIndex?: number): Promise<void> {
+    await this.ensureInitialized();
+
+    if (this.queue.tabs.length === 0) {
+      await this.stopInternal(true);
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    const targetIndex = this.selectNextIndex(startIndex);
+    if (targetIndex === -1) {
+      await this.stopInternal(true);
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    const tab = this.queue.tabs[targetIndex];
+    const ready = await this.ensureTabReady(tab);
+
+    if (!ready) {
+      this.queue.status = 'paused';
+      this.queue.currentIndex = targetIndex;
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    this.queue.currentIndex = targetIndex;
+    this.queue.status = 'reading';
+    await this.persistQueue();
+    this.emitStatus();
+
+    const token = this.nextPlaybackToken();
+    this.activePlaybackToken = token;
+
+    try {
+      await this.playback.start(tab, this.queue.settings, {
+        onEnd: () => this.handlePlaybackEnd(token),
+        onError: (error) => this.handlePlaybackError(token, error, tab.tabId),
+        onProgress: (progress) => this.handlePlaybackProgress(token, tab.tabId, progress),
+      });
+    } catch (error) {
+      this.handlePlaybackError(token, error instanceof Error ? error : new Error('Playback start failed'), tab.tabId);
+      throw error;
+    }
+  }
+
+  pause(): void {
+    if (this.queue.status !== 'reading') {
+      return;
+    }
+    this.playback.pause();
+    this.queue.status = 'paused';
+    this.emitStatus();
+  }
+
+  resume(): void {
+    if (this.queue.status !== 'paused') {
+      return;
+    }
+    this.playback.resume();
+    this.queue.status = 'reading';
+    this.emitStatus();
+  }
+
+  async stop(): Promise<void> {
+    await this.stopInternal(true);
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
+  async onTabClosed(tabId: number): Promise<void> {
+    await this.ensureInitialized();
+    const index = this.queue.tabs.findIndex((tab) => tab.tabId === tabId);
+    if (index === -1) {
+      return;
+    }
+    await this.removeTab(tabId);
+  }
+
+  async onTabUpdated(tabId: number, update: Partial<TabInfo>): Promise<void> {
+    await this.ensureInitialized();
+    const tab = this.queue.tabs.find((candidate) => candidate.tabId === tabId);
+    if (!tab) {
+      return;
+    }
+
+    if (update.title !== undefined) {
+      tab.title = update.title;
+    }
+    if (update.url !== undefined) {
+      tab.url = update.url;
+      tab.isIgnored = this.isDomainIgnored(update.url);
+    }
+    if (update.content !== undefined) {
+      tab.content = update.content;
+    }
+    if (update.summary !== undefined) {
+      tab.summary = update.summary;
+    }
+    if (update.extractedAt) {
+      tab.extractedAt = new Date(update.extractedAt);
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
+  async cleanupClosedTabs(closedTabIds?: number[]): Promise<void> {
+    await this.ensureInitialized();
+
+    if (!closedTabIds || closedTabIds.length === 0) {
+      return;
+    }
+
+    const closedSet = new Set(closedTabIds);
+    const originalLength = this.queue.tabs.length;
+    this.queue.tabs = this.queue.tabs.filter((tab) => !closedSet.has(tab.tabId));
+
+    if (this.queue.tabs.length === originalLength) {
+      return;
+    }
+
+    if (this.queue.tabs.length === 0) {
+      await this.stopInternal(true);
+    } else if (this.queue.currentIndex >= this.queue.tabs.length) {
+      this.queue.currentIndex = this.queue.tabs.length - 1;
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
+  async refreshIgnoredDomains(): Promise<void> {
+    if (!this.fetchIgnoredDomains) {
+      return;
+    }
+    try {
+      const domains = await this.fetchIgnoredDomains();
+      this.ignoredDomains = new Set(domains.map((domain) => domain.toLowerCase()));
+      this.refreshIgnoredFlags();
+      await this.persistQueue();
+      this.emitStatus();
+    } catch (error) {
+      this.logger.warn('TabManager: failed to refresh ignored domains', error);
+    }
+  }
+
+  async updateSettings(settings: Partial<TTSSettings>): Promise<void> {
+    await this.ensureInitialized();
+
+    const merged: Partial<TTSSettings> = {
+      ...this.queue.settings,
+      ...settings,
+    };
+
+    const validated = StorageManager.validateSettings(merged);
+    this.queue.settings = validated;
+
+    await Promise.all([
+      this.persistQueue(),
+      StorageManager.saveSettings(validated),
+    ]);
+
+    this.emitStatus();
+  }
+
+  validateQueue(): void {
+    if (this.queue.tabs.length === 0) {
+      this.queue.currentIndex = 0;
+      if (this.queue.status !== 'idle') {
+        this.queue.status = 'idle';
+      }
+      return;
+    }
+
+    this.queue.currentIndex = this.clampIndex(this.queue.currentIndex);
+
+    if (this.queue.status === 'reading' && this.activePlaybackToken === null) {
+      this.queue.status = 'idle';
+    }
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+  }
+
+  private async persistQueue(): Promise<void> {
+    try {
+      await this.storage.save(this.queue);
+    } catch (error) {
+      this.logger.error('TabManager: failed to persist queue', error);
+    }
+  }
+
+  private emitStatus(): void {
+    const payload = this.createStatusPayload();
+    for (const listener of this.statusListeners) {
+      try {
+        listener(payload);
+      } catch (error) {
+        this.logger.error('TabManager: status listener failed', error);
+      }
+    }
+  }
+
+  private emitProgress(payload: QueueProgressPayload): void {
+    for (const listener of this.progressListeners) {
+      try {
+        listener(payload);
+      } catch (error) {
+        this.logger.error('TabManager: progress listener failed', error);
+      }
+    }
+  }
+
+  private emitError(payload: QueueErrorPayload): void {
+    for (const listener of this.errorListeners) {
+      try {
+        listener(payload);
+      } catch (error) {
+        this.logger.error('TabManager: error listener failed', error);
+      }
+    }
+  }
+
+  private emitContentRequest(tabId: number, reason: 'missing' | 'stale'): void {
+    const event = { type: 'QUEUE_CONTENT_REQUEST', payload: { tabId, reason } } as const;
+    for (const listener of this.commandListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.logger.error('TabManager: command listener failed', error);
+      }
+    }
+  }
+
+  private createStatusPayload(): QueueStatusPayload {
+    const tabs: SerializedTabInfo[] = this.queue.tabs.map((tab) => toSerializedTabInfo(tab));
+    return {
+      status: this.queue.status,
+      currentIndex: this.queue.currentIndex,
+      totalCount: this.queue.tabs.length,
+      activeTabId: this.queue.tabs[this.queue.currentIndex]?.tabId ?? null,
+      tabs,
+      settings: this.queue.settings,
+      updatedAt: this.now(),
+    };
+  }
+
+  private async stopInternal(stopPlayback: boolean): Promise<void> {
+    if (stopPlayback) {
+      try {
+        this.playback.stop();
+      } catch (error) {
+        this.logger.warn('TabManager: playback stop failed', error);
+      }
+    }
+    this.activePlaybackToken = null;
+    this.queue.status = 'idle';
+    this.queue.currentIndex = this.queue.tabs.length === 0 ? 0 : this.clampIndex(this.queue.currentIndex);
+  }
+
+  private async playbackStopSafe(): Promise<void> {
+    try {
+      this.playback.stop();
+    } catch (error) {
+      this.logger.warn('TabManager: playback stop error', error);
+    }
+    this.activePlaybackToken = null;
+  }
+
+  private handlePlaybackEnd(token: number): void {
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
+
+    const nextIndex = this.findNextReadableIndex(this.queue.currentIndex + 1);
+    if (nextIndex === -1) {
+      this.stopInternal(false).then(() => {
+        this.persistQueue();
+        this.emitStatus();
+      });
+      return;
+    }
+
+    this.processNext(nextIndex).catch((error) => {
+      this.logger.error('TabManager: failed to advance to next tab', error);
+    });
+  }
+
+  private handlePlaybackError(token: number, error: Error, tabId?: number): void {
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
+
+    this.logger.error('TabManager: playback error', error);
+    this.activePlaybackToken = null;
+    this.queue.status = 'error';
+
+    this.emitError({
+      code: 'PLAYBACK_ERROR',
+      message: error.message,
+      tabId,
+      detail: error,
+      timestamp: this.now(),
+    });
+
+    this.persistQueue().then(() => this.emitStatus());
+  }
+
+  private handlePlaybackProgress(token: number, tabId: number, progress: number): void {
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
+    const clamped = Math.max(0, Math.min(100, progress));
+    this.emitProgress({
+      tabId,
+      progress: clamped,
+      timestamp: this.now(),
+    });
+  }
+
+  private normalizeTabInfo(tab: TabInfo): TabInfo {
+    return {
+      ...tab,
+      extractedAt: tab.extractedAt instanceof Date
+        ? tab.extractedAt
+        : new Date(tab.extractedAt ?? Date.now()),
+      isIgnored: this.isDomainIgnored(tab.url),
+    };
+  }
+
+  private refreshIgnoredFlags(): void {
+    this.queue.tabs = this.queue.tabs.map((tab) => ({
+      ...tab,
+      isIgnored: this.isDomainIgnored(tab.url),
+    }));
+  }
+
+  private resolveInsertIndex(position?: 'start' | 'end' | number): number {
+    if (position === undefined || position === 'end') {
+      return this.queue.tabs.length;
+    }
+    if (position === 'start') {
+      return 0;
+    }
+    if (typeof position === 'number' && !Number.isNaN(position)) {
+      return this.clampIndex(position, true);
+    }
+    return this.queue.tabs.length;
+  }
+
+  private clampIndex(index: number, allowEnd: boolean = false): number {
+    if (this.queue.tabs.length === 0) {
+      return 0;
+    }
+    const max = allowEnd ? this.queue.tabs.length : this.queue.tabs.length - 1;
+    const clamped = Math.max(0, Math.min(max, index));
+    return clamped;
+  }
+
+  private selectNextIndex(startIndex?: number): number {
+    if (typeof startIndex === 'number') {
+      const direct = this.findNextReadableIndex(startIndex);
+      if (direct !== -1) {
+        return direct;
+      }
+    }
+    return this.findNextReadableIndex(this.queue.currentIndex);
+  }
+
+  private findNextReadableIndex(from: number): number {
+    for (let i = Math.max(0, from); i < this.queue.tabs.length; i += 1) {
+      if (!this.queue.tabs[i].isIgnored) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private findPreviousReadableIndex(from: number): number {
+    for (let i = Math.min(this.queue.tabs.length - 1, from); i >= 0; i -= 1) {
+      if (!this.queue.tabs[i].isIgnored) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private async ensureTabReady(tab: TabInfo): Promise<boolean> {
+    if (tab.isIgnored) {
+      return false;
+    }
+
+    if (tab.content && tab.content.length > 0) {
+      return true;
+    }
+
+    if (this.resolveContent) {
+      try {
+        const result = await this.resolveContent(tab);
+        if (result && result.content) {
+          tab.content = result.content;
+          if (result.summary !== undefined) {
+            tab.summary = result.summary;
+          }
+          if (result.extractedAt) {
+            tab.extractedAt = new Date(result.extractedAt);
+          } else {
+            tab.extractedAt = new Date();
+          }
+          await this.persistQueue();
+          return true;
+        }
+      } catch (error) {
+        this.logger.error('TabManager: content resolver failed', error);
+      }
+    }
+
+    this.emitContentRequest(tab.tabId, 'missing');
+    return false;
+  }
+
+  private nextPlaybackToken(): number {
+    this.playbackTokenSeq += 1;
+    return this.playbackTokenSeq;
+  }
+
+  private isDomainIgnored(url: string): boolean {
+    if (this.ignoredDomains.size === 0) {
+      return false;
+    }
+    try {
+      const parsed = new URL(url);
+      const domain = parsed.hostname.toLowerCase();
+      return this.ignoredDomains.has(domain);
+    } catch (error) {
+      this.logger.debug('TabManager: failed to parse URL for ignore check', url, error);
+      return false;
+    }
+  }
+}

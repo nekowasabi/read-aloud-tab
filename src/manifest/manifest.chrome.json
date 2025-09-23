@@ -35,5 +35,53 @@
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "read-aloud-start": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "読み上げを開始"
+    },
+    "read-aloud-stop": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+X",
+        "mac": "Command+Shift+X"
+      },
+      "description": "読み上げを停止"
+    },
+    "read-aloud-next": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+.",
+        "mac": "Command+Shift+."
+      },
+      "description": "次のタブを読み上げ"
+    },
+    "read-aloud-prev": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+,",
+        "mac": "Command+Shift+,"
+      },
+      "description": "前のタブを読み上げ"
+    },
+    "read-aloud-pause": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Z",
+        "mac": "Command+Shift+Z"
+      },
+      "description": "読み上げを一時停止"
+    },
+    "read-aloud-resume": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+R",
+        "mac": "Command+Shift+R"
+      },
+      "description": "読み上げを再開"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   }
 }

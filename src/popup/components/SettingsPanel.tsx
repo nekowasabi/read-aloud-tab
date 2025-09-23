@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TTSSettings } from '../../shared/types';
+import IgnoreListManager from './IgnoreListManager';
 
 interface Props {
   settings: TTSSettings;
@@ -135,7 +136,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
             <label>
               <span className="setting-label">音声</span>
               <select
-                value={localSettings.voice}
+                value={localSettings.voice || ''}
                 onChange={(e) => handleSettingChange('voice', e.target.value)}
                 className="voice-select"
               >
@@ -161,6 +162,11 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
               </select>
             </label>
           </div>
+        </div>
+
+        <div className="settings-subsection">
+          <h4>無視リスト</h4>
+          <IgnoreListManager />
         </div>
 
         <div className="settings-info">

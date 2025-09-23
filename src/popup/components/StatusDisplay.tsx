@@ -1,48 +1,45 @@
 import React from 'react';
-import { TTSState } from '../../shared/types';
+import { SerializedTabInfo } from '../../shared/messages';
+import { QueueStatus } from '../../shared/types';
 
 interface Props {
-  tab: chrome.tabs.Tab;
-  ttsState: TTSState;
+  activeTab: SerializedTabInfo | null;
+  fallbackTab?: chrome.tabs.Tab | null;
+  status: QueueStatus;
+  progress: number;
+  isConnected: boolean;
 }
 
-export default function StatusDisplay({ tab, ttsState }: Props) {
-  const getStatusText = (): string => {
-    if (ttsState.isReading) {
-      return ttsState.isPaused ? '一時停止中' : '読み上げ中';
-    }
-    return '待機中';
-  };
+export default function StatusDisplay({
+  activeTab,
+  fallbackTab = null,
+  status,
+  progress,
+  isConnected,
+}: Props) {
+  const displayTitle = activeTab?.title || fallbackTab?.title || 'タブが選択されていません';
+  const displayUrl = activeTab?.url || fallbackTab?.url || '';
 
-  const getStatusIcon = (): string => {
-    if (ttsState.isReading) {
-      return ttsState.isPaused ? '⏸️' : '🔊';
-    }
-    return '⭕';
-  };
-
-  const truncateTitle = (title: string, maxLength: number = 35): string => {
-    if (title.length <= maxLength) return title;
-    return title.substring(0, maxLength) + '...';
-  };
+  const statusText = getStatusText(status, isConnected);
+  const statusIcon = getStatusIcon(status, isConnected);
 
   return (
     <div className="status-section">
       <div className="current-tab">
         <div className="tab-info">
           <div className="tab-favicon">
-            {tab.favIconUrl ? (
-              <img src={tab.favIconUrl} alt="" className="favicon" />
+            {fallbackTab?.favIconUrl ? (
+              <img src={fallbackTab.favIconUrl} alt="" className="favicon" />
             ) : (
               <div className="favicon-placeholder">🌐</div>
             )}
           </div>
           <div className="tab-details">
-            <div className="tab-title" title={tab.title}>
-              {truncateTitle(tab.title || 'Untitled')}
+            <div className="tab-title" title={displayTitle}>
+              {truncate(displayTitle, 40)}
             </div>
-            <div className="tab-url" title={tab.url}>
-              {new URL(tab.url || '').hostname}
+            <div className="tab-url" title={displayUrl}>
+              {safeHostname(displayUrl)}
             </div>
           </div>
         </div>
@@ -50,24 +47,72 @@ export default function StatusDisplay({ tab, ttsState }: Props) {
 
       <div className="status-info">
         <div className="status-indicator">
-          <span className="status-icon">{getStatusIcon()}</span>
-          <span className="status-text">{getStatusText()}</span>
+          <span className="status-icon">{statusIcon}</span>
+          <span className="status-text">{statusText}</span>
         </div>
 
-        {ttsState.isReading && (
+        {status === 'reading' && (
           <div className="progress-section">
             <div className="progress-bar">
               <div
                 className="progress-fill"
-                style={{ width: `${ttsState.progress}%` }}
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
               />
             </div>
-            <div className="progress-text">
-              {Math.round(ttsState.progress)}%
-            </div>
+            <div className="progress-text">{Math.round(progress)}%</div>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function getStatusText(status: QueueStatus, isConnected: boolean): string {
+  if (!isConnected) {
+    return '未接続';
+  }
+  switch (status) {
+    case 'reading':
+      return '読み上げ中';
+    case 'paused':
+      return '一時停止中';
+    case 'error':
+      return 'エラー';
+    default:
+      return '待機中';
+  }
+}
+
+function getStatusIcon(status: QueueStatus, isConnected: boolean): string {
+  if (!isConnected) {
+    return '⚠️';
+  }
+  switch (status) {
+    case 'reading':
+      return '🔊';
+    case 'paused':
+      return '⏸️';
+    case 'error':
+      return '❌';
+    default:
+      return '⭕';
+  }
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}…`;
+}
+
+function safeHostname(url: string): string {
+  if (!url) {
+    return '-';
+  }
+  try {
+    return new URL(url).hostname;
+  } catch (error) {
+    return url;
+  }
 }
