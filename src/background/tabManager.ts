@@ -17,6 +17,12 @@ import {
   SerializedTabInfo,
   toSerializedTabInfo,
 } from '../shared/messages';
+import {
+  QUEUE_CONTENT_CHAR_BUDGET,
+  QUEUE_PERSIST_DEBOUNCE_MS,
+  QUEUE_CONTENT_RESERVE_ACTIVE,
+} from '../shared/constants';
+import { createExtensionError, formatErrorLog } from '../shared/errors';
 
 export interface PlaybackHooks {
   onEnd: () => void;
@@ -96,6 +102,13 @@ export class TabManager {
   private activePlaybackToken: number | null = null;
   private playbackTokenSeq = 0;
 
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingPersistPromise: Promise<void> | null = null;
+  private persistResolve?: () => void;
+  private persistReject?: (error: unknown) => void;
+  private readonly persistDelayMs = QUEUE_PERSIST_DEBOUNCE_MS;
+  private reloadingTabs: Set<number> = new Set();
+
   constructor(options: TabManagerOptions) {
     this.playback = options.playback;
     this.storage = options.storage || {
@@ -116,7 +129,7 @@ export class TabManager {
     try {
       this.queue = await this.storage.load();
     } catch (error) {
-      this.logger.error('TabManager: failed to load queue from storage', error);
+      this.logError('QUEUE_LOAD_FAILED', 'TabManager: failed to load queue from storage', error);
       // Fallback to default empty queue
       this.queue = {
         tabs: [],
@@ -148,6 +161,7 @@ export class TabManager {
     }
 
     this.refreshIgnoredFlags();
+    this.enforceContentBudget();
 
     // Resume in idle state on startup
     if (this.queue.status === 'reading') {
@@ -155,7 +169,7 @@ export class TabManager {
       this.activePlaybackToken = null;
     }
 
-    await this.persistQueue();
+    await this.persistQueue(true);
     this.emitStatus();
 
     this.initialized = true;
@@ -210,6 +224,7 @@ export class TabManager {
       this.queue.currentIndex += 1;
     }
 
+    this.enforceContentBudget();
     await this.persistQueue();
     this.emitStatus();
 
@@ -388,6 +403,30 @@ export class TabManager {
     await this.removeTab(tabId);
   }
 
+  async onTabLoading(tabId: number): Promise<void> {
+    await this.ensureInitialized();
+
+    const index = this.queue.tabs.findIndex((candidate) => candidate.tabId === tabId);
+    if (index === -1) {
+      return;
+    }
+
+    this.reloadingTabs.add(tabId);
+
+    if (index === this.queue.currentIndex && this.queue.status === 'reading') {
+      this.pause();
+    }
+
+    const tab = this.queue.tabs[index];
+    if (tab) {
+      tab.content = undefined;
+      tab.summary = undefined;
+    }
+
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
   async onTabUpdated(tabId: number, update: Partial<TabInfo>): Promise<void> {
     await this.ensureInitialized();
     const tab = this.queue.tabs.find((candidate) => candidate.tabId === tabId);
@@ -413,7 +452,18 @@ export class TabManager {
     }
 
     await this.persistQueue();
-    this.emitStatus();
+    const index = this.queue.tabs.findIndex((candidate) => candidate.tabId === tabId);
+    const isReloaded = this.reloadingTabs.has(tabId);
+
+    if (isReloaded) {
+      this.reloadingTabs.delete(tabId);
+    }
+
+    if (isReloaded && index === this.queue.currentIndex && this.queue.status === 'paused') {
+      await this.processNext(this.queue.currentIndex);
+    } else {
+      this.emitStatus();
+    }
   }
 
   async cleanupClosedTabs(closedTabIds?: number[]): Promise<void> {
@@ -497,12 +547,62 @@ export class TabManager {
     }
   }
 
-  private async persistQueue(): Promise<void> {
-    try {
-      await this.storage.save(this.queue);
-    } catch (error) {
-      this.logger.error('TabManager: failed to persist queue', error);
+  private async persistQueue(immediate: boolean = false): Promise<void> {
+    if (immediate) {
+      if (this.persistTimer) {
+        clearTimeout(this.persistTimer);
+        this.persistTimer = null;
+      }
+
+      try {
+        await this.storage.save(this.queue);
+        if (this.pendingPersistPromise && this.persistResolve) {
+          this.persistResolve();
+        }
+      } catch (error) {
+        if (this.pendingPersistPromise && this.persistReject) {
+          this.persistReject(error instanceof Error ? error : new Error('Queue persistence failed'));
+        }
+        this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue', error);
+        throw error;
+      } finally {
+        this.cleanupPersistState();
+      }
+
+      return;
     }
+
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+    }
+
+    if (!this.pendingPersistPromise) {
+      this.pendingPersistPromise = new Promise<void>((resolve, reject) => {
+        this.persistResolve = resolve;
+        this.persistReject = reject;
+      });
+    }
+
+    this.persistTimer = setTimeout(() => {
+      this.persistQueue(true).catch((error) => {
+        this.logError('QUEUE_PERSIST_FAILED', 'TabManager: scheduled persistence error', error);
+      });
+    }, this.persistDelayMs);
+  }
+
+  async flushPersistence(): Promise<void> {
+    if (!this.persistTimer && !this.pendingPersistPromise) {
+      return;
+    }
+
+    await this.persistQueue(true);
+  }
+
+  private cleanupPersistState(): void {
+    this.persistTimer = null;
+    this.pendingPersistPromise = null;
+    this.persistResolve = undefined;
+    this.persistReject = undefined;
   }
 
   private emitStatus(): void {
@@ -511,7 +611,7 @@ export class TabManager {
       try {
         listener(payload);
       } catch (error) {
-        this.logger.error('TabManager: status listener failed', error);
+        this.logError('QUEUE_STATUS_NOTIFY_FAILED', 'TabManager: status listener failed', error);
       }
     }
   }
@@ -521,7 +621,7 @@ export class TabManager {
       try {
         listener(payload);
       } catch (error) {
-        this.logger.error('TabManager: progress listener failed', error);
+        this.logError('QUEUE_PROGRESS_NOTIFY_FAILED', 'TabManager: progress listener failed', error);
       }
     }
   }
@@ -531,9 +631,14 @@ export class TabManager {
       try {
         listener(payload);
       } catch (error) {
-        this.logger.error('TabManager: error listener failed', error);
+        this.logError('QUEUE_ERROR_NOTIFY_FAILED', 'TabManager: error listener failed', error);
       }
     }
+  }
+
+  private pushQueueError(code: string, message: string, detail?: unknown, tabId?: number): void {
+    const error = createExtensionError(code, message, detail);
+    this.emitError({ ...error, tabId, timestamp: this.now() });
   }
 
   private emitContentRequest(tabId: number, reason: 'missing' | 'stale'): void {
@@ -542,7 +647,7 @@ export class TabManager {
       try {
         listener(event);
       } catch (error) {
-        this.logger.error('TabManager: command listener failed', error);
+        this.logError('QUEUE_COMMAND_NOTIFY_FAILED', 'TabManager: command listener failed', error);
       }
     }
   }
@@ -589,15 +694,15 @@ export class TabManager {
 
     const nextIndex = this.findNextReadableIndex(this.queue.currentIndex + 1);
     if (nextIndex === -1) {
-      this.stopInternal(false).then(() => {
-        this.persistQueue();
-        this.emitStatus();
-      });
+      this.stopInternal(false)
+        .then(() => this.persistQueue())
+        .then(() => this.emitStatus())
+        .catch((error) => this.logError('QUEUE_STOP_FAILED', 'TabManager: failed to stop queue', error));
       return;
     }
 
     this.processNext(nextIndex).catch((error) => {
-      this.logger.error('TabManager: failed to advance to next tab', error);
+      this.logError('QUEUE_ADVANCE_FAILED', 'TabManager: failed to advance to next tab', error);
     });
   }
 
@@ -606,17 +711,11 @@ export class TabManager {
       return;
     }
 
-    this.logger.error('TabManager: playback error', error);
+    this.logError('PLAYBACK_ERROR', 'TabManager: playback error', error);
     this.activePlaybackToken = null;
     this.queue.status = 'error';
 
-    this.emitError({
-      code: 'PLAYBACK_ERROR',
-      message: error.message,
-      tabId,
-      detail: error,
-      timestamp: this.now(),
-    });
+    this.pushQueueError('PLAYBACK_ERROR', error.message, error, tabId);
 
     this.persistQueue().then(() => this.emitStatus());
   }
@@ -722,16 +821,45 @@ export class TabManager {
           } else {
             tab.extractedAt = new Date();
           }
+          this.enforceContentBudget();
           await this.persistQueue();
           return true;
         }
       } catch (error) {
-        this.logger.error('TabManager: content resolver failed', error);
+        this.logError('CONTENT_RESOLVE_FAILED', 'TabManager: content resolver failed', error);
       }
     }
 
     this.emitContentRequest(tab.tabId, 'missing');
     return false;
+  }
+
+  private enforceContentBudget(): void {
+    let totalChars = 0;
+    const activeTab = this.queue.tabs[this.queue.currentIndex] ?? null;
+    const reserveId = QUEUE_CONTENT_RESERVE_ACTIVE && activeTab ? activeTab.tabId : null;
+
+    for (let i = this.queue.tabs.length - 1; i >= 0; i -= 1) {
+      const tab = this.queue.tabs[i];
+      if (!tab.content) {
+        continue;
+      }
+
+      const contentLength = tab.content.length;
+      if (reserveId !== null && tab.tabId === reserveId) {
+        continue;
+      }
+
+      totalChars += contentLength;
+      if (totalChars > QUEUE_CONTENT_CHAR_BUDGET) {
+        tab.content = undefined;
+        tab.summary = undefined;
+      }
+    }
+  }
+
+  private logError(code: string, message: string, detail?: unknown): void {
+    this.logger.error(...formatErrorLog(code, message, detail));
   }
 
   private nextPlaybackToken(): number {

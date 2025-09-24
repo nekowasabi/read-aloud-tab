@@ -4,6 +4,8 @@ import {
   addIgnoredDomain,
   removeIgnoredDomain,
 } from '../../shared/utils/storage';
+import { ListCard } from './common/ListCard';
+import { InputWithButton } from './common/InputWithButton';
 
 type RequestState = 'idle' | 'loading' | 'error';
 
@@ -13,7 +15,6 @@ interface Props {
 
 export default function IgnoreListManager({ onChange }: Props = {}) {
   const [domains, setDomains] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<RequestState>('idle');
 
@@ -32,8 +33,8 @@ export default function IgnoreListManager({ onChange }: Props = {}) {
     }
   };
 
-  const handleAdd = async () => {
-    const normalized = normalizeDomain(inputValue);
+  const handleAdd = async (value: string) => {
+    const normalized = normalizeDomain(value);
 
     if (!normalized) {
       setMessage('有効なドメイン名を入力してください');
@@ -50,7 +51,6 @@ export default function IgnoreListManager({ onChange }: Props = {}) {
 
     try {
       await addIgnoredDomain(normalized);
-      setInputValue('');
       await refreshDomains();
     } catch (error) {
       console.error('IgnoreListManager: failed to add domain', error);
@@ -80,39 +80,19 @@ export default function IgnoreListManager({ onChange }: Props = {}) {
   };
 
   return (
-    <section className="ignore-list-manager">
-      <h3>無視リスト</h3>
-      <p className="helper-text">読み上げ対象から除外したいドメインを登録してください。</p>
-
-      <div className="ignore-form">
-        <input
-          type="text"
-          placeholder="example.com"
-          value={inputValue}
-          onChange={(event) => setInputValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              handleAdd();
-            }
-          }}
-          className="ignore-input"
-        />
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={handleAdd}
-          disabled={status === 'loading'}
-        >
-          追加
-        </button>
-      </div>
-
-      {message && (
-        <div className="ignore-message" role="alert">
-          {message}
-        </div>
-      )}
+    <ListCard
+      title="無視リスト"
+      description="読み上げ対象から除外したいドメインを登録してください。"
+    >
+      <InputWithButton
+        label="ドメイン"
+        placeholder="example.com"
+        buttonLabel="追加"
+        onSubmit={handleAdd}
+        message={message}
+        disabled={status === 'loading'}
+        clearOnSubmit
+      />
 
       <ul className="ignore-list">
         {domains.map((domain) => (
@@ -136,7 +116,7 @@ export default function IgnoreListManager({ onChange }: Props = {}) {
           </li>
         )}
       </ul>
-    </section>
+    </ListCard>
   );
 }
 

@@ -199,19 +199,50 @@ interface TabInfo {
 
 ### process50 フォローアップ
 #### sub1 パフォーマンス最適化
-- [ ] 大量タブ（100+）での動作検証
+- [x] 大量タブ（100+）での動作検証
+  - Jestで200件の`TabInfo`を投入し`processNext`が100ms以内で進行するか測定するテストを作成（Red）
+  - TabManagerにバッチ永続化（debounce）・高速探索・キャッシュ上限を導入しテストをパスさせる（Green）
+  - キュー内部表現を`Map`＋インデックス配列に抽出しパフォーマンスコードを整理（Refactor）
 - [ ] メモリ使用量の最適化
+  - 大容量コンテンツ保持後に`cleanupOldContent`が解放するかのユニットテストを追加（Red）
+  - LRUクリアと`useTabQueue`アンマウント時の`disconnect`処理を実装（Green）
+  - メモリ閾値を`shared/constants.ts`へ集約し共通ユーティリティ化（Refactor）
 - [ ] コンテンツクリーンアップ戦略
+  - 再起動時や旧スキーマインポート時の破損防止テストを追加（Red）
+  - `migrateStorageSchema`拡張と起動時`validateQueue`/`cleanupClosedTabs`実行を実装（Green）
+  - ストレージ整合ロジックを`QueueSanitizer`クラスに切り出し（Refactor）
 
 #### sub2 エッジケース対応
 - [ ] タブクラッシュ時の復旧
+  - `chrome.tabs.onRemoved/onUpdated`をモックしクラッシュ→復帰テストを追加（Red）
+  - ロード中停止＋完了時再開、`skipTab`フォールバックを導入（Green）
+  - イベント処理を`TabLifecycleController`に分離（Refactor）
 - [ ] 拡張機能の再起動対応
+  - サービスワーカー再起動後の状態復旧テスト、Port再接続テストを追加（Red）
+  - 起動時スナップショット送信と`onStartup`フックを実装（Green）
+  - 初期化処理を`bootstrapBackground`ヘルパーに集約（Refactor）
 - [ ] ネットワークエラー処理
+  - コンテンツ抽出失敗やインポート失敗のエラーフローを検証するテストを追加（Red）
+  - リトライ＋`QUEUE_ERROR`通知/UIトースト表示を実装（Green）
+  - エラーコードを`shared/errors.ts`に統一（Refactor）
 
-### process100 リファクタリング
-- [ ] 共通コンポーネントの抽出
-- [ ] 型定義の整理
-- [ ] エラーハンドリングの統一
+- スケジュール
+  - 大量タブ耐性→メモリ最適化→エッジケース復旧の順にRed-Green-Refactorを回す
+  - 各ステップ後に`npm test`/`npm run typecheck`/`npm run build:*`で回帰確認
+
+- [x] 共通コンポーネントの抽出
+  - Red: `TabQueueList`/`IgnoreListManager` の重複 UI を検出するレンダリングテストを追加
+  - Green: 共通 `ListCard`・`InputWithButton` コンポーネントを導入し既存 UI を置換
+  - Refactor: Jest ベースの簡易ストーリーテストと props API ドキュメント整備
+- [x] 型定義の整理
+  - Red: 型整合性テストで `TabInfo` 等の重複・不一致を検知
+  - Green: Queue 系型をモジュール分割し、`SerializedTabInfo` 等を整理
+  - Refactor: Barrel ファイルと `shared/constants.ts` を整備して循環参照を解消
+- [x] エラーハンドリングの統一
+  - Red: エラーログフォーマットを検証するユニットテストを追加
+  - Green: `createExtensionError` を実装し、TabManager/Background/UI のエラー通知を統一
+  - Refactor: `LoggerLike` 経由のエラーログと共通エラーコード管理に集約
+- スケジュール: 共通コンポーネント → 型整理 → エラー統一の順で TDD を回し、各ステップで `npm test`/`npm run typecheck`/lint を実行
 
 ### process200 ドキュメンテーション
 - [ ] README.mdの更新

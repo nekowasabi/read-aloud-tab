@@ -36,6 +36,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
 
+  if (changeInfo.status === 'loading') {
+    tabManager.onTabLoading(tabId).catch((error) => {
+      console.warn('Failed to handle tab loading', error);
+    });
+  }
+
   const update: Partial<Pick<TabInfo, 'title' | 'url'>> = {
     url: tab.url,
   };

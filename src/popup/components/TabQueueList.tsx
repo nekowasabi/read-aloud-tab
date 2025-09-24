@@ -9,6 +9,7 @@ import {
 } from 'react-beautiful-dnd';
 import { QueueStatus } from '../../shared/types';
 import { SerializedTabInfo } from '../../shared/messages';
+import { ListCard } from './common/ListCard';
 
 export interface TabQueueListProps {
   tabs: SerializedTabInfo[];
@@ -67,32 +68,14 @@ export default function TabQueueList({
   };
 
   return (
-    <section className="queue-section">
-      <div className="queue-header">
-        <div className="queue-header-title">
-          <h2>読み上げキュー</h2>
-          <span className="queue-count">{tabs.length} 件</span>
-        </div>
-        <div className="queue-controls">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={onSkipPrevious}
-            disabled={isQueueEmpty}
-          >
-            ◀ 前へ
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={onSkipNext}
-            disabled={isQueueEmpty}
-          >
-            次へ ▶
-          </button>
-        </div>
-      </div>
-
+    <ListCard
+      title="読み上げキュー"
+      description={`${tabs.length} 件 / 状態: ${statusLabel}`}
+      actions={[
+        { label: '◀ 前へ', onClick: onSkipPrevious, disabled: isQueueEmpty },
+        { label: '次へ ▶', onClick: onSkipNext, disabled: isQueueEmpty },
+      ]}
+    >
       <div className="queue-status-chip" aria-live="polite">
         <span className={`status-dot status-${status}`}></span>
         <span>{statusLabel}</span>
@@ -151,7 +134,7 @@ export default function TabQueueList({
           </Droppable>
         </DragDropContext>
       )}
-    </section>
+    </ListCard>
   );
 }
 

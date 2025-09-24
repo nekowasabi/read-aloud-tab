@@ -1,4 +1,6 @@
-import { QueueStatus, TabInfo, TTSSettings } from './types';
+import { QueueStatus, TabInfo, TTSSettings, SerializedTabInfo, createSerializedTab } from './types';
+
+export type { SerializedTabInfo } from './types';
 
 export type QueueSkipDirection = 'next' | 'previous';
 
@@ -48,11 +50,6 @@ export type QueueCommandMessage =
   | { type: 'QUEUE_CONTROL'; payload: QueueControlPayload }
   | { type: 'QUEUE_UPDATE_SETTINGS'; payload: QueueSettingsUpdatePayload }
   | { type: 'REQUEST_QUEUE_STATE' };
-
-export interface SerializedTabInfo
-  extends Omit<TabInfo, 'extractedAt'> {
-  extractedAt: string | null;
-}
 
 export interface QueueStatusPayload {
   status: QueueStatus;
@@ -137,8 +134,5 @@ export function isQueueBroadcastMessage(message: unknown): message is QueueBroad
 }
 
 export function toSerializedTabInfo(tab: TabInfo): SerializedTabInfo {
-  return {
-    ...tab,
-    extractedAt: tab.extractedAt ? new Date(tab.extractedAt).toISOString() : null,
-  };
+  return createSerializedTab(tab);
 }
