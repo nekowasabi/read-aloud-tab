@@ -209,9 +209,53 @@ export class BackgroundOrchestrator {
     });
   }
 
+  private async ensureActiveTabInQueue(): Promise<boolean> {
+    // キューに読み上げ可能なタブがあるかチェック
+    const snapshot = this.tabManager.getSnapshot();
+
+    // 読み上げ可能なタブが存在する場合は何もしない
+    const hasReadableTabs = snapshot.tabs.some((tab) => !tab.isIgnored);
+    if (hasReadableTabs) {
+      return false;
+    }
+
+    try {
+      // アクティブタブを取得
+      const tabs = await (this.chrome.tabs as any).query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+
+      if (!activeTab || !activeTab.id || !activeTab.url) {
+        this.logger.warn('BackgroundOrchestrator: no active tab found');
+        return false;
+      }
+
+      // タブ情報を作成（コンテンツは後で取得）
+      const tab: TabInfo = {
+        tabId: activeTab.id,
+        url: activeTab.url,
+        title: activeTab.title || '',
+        isIgnored: false,
+        extractedAt: new Date(),
+      };
+
+      // キューに追加（コンテンツ抽出は後で行われる）
+      await this.tabManager.addTab(tab, {
+        position: 'end',
+        autoStart: false, // processNext()で手動で開始する
+      });
+
+      this.logger.info('BackgroundOrchestrator: added active tab to queue', { tabId: activeTab.id, url: activeTab.url });
+      return true;
+    } catch (error) {
+      this.logger.error('BackgroundOrchestrator: failed to add active tab to queue', error);
+      return false;
+    }
+  }
+
   private async handleControlCommand(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
     switch (action) {
       case 'start':
+        await this.ensureActiveTabInQueue();
         await this.tabManager.processNext();
         break;
       case 'pause':
@@ -282,12 +326,14 @@ export class BackgroundOrchestrator {
           this.tabManager.resume();
         } else {
           this.logger.info('Toggling: Starting read aloud...');
+          await this.ensureActiveTabInQueue();
           await this.tabManager.processNext();
         }
         break;
       }
       case 'read-aloud-start':
         this.logger.info('Starting read aloud...');
+        await this.ensureActiveTabInQueue();
         await this.tabManager.processNext();
         break;
       case 'read-aloud-stop':

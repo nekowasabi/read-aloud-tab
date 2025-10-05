@@ -261,7 +261,7 @@ export default function App() {
         isPaused={queueStatus === 'paused'}
         onToggle={handleToggle}
         onStop={() => handleControl('stop')}
-        disabled={!isConnected || queueTabs.length === 0}
+        disabled={!isConnected}
       />
 
       <TabQueueList
