@@ -113,6 +113,37 @@ export class BrowserAdapter implements BrowserAPI {
         }
       },
     },
+
+    onConnect: {
+      addListener: (callback: any): void => {
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+          chrome.runtime.onConnect.addListener(callback);
+        } else if (typeof browser !== 'undefined' && browser.runtime) {
+          browser.runtime.onConnect.addListener(callback);
+        }
+      },
+    },
+
+    lastError: (() => {
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        return chrome.runtime.lastError;
+      } else if (typeof browser !== 'undefined' && browser.runtime) {
+        return browser.runtime.lastError;
+      }
+      return undefined;
+    })(),
+  };
+
+  commands = {
+    onCommand: {
+      addListener: (callback: (command: string) => void): void => {
+        if (typeof chrome !== 'undefined' && chrome.commands) {
+          chrome.commands.onCommand.addListener(callback);
+        } else if (typeof browser !== 'undefined' && browser.commands) {
+          browser.commands.onCommand.addListener(callback);
+        }
+      },
+    },
   };
 
   // 現在のブラウザを判定

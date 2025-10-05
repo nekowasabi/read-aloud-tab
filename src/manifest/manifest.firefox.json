@@ -36,7 +36,7 @@
   "commands": {
     "read-aloud-start": {
       "suggested_key": {
-        "default": "Ctrl+Shift+S"
+        "default": "Alt+R"
       },
       "description": "読み上げを開始"
     },

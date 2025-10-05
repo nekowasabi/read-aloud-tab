@@ -9,6 +9,7 @@ import {
   isQueueCommandMessage,
 } from '../shared/messages';
 import { TabManager, LoggerLike } from './tabManager';
+import { BrowserAdapter } from '../shared/utils/browser';
 
 interface ChromeRuntimePort {
   name: string;
@@ -61,7 +62,8 @@ export class BackgroundOrchestrator {
 
   constructor(options: BackgroundOrchestratorOptions) {
     this.tabManager = options.tabManager;
-    this.chrome = options.chrome || (globalThis.chrome as ChromeLike);
+    const browserAPI = BrowserAdapter.getInstance();
+    this.chrome = options.chrome || (browserAPI as unknown as ChromeLike);
     this.logger = options.logger || console;
 
     if (!this.chrome?.runtime) {
@@ -227,23 +229,36 @@ export class BackgroundOrchestrator {
   }
 
   private async handleShortcutCommand(command: string): Promise<void> {
+    // デバッグ用: アラート表示（本番環境では削除可能）
+    if (typeof globalThis !== 'undefined') {
+      console.log(`[Read Aloud Tab] Shortcut command received: ${command}`);
+    }
+
+    this.logger.info(`Shortcut command received: ${command}`);
+
     switch (command) {
       case 'read-aloud-start':
+        this.logger.info('Starting read aloud...');
         await this.tabManager.processNext();
         break;
       case 'read-aloud-stop':
+        this.logger.info('Stopping read aloud...');
         await this.tabManager.stop();
         break;
       case 'read-aloud-next':
+        this.logger.info('Skipping to next tab...');
         await this.tabManager.skipTab('next');
         break;
       case 'read-aloud-prev':
+        this.logger.info('Skipping to previous tab...');
         await this.tabManager.skipTab('previous');
         break;
       case 'read-aloud-pause':
+        this.logger.info('Pausing read aloud...');
         this.tabManager.pause();
         break;
       case 'read-aloud-resume':
+        this.logger.info('Resuming read aloud...');
         this.tabManager.resume();
         break;
       default:
