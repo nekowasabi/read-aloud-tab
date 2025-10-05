@@ -37,6 +37,13 @@
     "128": "icons/icon-128.png"
   },
   "commands": {
+    "read-aloud-toggle": {
+      "suggested_key": {
+        "default": "Alt+R",
+        "mac": "Alt+R"
+      },
+      "description": "読み上げを再生/一時停止"
+    },
     "read-aloud-start": {
       "suggested_key": {
         "default": "Ctrl+Shift+S",

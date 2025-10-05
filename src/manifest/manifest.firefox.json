@@ -34,11 +34,11 @@
     "128": "icons/icon-128.png"
   },
   "commands": {
-    "read-aloud-start": {
+    "read-aloud-toggle": {
       "suggested_key": {
         "default": "Alt+R"
       },
-      "description": "読み上げを開始"
+      "description": "読み上げを再生/一時停止"
     },
     "read-aloud-stop": {
       "suggested_key": {

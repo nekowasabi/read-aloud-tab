@@ -183,6 +183,24 @@ export default function App() {
   const queueTabs = queueState?.tabs ?? [];
   const queueIndex = queueState?.currentIndex ?? 0;
 
+  const handleToggle = useCallback(
+    async () => {
+      try {
+        if (queueStatus === 'reading') {
+          await control('pause');
+        } else if (queueStatus === 'paused') {
+          await control('resume');
+        } else {
+          await control('start');
+        }
+      } catch (commandError) {
+        const message = commandError instanceof Error ? commandError.message : '操作に失敗しました';
+        setError(message);
+      }
+    },
+    [queueStatus, control],
+  );
+
   if (isLoading) {
     return (
       <div className="popup-container">
@@ -241,9 +259,7 @@ export default function App() {
       <ControlButtons
         isReading={queueStatus === 'reading' || queueStatus === 'paused'}
         isPaused={queueStatus === 'paused'}
-        onStart={() => handleControl('start')}
-        onPause={() => handleControl('pause')}
-        onResume={() => handleControl('resume')}
+        onToggle={handleToggle}
         onStop={() => handleControl('stop')}
         disabled={!isConnected || queueTabs.length === 0}
       />

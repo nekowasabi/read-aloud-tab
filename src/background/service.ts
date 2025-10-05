@@ -272,6 +272,20 @@ export class BackgroundOrchestrator {
     this.logger.info(`Shortcut command received: ${command}`);
 
     switch (command) {
+      case 'read-aloud-toggle': {
+        const status = this.tabManager.getSnapshot().status;
+        if (status === 'reading') {
+          this.logger.info('Toggling: Pausing read aloud...');
+          this.tabManager.pause();
+        } else if (status === 'paused') {
+          this.logger.info('Toggling: Resuming read aloud...');
+          this.tabManager.resume();
+        } else {
+          this.logger.info('Toggling: Starting read aloud...');
+          await this.tabManager.processNext();
+        }
+        break;
+      }
       case 'read-aloud-start':
         this.logger.info('Starting read aloud...');
         await this.tabManager.processNext();
