@@ -48,13 +48,13 @@
     },
     "read-aloud-next": {
       "suggested_key": {
-        "default": "Ctrl+Shift+."
+        "default": "Ctrl+Shift+Right"
       },
       "description": "次のタブを読み上げ"
     },
     "read-aloud-prev": {
       "suggested_key": {
-        "default": "Ctrl+Shift+,"
+        "default": "Ctrl+Shift+Left"
       },
       "description": "前のタブを読み上げ"
     },
