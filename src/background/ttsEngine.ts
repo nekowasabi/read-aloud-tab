@@ -20,6 +20,7 @@ export class TTSEngine implements PlaybackController {
   private originalText: string = '';
   private currentSettings: TTSSettings | null = null;
   private currentHooks: PlaybackHooks | null = null;
+  private isResuming: boolean = false;
 
   private readonly speech: SpeechSynthesis;
   private readonly createUtteranceFn: (text: string) => SpeechSynthesisUtterance;
@@ -67,29 +68,25 @@ export class TTSEngine implements PlaybackController {
   }
 
   pause(): void {
-    if (!this.speech) {
-      this.logger.warn('TTSEngine: pause called but speech is not available');
+    if (!this.speech || !this.speech.speaking || this.isPaused) {
       return;
     }
 
-    if (this.speech.speaking && !this.isPaused) {
-      // Save current position for Firefox compatibility
-      // Firefox doesn't support pause() properly, so we use cancel() + position tracking
-      this.pausedPosition = this.currentPosition;
+    // Save current position for Firefox compatibility
+    // Firefox doesn't support pause() properly, so we use cancel() + position tracking
+    this.pausedPosition = this.currentPosition;
 
-      try {
-        // Use cancel() instead of pause() for Firefox compatibility
-        this.speech.cancel();
-        this.isPaused = true;
-        this.logger.info(`TTSEngine: paused at position ${this.pausedPosition}`);
-      } catch (error) {
-        this.logger.warn('TTSEngine: pause failed', error);
-      }
-    } else {
-      this.logger.warn('TTSEngine: pause called but not speaking or already paused', {
-        speaking: this.speech.speaking,
-        isPaused: this.isPaused,
-      });
+    try {
+      // IMPORTANT: Set isPaused BEFORE calling cancel()
+      // Firefox fires utterance.onend when cancel() is called, and we need
+      // to prevent that onend handler from calling hooks.onEnd()
+      this.isPaused = true;
+
+      // Use cancel() instead of pause() for Firefox compatibility
+      this.speech.cancel();
+    } catch (error) {
+      this.logger.warn('[TTSEngine] pause failed during cancel()', error);
+      this.isPaused = false; // Reset on error
     }
   }
 
@@ -119,6 +116,9 @@ export class TTSEngine implements PlaybackController {
     // Use async IIFE to handle voice application
     (async () => {
       try {
+        // Set resuming flag to prevent onstart from resetting isPaused
+        this.isResuming = true;
+
         // Create new utterance for remaining text
         const utterance = this.createUtteranceFn(remainingText);
         utterance.text = remainingText;
@@ -133,10 +133,9 @@ export class TTSEngine implements PlaybackController {
 
         this.isPaused = false;
         this.speech.speak(utterance);
-
-        this.logger.info(`TTSEngine: resumed from position ${this.pausedPosition}, remaining length: ${remainingText.length}`);
       } catch (error) {
         this.logger.warn('TTSEngine: resume failed', error);
+        this.isResuming = false;
       }
     })();
   }
@@ -199,12 +198,21 @@ export class TTSEngine implements PlaybackController {
     offset: number,
   ): void {
     utterance.onstart = () => {
-      this.isPaused = false;
+      // Only reset isPaused if not resuming (to prevent state reset on resume)
+      if (!this.isResuming) {
+        this.isPaused = false;
+      } else {
+        // Clear resuming flag after onstart fires
+        this.isResuming = false;
+      }
     };
 
     utterance.onend = () => {
-      this.cleanup();
-      hooks.onEnd();
+      // Don't call hooks.onEnd() if we're paused (Firefox fires onend when cancel() is called)
+      if (!this.isPaused) {
+        this.cleanup();
+        hooks.onEnd();
+      }
     };
 
     utterance.onerror = (event: any) => {
@@ -258,6 +266,7 @@ export class TTSEngine implements PlaybackController {
     this.currentText = '';
     this.currentPosition = 0;
     this.totalLength = 0;
+    this.isResuming = false;
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {

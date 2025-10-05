@@ -233,7 +233,7 @@ export default function App() {
       />
 
       <ControlButtons
-        isReading={queueStatus === 'reading'}
+        isReading={queueStatus === 'reading' || queueStatus === 'paused'}
         isPaused={queueStatus === 'paused'}
         onStart={() => handleControl('start')}
         onPause={() => handleControl('pause')}

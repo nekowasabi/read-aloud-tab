@@ -215,7 +215,9 @@ export default function useTabQueue(): UseTabQueueResult {
   );
 
   const control = useCallback(
-    (action: ControlAction): Promise<void> => sendCommand({ type: 'QUEUE_CONTROL', payload: { action } }),
+    (action: ControlAction): Promise<void> => {
+      return sendCommand({ type: 'QUEUE_CONTROL', payload: { action } });
+    },
     [sendCommand],
   );
 
