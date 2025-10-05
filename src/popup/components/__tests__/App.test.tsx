@@ -74,7 +74,7 @@ describe('App integration', () => {
   test('リストから削除ボタンを押すと removeTab が呼ばれる', async () => {
     render(<App />);
 
-    const removeButton = await screen.findByRole('button', { name: /削除/ });
+    const removeButton = await screen.findByLabelText(/削除:/);
     fireEvent.click(removeButton);
 
     expect(mockRemoveTab).toHaveBeenCalledWith(1);

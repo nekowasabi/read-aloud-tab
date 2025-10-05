@@ -1,12 +1,20 @@
 import React, { useMemo } from 'react';
 import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  DropResult,
-  DraggableProvided,
-  DroppableProvided,
-} from 'react-beautiful-dnd';
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { QueueStatus } from '../../shared/types';
 import { SerializedTabInfo } from '../../shared/messages';
 import { ListCard } from './common/ListCard';
@@ -21,6 +29,57 @@ export interface TabQueueListProps {
   onSkipPrevious: () => void;
 }
 
+interface SortableItemProps {
+  tab: SerializedTabInfo;
+  index: number;
+  currentIndex: number;
+  onRemoveTab: (tabId: number) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLLIElement>, index: number) => void;
+}
+
+function SortableItem({ tab, index, currentIndex, onRemoveTab, onKeyDown }: SortableItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: tab.tabId,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`queue-item${index === currentIndex ? ' is-active' : ''}${tab.isIgnored ? ' is-ignored' : ''}`}
+      onKeyDown={(event) => onKeyDown(event, index)}
+      aria-current={index === currentIndex ? 'true' : undefined}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="queue-item-body">
+        <div className="queue-item-title" title={tab.title || tab.url}>
+          {tab.title || 'タイトル未取得'}
+        </div>
+        <div className="queue-item-url" title={tab.url}>
+          {safeHostname(tab.url)}
+        </div>
+      </div>
+      <div className="queue-item-actions">
+        {tab.isIgnored && <span className="queue-item-badge">無視</span>}
+        <button
+          type="button"
+          className="queue-item-button"
+          onClick={() => onRemoveTab(tab.tabId)}
+          aria-label={`削除: ${tab.title || tab.url}`}
+        >
+          削除
+        </button>
+      </div>
+    </li>
+  );
+}
+
 export default function TabQueueList({
   tabs,
   currentIndex,
@@ -31,6 +90,13 @@ export default function TabQueueList({
   onSkipPrevious,
 }: TabQueueListProps) {
   const isQueueEmpty = tabs.length === 0;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const statusLabel = useMemo(() => {
     switch (status) {
@@ -45,15 +111,19 @@ export default function TabQueueList({
     }
   }, [status]);
 
-  const handleDragEnd = (result: DropResult) => {
-    if (!result.destination) {
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
       return;
     }
-    const { source, destination } = result;
-    if (destination.index === null || source.index === destination.index) {
-      return;
+
+    const oldIndex = tabs.findIndex((tab) => tab.tabId === active.id);
+    const newIndex = tabs.findIndex((tab) => tab.tabId === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      onReorder(oldIndex, newIndex);
     }
-    onReorder(source.index, destination.index);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLLIElement>, index: number) => {
@@ -84,55 +154,22 @@ export default function TabQueueList({
       {isQueueEmpty ? (
         <p className="queue-empty">キューにタブが追加されていません</p>
       ) : (
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <Droppable droppableId="tabQueue">
-            {(provided: DroppableProvided) => (
-              <ul
-                className="queue-list"
-                ref={provided.innerRef}
-                {...provided.droppableProps}
-              >
-                {tabs.map((tab, index) => (
-                  <Draggable key={tab.tabId} draggableId={tab.tabId.toString()} index={index}>
-                    {(dragProvided: DraggableProvided) => (
-                      <li
-                        className={`queue-item${index === currentIndex ? ' is-active' : ''}${tab.isIgnored ? ' is-ignored' : ''}`}
-                        ref={dragProvided.innerRef}
-                        {...dragProvided.draggableProps}
-                        {...dragProvided.dragHandleProps}
-                        role="listitem"
-                        tabIndex={0}
-                        onKeyDown={(event) => handleKeyDown(event, index)}
-                        aria-current={index === currentIndex ? 'true' : undefined}
-                      >
-                        <div className="queue-item-body">
-                          <div className="queue-item-title" title={tab.title || tab.url}>
-                            {tab.title || 'タイトル未取得'}
-                          </div>
-                          <div className="queue-item-url" title={tab.url}>
-                            {safeHostname(tab.url)}
-                          </div>
-                        </div>
-                        <div className="queue-item-actions">
-                          {tab.isIgnored && <span className="queue-item-badge">無視</span>}
-                          <button
-                            type="button"
-                            className="queue-item-button"
-                            onClick={() => onRemoveTab(tab.tabId)}
-                            aria-label={`削除: ${tab.title || tab.url}`}
-                          >
-                            削除
-                          </button>
-                        </div>
-                      </li>
-                    )}
-                  </Draggable>
-                ))}
-                {provided.placeholder}
-              </ul>
-            )}
-          </Droppable>
-        </DragDropContext>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={tabs.map((tab) => tab.tabId)} strategy={verticalListSortingStrategy}>
+            <ul className="queue-list">
+              {tabs.map((tab, index) => (
+                <SortableItem
+                  key={tab.tabId}
+                  tab={tab}
+                  index={index}
+                  currentIndex={currentIndex}
+                  onRemoveTab={onRemoveTab}
+                  onKeyDown={handleKeyDown}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
     </ListCard>
   );

@@ -5,22 +5,42 @@ import { SerializedTabInfo } from '../../../shared/messages';
 
 const mockListeners: { onDragEnd?: (result: any) => void } = {};
 
-jest.mock('react-beautiful-dnd', () => {
+jest.mock('@dnd-kit/core', () => {
   return {
-    DragDropContext: ({ children, onDragEnd }: any) => {
+    DndContext: ({ children, onDragEnd }: any) => {
       mockListeners.onDragEnd = onDragEnd;
-      return <div data-testid="drag-context">{children}</div>;
+      return <div data-testid="dnd-context">{children}</div>;
     },
-    Droppable: ({ children }: any) => children({
-      droppableProps: { 'data-testid': 'droppable' },
-      innerRef: jest.fn(),
-      placeholder: null,
+    closestCenter: jest.fn(),
+    PointerSensor: jest.fn(),
+    KeyboardSensor: jest.fn(),
+    useSensor: jest.fn(),
+    useSensors: jest.fn(() => []),
+  };
+});
+
+jest.mock('@dnd-kit/sortable', () => {
+  return {
+    SortableContext: ({ children }: any) => <div data-testid="sortable-context">{children}</div>,
+    useSortable: (props: any) => ({
+      attributes: { 'data-sortable-id': props.id },
+      listeners: { 'data-draggable': 'true' },
+      setNodeRef: jest.fn(),
+      transform: null,
+      transition: null,
     }),
-    Draggable: ({ children, draggableId, index }: any) => children({
-      draggableProps: { 'data-testid': `draggable-${draggableId}`, 'data-index': index },
-      dragHandleProps: {},
-      innerRef: jest.fn(),
-    }, null),
+    sortableKeyboardCoordinates: jest.fn(),
+    verticalListSortingStrategy: jest.fn(),
+  };
+});
+
+jest.mock('@dnd-kit/utilities', () => {
+  return {
+    CSS: {
+      Transform: {
+        toString: (transform: any) => (transform ? 'transform: translate(0, 0)' : undefined),
+      },
+    },
   };
 });
 
@@ -87,10 +107,30 @@ describe('TabQueueList', () => {
   test('ドラッグ終了で onReorder が呼ばれる', () => {
     const { props } = renderList();
     mockListeners.onDragEnd?.({
-      source: { index: 0 },
-      destination: { index: 1 },
+      active: { id: 1 },
+      over: { id: 2 },
     });
 
     expect(props.onReorder).toHaveBeenCalledWith(0, 1);
+  });
+
+  test('ドラッグ終了時に over がない場合は onReorder が呼ばれない', () => {
+    const { props } = renderList();
+    mockListeners.onDragEnd?.({
+      active: { id: 1 },
+      over: null,
+    });
+
+    expect(props.onReorder).not.toHaveBeenCalled();
+  });
+
+  test('同じアイテムにドロップした場合は onReorder が呼ばれない', () => {
+    const { props } = renderList();
+    mockListeners.onDragEnd?.({
+      active: { id: 1 },
+      over: { id: 1 },
+    });
+
+    expect(props.onReorder).not.toHaveBeenCalled();
   });
 });
