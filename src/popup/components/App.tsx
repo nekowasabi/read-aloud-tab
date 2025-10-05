@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { TTSSettings, QueueStatus } from '../../shared/types';
 import { StorageManager } from '../../shared/utils/storage';
+import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
 import SettingsPanel from './SettingsPanel';
 import StatusDisplay from './StatusDisplay';
@@ -44,7 +45,8 @@ export default function App() {
         console.log('[Popup Init] Starting initialization...');
 
         console.log('[Popup Init] Querying active tab...');
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const browserAPI = BrowserAdapter.getInstance();
+        const tabs = await browserAPI.tabs.query({ active: true, currentWindow: true });
         console.log('[Popup Init] Active tab query result:', tabs);
 
         if (mounted && tabs[0]) {

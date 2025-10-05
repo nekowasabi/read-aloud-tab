@@ -109,6 +109,19 @@ export class BackgroundOrchestrator {
   }
 
   private handleRuntimeMessage: RuntimeMessageListener = (message, _sender, sendResponse) => {
+    // Handle TEXT_EXTRACTED message
+    if (message && typeof message === 'object' && 'type' in message) {
+      if (message.type === 'TEXT_EXTRACTED') {
+        this.handleTextExtracted(message as any)
+          .then(() => sendResponse({ success: true }))
+          .catch((error: Error) => {
+            this.logger.error('BackgroundOrchestrator: text extraction handling failed', error);
+            sendResponse({ success: false, error: error.message });
+          });
+        return true as unknown as void;
+      }
+    }
+
     if (!isQueueCommandMessage(message)) {
       return;
     }
@@ -212,6 +225,28 @@ export class BackgroundOrchestrator {
         break;
       default:
         throw new Error(`Unsupported control action: ${action}`);
+    }
+  }
+
+  private async handleTextExtracted(message: { type: 'TEXT_EXTRACTED'; content: any }): Promise<void> {
+    const { content } = message;
+    if (!content || typeof content.tabId !== 'number') {
+      this.logger.warn('BackgroundOrchestrator: invalid TEXT_EXTRACTED message', message);
+      return;
+    }
+
+    const { tabId, text, url, title, extractedAt } = content;
+
+    try {
+      await this.tabManager.onTabUpdated(tabId, {
+        url,
+        title,
+        content: text,
+        extractedAt: extractedAt || Date.now(),
+      });
+      this.logger.info(`BackgroundOrchestrator: content extracted for tab ${tabId}, length: ${text?.length || 0}`);
+    } catch (error) {
+      this.logger.error('BackgroundOrchestrator: failed to update tab with extracted content', error);
     }
   }
 

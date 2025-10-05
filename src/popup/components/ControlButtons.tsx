@@ -19,48 +19,41 @@ export default function ControlButtons({
   onStop,
   disabled = false
 }: Props) {
-  if (!isReading) {
-    return (
-      <div className="control-section">
-        <button
-          className="btn btn-primary btn-large"
-          onClick={onStart}
-          disabled={disabled}
-        >
-          <span className="btn-icon">▶️</span>
-          読み上げ開始
-        </button>
-      </div>
-    );
-  }
+  // 状態判定
+  const isIdle = !isReading && !isPaused;
+  const isPlaying = isReading && !isPaused;
 
   return (
     <div className="control-section">
       <div className="control-buttons">
-        {isPaused ? (
-          <button
-            className="btn btn-primary"
-            onClick={onResume}
-            disabled={disabled}
-          >
-            <span className="btn-icon">▶️</span>
-            再開
-          </button>
-        ) : (
-          <button
-            className="btn btn-secondary"
-            onClick={onPause}
-            disabled={disabled}
-          >
-            <span className="btn-icon">⏸️</span>
-            一時停止
-          </button>
-        )}
+        {/* 再生/再開ボタン（常に表示） */}
+        <button
+          className="btn btn-primary"
+          onClick={isPaused ? onResume : onStart}
+          disabled={disabled || isPlaying}
+          title={isPaused ? "再開" : "再生"}
+        >
+          <span className="btn-icon">▶️</span>
+          {isPaused ? "再開" : "再生"}
+        </button>
 
+        {/* 一時停止ボタン（常に表示） */}
+        <button
+          className="btn btn-secondary"
+          onClick={onPause}
+          disabled={disabled || !isPlaying}
+          title="一時停止"
+        >
+          <span className="btn-icon">⏸️</span>
+          一時停止
+        </button>
+
+        {/* 停止ボタン（常に表示） */}
         <button
           className="btn btn-danger"
           onClick={onStop}
-          disabled={disabled}
+          disabled={disabled || isIdle}
+          title="停止"
         >
           <span className="btn-icon">⏹️</span>
           停止

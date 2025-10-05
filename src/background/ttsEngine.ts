@@ -15,6 +15,12 @@ export class TTSEngine implements PlaybackController {
   private currentPosition = 0;
   private totalLength = 0;
 
+  // Firefox pause/resume support
+  private pausedPosition: number = 0;
+  private originalText: string = '';
+  private currentSettings: TTSSettings | null = null;
+  private currentHooks: PlaybackHooks | null = null;
+
   private readonly speech: SpeechSynthesis;
   private readonly createUtteranceFn: (text: string) => SpeechSynthesisUtterance;
   private readonly logger: LoggerLike;
@@ -38,6 +44,12 @@ export class TTSEngine implements PlaybackController {
 
     this.stop();
 
+    // Store for Firefox pause/resume support
+    this.originalText = tab.content;
+    this.currentSettings = settings;
+    this.currentHooks = hooks;
+    this.pausedPosition = 0;
+
     this.currentText = tab.content;
     this.totalLength = tab.content.length;
     this.currentPosition = 0;
@@ -55,17 +67,78 @@ export class TTSEngine implements PlaybackController {
   }
 
   pause(): void {
+    if (!this.speech) {
+      this.logger.warn('TTSEngine: pause called but speech is not available');
+      return;
+    }
+
     if (this.speech.speaking && !this.isPaused) {
-      this.speech.pause();
-      this.isPaused = true;
+      // Save current position for Firefox compatibility
+      // Firefox doesn't support pause() properly, so we use cancel() + position tracking
+      this.pausedPosition = this.currentPosition;
+
+      try {
+        // Use cancel() instead of pause() for Firefox compatibility
+        this.speech.cancel();
+        this.isPaused = true;
+        this.logger.info(`TTSEngine: paused at position ${this.pausedPosition}`);
+      } catch (error) {
+        this.logger.warn('TTSEngine: pause failed', error);
+      }
+    } else {
+      this.logger.warn('TTSEngine: pause called but not speaking or already paused', {
+        speaking: this.speech.speaking,
+        isPaused: this.isPaused,
+      });
     }
   }
 
   resume(): void {
-    if (this.isPaused) {
-      this.speech.resume();
-      this.isPaused = false;
+    if (!this.speech) {
+      this.logger.warn('TTSEngine: resume called but speech is not available');
+      return;
     }
+
+    if (!this.isPaused || !this.currentHooks || !this.currentSettings) {
+      this.logger.warn('TTSEngine: resume called but not paused or missing context', {
+        isPaused: this.isPaused,
+        hasHooks: !!this.currentHooks,
+        hasSettings: !!this.currentSettings,
+      });
+      return;
+    }
+
+    // Get remaining text from paused position
+    const remainingText = this.originalText.substring(this.pausedPosition);
+
+    if (!remainingText || remainingText.length === 0) {
+      this.logger.warn('TTSEngine: no remaining text to resume');
+      return;
+    }
+
+    // Use async IIFE to handle voice application
+    (async () => {
+      try {
+        // Create new utterance for remaining text
+        const utterance = this.createUtteranceFn(remainingText);
+        utterance.text = remainingText;
+        this.utterance = utterance;
+
+        // Apply settings
+        this.applySettings(utterance, this.currentSettings!);
+        await this.applyVoice(utterance, this.currentSettings!.voice);
+
+        // Bind events with offset for correct position tracking
+        this.bindUtteranceEventsWithOffset(utterance, this.currentHooks!, this.pausedPosition);
+
+        this.isPaused = false;
+        this.speech.speak(utterance);
+
+        this.logger.info(`TTSEngine: resumed from position ${this.pausedPosition}, remaining length: ${remainingText.length}`);
+      } catch (error) {
+        this.logger.warn('TTSEngine: resume failed', error);
+      }
+    })();
   }
 
   stop(): void {
@@ -117,6 +190,14 @@ export class TTSEngine implements PlaybackController {
   }
 
   private bindUtteranceEvents(utterance: SpeechSynthesisUtterance, hooks: PlaybackHooks): void {
+    this.bindUtteranceEventsWithOffset(utterance, hooks, 0);
+  }
+
+  private bindUtteranceEventsWithOffset(
+    utterance: SpeechSynthesisUtterance,
+    hooks: PlaybackHooks,
+    offset: number,
+  ): void {
     utterance.onstart = () => {
       this.isPaused = false;
     };
@@ -149,7 +230,8 @@ export class TTSEngine implements PlaybackController {
 
     utterance.onboundary = (event: any) => {
       if (typeof event?.charIndex === 'number') {
-        this.currentPosition = event.charIndex;
+        // Add offset for position tracking when resuming
+        this.currentPosition = offset + event.charIndex;
         this.emitProgress(hooks);
       }
     };

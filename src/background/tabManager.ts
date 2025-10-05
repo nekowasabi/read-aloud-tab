@@ -376,6 +376,9 @@ export class TabManager {
     }
     this.playback.pause();
     this.queue.status = 'paused';
+    this.persistQueue().catch((error) => {
+      this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after pause', error);
+    });
     this.emitStatus();
   }
 
@@ -385,6 +388,9 @@ export class TabManager {
     }
     this.playback.resume();
     this.queue.status = 'reading';
+    this.persistQueue().catch((error) => {
+      this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after resume', error);
+    });
     this.emitStatus();
   }
 
@@ -459,7 +465,8 @@ export class TabManager {
       this.reloadingTabs.delete(tabId);
     }
 
-    if (isReloaded && index === this.queue.currentIndex && this.queue.status === 'paused') {
+    // Auto-resume when content is added (both for reload and new tab)
+    if (update.content && index === this.queue.currentIndex && this.queue.status === 'paused') {
       await this.processNext(this.queue.currentIndex);
     } else {
       this.emitStatus();
