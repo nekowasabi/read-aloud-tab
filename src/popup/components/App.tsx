@@ -41,19 +41,39 @@ export default function App() {
 
     (async () => {
       try {
+        console.log('[Popup Init] Starting initialization...');
+
+        console.log('[Popup Init] Querying active tab...');
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        console.log('[Popup Init] Active tab query result:', tabs);
+
         if (mounted && tabs[0]) {
           setActiveTab(tabs[0]);
+          console.log('[Popup Init] Active tab set:', tabs[0].id, tabs[0].url);
+        } else {
+          console.warn('[Popup Init] No active tab found');
         }
 
+        console.log('[Popup Init] Loading settings...');
         const savedSettings = await StorageManager.getSettings();
+        console.log('[Popup Init] Settings loaded:', savedSettings);
+
         if (mounted) {
           setSettings(savedSettings);
         }
+
+        console.log('[Popup Init] Initialization successful');
       } catch (initError) {
-        console.error('Failed to initialize popup:', initError);
+        console.error('[Popup Init] Initialization failed:', initError);
+        console.error('[Popup Init] Error name:', (initError as Error)?.name);
+        console.error('[Popup Init] Error message:', (initError as Error)?.message);
+        console.error('[Popup Init] Error stack:', (initError as Error)?.stack);
+
         if (mounted) {
-          setError('初期化に失敗しました');
+          const errorMsg = initError instanceof Error
+            ? `初期化に失敗しました: ${initError.message}`
+            : '初期化に失敗しました';
+          setError(errorMsg);
         }
       } finally {
         if (mounted) {
