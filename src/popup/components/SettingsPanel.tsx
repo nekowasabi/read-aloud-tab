@@ -74,7 +74,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
               <input
                 type="range"
                 min="0.5"
-                max="2"
+                max="3"
                 step="0.1"
                 value={localSettings.rate}
                 onChange={(e) => handleSettingChange('rate', parseFloat(e.target.value))}

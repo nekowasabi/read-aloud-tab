@@ -53,7 +53,7 @@ export class StorageManager {
   // 設定の妥当性をチェック
   static validateSettings(settings: Partial<TTSSettings>): TTSSettings {
     return {
-      rate: this.clamp(settings.rate || this.DEFAULT_SETTINGS.rate, 0.5, 2.0),
+      rate: this.clamp(settings.rate || this.DEFAULT_SETTINGS.rate, 0.5, 3.0),
       pitch: this.clamp(settings.pitch || this.DEFAULT_SETTINGS.pitch, 0, 2.0),
       volume: this.clamp(settings.volume || this.DEFAULT_SETTINGS.volume, 0, 1.0),
       voice: settings.voice || this.DEFAULT_SETTINGS.voice,

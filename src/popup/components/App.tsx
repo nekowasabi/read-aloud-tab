@@ -3,6 +3,7 @@ import { TTSSettings, QueueStatus } from '../../shared/types';
 import { StorageManager } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
+import QuickControls from './QuickControls';
 import SettingsPanel from './SettingsPanel';
 import StatusDisplay from './StatusDisplay';
 import TabQueueList from './TabQueueList';
@@ -230,6 +231,11 @@ export default function App() {
         status={queueStatus}
         progress={activeProgress}
         isConnected={isConnected}
+      />
+
+      <QuickControls
+        settings={settings}
+        onChange={handleSettingsChange}
       />
 
       <ControlButtons
