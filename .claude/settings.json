@@ -1,0 +1,69 @@
+{
+  "env": {},
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Bash(npm run test:*)",
+      "Read(~/.zshrc)",
+      "Bash(git:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(pwd:*)",
+      "Bash(cd:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(terminal-notifier:*)",
+      "Bash(rg:*)"
+    ],
+    "deny": [
+      "Bash(curl:*)",
+      "Bash(sudo:*)",
+      "Bash(rm:*)",
+      "Bash(git config:*)",
+      "Bash(brew install:*)",
+      "Bash(chmod 777:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(git push:*)",
+      "Read(.env.*)",
+      "Write(.env*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(nc:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm remove:*)",
+      "Bash(psql:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/stop-send-notification.js"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/deny-check.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bun x ccusage statusline",
+    "padding": 0
+  },
+  "alwaysThinkingEnabled": true
+}

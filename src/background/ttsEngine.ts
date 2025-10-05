@@ -151,6 +151,13 @@ export class TTSEngine implements PlaybackController {
     this.cleanup();
   }
 
+  updateSettings(settings: TTSSettings): void {
+    if (!this.currentSettings) {
+      return;
+    }
+    this.currentSettings = settings;
+  }
+
   getDebugInfo(): object {
     return {
       isSupported: Boolean(this.speech),

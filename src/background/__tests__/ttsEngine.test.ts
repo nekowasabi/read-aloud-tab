@@ -79,4 +79,51 @@ describe('TTSEngine (PlaybackController)', () => {
 
     expect(hooks.onProgress).toHaveBeenCalledWith(expect.any(Number));
   });
+
+  test('pause→updateSettings→resume で新しい設定が反映される', async () => {
+    const hooks = {
+      onEnd: jest.fn(),
+      onError: jest.fn(),
+      onProgress: jest.fn(),
+    };
+
+    const engine = new TTSEngine();
+    const tab = createTab({ content: 'Hello world for testing pause and resume' });
+    await engine.start(tab, defaultSettings, hooks);
+
+    // First utterance
+    const firstUtterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+    expect(firstUtterance.rate).toBe(1);
+    expect(firstUtterance.volume).toBe(1);
+
+    // Mark as speaking for pause to work
+    (speechSynthesis as any).speaking = true;
+
+    // Simulate boundary event (position tracking)
+    firstUtterance.onboundary?.({ name: 'word', charIndex: 10 });
+
+    // Simulate pause
+    engine.pause();
+
+    // Update settings
+    const newSettings: TTSSettings = {
+      rate: 1.5,
+      pitch: 1.2,
+      volume: 0.5,
+      voice: null,
+    };
+    engine.updateSettings(newSettings);
+
+    // Simulate resume
+    engine.resume();
+
+    // Wait for async voice application
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Second utterance should have new settings
+    const secondUtterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[1].value;
+    expect(secondUtterance.rate).toBe(1.5);
+    expect(secondUtterance.volume).toBe(0.5);
+    expect(secondUtterance.pitch).toBe(1.2);
+  });
 });

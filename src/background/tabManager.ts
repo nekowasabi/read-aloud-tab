@@ -35,6 +35,7 @@ export interface PlaybackController {
   pause: () => void;
   resume: () => void;
   stop: () => void;
+  updateSettings: (settings: TTSSettings) => void;
 }
 
 export interface ContentResolverResult {
@@ -523,6 +524,11 @@ export class TabManager {
 
     const validated = StorageManager.validateSettings(merged);
     this.queue.settings = validated;
+
+    // Update TTSEngine's current settings if paused
+    if (this.queue.status === 'paused') {
+      this.playback.updateSettings(validated);
+    }
 
     await Promise.all([
       this.persistQueue(),
