@@ -123,15 +123,6 @@ export class BrowserAdapter implements BrowserAPI {
         }
       },
     },
-
-    lastError: (() => {
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        return chrome.runtime.lastError;
-      } else if (typeof browser !== 'undefined' && browser.runtime) {
-        return browser.runtime.lastError;
-      }
-      return undefined;
-    })(),
   };
 
   commands = {
