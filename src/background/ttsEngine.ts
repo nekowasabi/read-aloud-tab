@@ -1,5 +1,5 @@
-import { TabInfo, TTSSettings } from '../shared/types';
-import { PlaybackController, PlaybackHooks, LoggerLike } from './tabManager';
+import { TabInfo, TTSSettings } from "../shared/types";
+import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 
 interface TTSEngineOptions {
   speech?: SpeechSynthesis;
@@ -11,36 +11,44 @@ interface TTSEngineOptions {
 export class TTSEngine implements PlaybackController {
   private utterance: SpeechSynthesisUtterance | null = null;
   private isPaused = false;
-  private currentText = '';
+  private currentText = "";
   private currentPosition = 0;
   private totalLength = 0;
 
   // Firefox pause/resume support
   private pausedPosition: number = 0;
-  private originalText: string = '';
+  private originalText: string = "";
   private currentSettings: TTSSettings | null = null;
   private currentHooks: PlaybackHooks | null = null;
   private isResuming: boolean = false;
 
   private readonly speech: SpeechSynthesis;
-  private readonly createUtteranceFn: (text: string) => SpeechSynthesisUtterance;
+  private readonly createUtteranceFn: (
+    text: string,
+  ) => SpeechSynthesisUtterance;
   private readonly logger: LoggerLike;
   private readonly defaultLang: string;
 
   constructor(options: TTSEngineOptions = {}) {
-    this.speech = options.speech || (globalThis.speechSynthesis as SpeechSynthesis);
-    this.createUtteranceFn = options.createUtterance || ((text: string) => new SpeechSynthesisUtterance(text));
+    this.speech = options.speech ||
+      (globalThis.speechSynthesis as SpeechSynthesis);
+    this.createUtteranceFn = options.createUtterance ||
+      ((text: string) => new SpeechSynthesisUtterance(text));
     this.logger = options.logger || console;
-    this.defaultLang = options.defaultLang || 'ja-JP';
+    this.defaultLang = options.defaultLang || "ja-JP";
 
     if (!this.speech) {
-      throw new Error('Web Speech API is not supported in this environment');
+      throw new Error("Web Speech API is not supported in this environment");
     }
   }
 
-  async start(tab: TabInfo, settings: TTSSettings, hooks: PlaybackHooks): Promise<void> {
+  async start(
+    tab: TabInfo,
+    settings: TTSSettings,
+    hooks: PlaybackHooks,
+  ): Promise<void> {
     if (!tab.content || tab.content.trim().length === 0) {
-      throw new Error('No readable content available for the selected tab');
+      throw new Error("No readable content available for the selected tab");
     }
 
     this.stop();
@@ -85,23 +93,26 @@ export class TTSEngine implements PlaybackController {
       // Use cancel() instead of pause() for Firefox compatibility
       this.speech.cancel();
     } catch (error) {
-      this.logger.warn('[TTSEngine] pause failed during cancel()', error);
+      this.logger.warn("[TTSEngine] pause failed during cancel()", error);
       this.isPaused = false; // Reset on error
     }
   }
 
   resume(): void {
     if (!this.speech) {
-      this.logger.warn('TTSEngine: resume called but speech is not available');
+      this.logger.warn("TTSEngine: resume called but speech is not available");
       return;
     }
 
     if (!this.isPaused || !this.currentHooks || !this.currentSettings) {
-      this.logger.warn('TTSEngine: resume called but not paused or missing context', {
-        isPaused: this.isPaused,
-        hasHooks: !!this.currentHooks,
-        hasSettings: !!this.currentSettings,
-      });
+      this.logger.warn(
+        "TTSEngine: resume called but not paused or missing context",
+        {
+          isPaused: this.isPaused,
+          hasHooks: !!this.currentHooks,
+          hasSettings: !!this.currentSettings,
+        },
+      );
       return;
     }
 
@@ -109,7 +120,7 @@ export class TTSEngine implements PlaybackController {
     const remainingText = this.originalText.substring(this.pausedPosition);
 
     if (!remainingText || remainingText.length === 0) {
-      this.logger.warn('TTSEngine: no remaining text to resume');
+      this.logger.warn("TTSEngine: no remaining text to resume");
       return;
     }
 
@@ -129,12 +140,16 @@ export class TTSEngine implements PlaybackController {
         await this.applyVoice(utterance, this.currentSettings!.voice);
 
         // Bind events with offset for correct position tracking
-        this.bindUtteranceEventsWithOffset(utterance, this.currentHooks!, this.pausedPosition);
+        this.bindUtteranceEventsWithOffset(
+          utterance,
+          this.currentHooks!,
+          this.pausedPosition,
+        );
 
         this.isPaused = false;
         this.speech.speak(utterance);
       } catch (error) {
-        this.logger.warn('TTSEngine: resume failed', error);
+        this.logger.warn("TTSEngine: resume failed", error);
         this.isResuming = false;
       }
     })();
@@ -145,7 +160,7 @@ export class TTSEngine implements PlaybackController {
       try {
         this.speech.cancel();
       } catch (error) {
-        this.logger.warn('TTSEngine: cancel failed', error);
+        this.logger.warn("TTSEngine: cancel failed", error);
       }
     }
     this.cleanup();
@@ -160,7 +175,9 @@ export class TTSEngine implements PlaybackController {
 
     // If currently speaking, pause to let user manually resume with new settings
     if (this.speech && this.speech.speaking && !this.isPaused) {
-      this.logger.info('[TTSEngine] Settings changed during playback, pausing for user to resume');
+      this.logger.info(
+        "[TTSEngine] Settings changed during playback, pausing for user to resume",
+      );
       this.pause();
     }
   }
@@ -177,14 +194,20 @@ export class TTSEngine implements PlaybackController {
     };
   }
 
-  private applySettings(utterance: SpeechSynthesisUtterance, settings: TTSSettings): void {
+  private applySettings(
+    utterance: SpeechSynthesisUtterance,
+    settings: TTSSettings,
+  ): void {
     utterance.rate = Math.max(0.1, Math.min(10, settings.rate));
     utterance.pitch = Math.max(0, Math.min(2, settings.pitch));
     utterance.volume = Math.max(0, Math.min(1, settings.volume));
     utterance.lang = this.defaultLang;
   }
 
-  private async applyVoice(utterance: SpeechSynthesisUtterance, voiceName: string | null | undefined): Promise<void> {
+  private async applyVoice(
+    utterance: SpeechSynthesisUtterance,
+    voiceName: string | null | undefined,
+  ): Promise<void> {
     if (!voiceName) {
       return;
     }
@@ -195,14 +218,19 @@ export class TTSEngine implements PlaybackController {
       if (selectedVoice) {
         utterance.voice = selectedVoice;
       } else {
-        this.logger.warn(`TTSEngine: voice "${voiceName}" not found. Using default voice.`);
+        this.logger.warn(
+          `TTSEngine: voice "${voiceName}" not found. Using default voice.`,
+        );
       }
     } catch (error) {
-      this.logger.warn('TTSEngine: failed to fetch voices', error);
+      this.logger.warn("TTSEngine: failed to fetch voices", error);
     }
   }
 
-  private bindUtteranceEvents(utterance: SpeechSynthesisUtterance, hooks: PlaybackHooks): void {
+  private bindUtteranceEvents(
+    utterance: SpeechSynthesisUtterance,
+    hooks: PlaybackHooks,
+  ): void {
     this.bindUtteranceEventsWithOffset(utterance, hooks, 0);
   }
 
@@ -231,12 +259,14 @@ export class TTSEngine implements PlaybackController {
 
     utterance.onerror = (event: any) => {
       const error = new Error(
-        typeof event?.error === 'string' ? `Speech synthesis error: ${event.error}` : 'Unknown speech synthesis error',
+        typeof event?.error === "string"
+          ? `Speech synthesis error: ${event.error}`
+          : "Unknown speech synthesis error",
       );
       try {
         this.speech.cancel();
       } catch (cancelError) {
-        this.logger.warn('TTSEngine: cancel after error failed', cancelError);
+        this.logger.warn("TTSEngine: cancel after error failed", cancelError);
       }
       this.cleanup();
       hooks.onError(error);
@@ -251,7 +281,7 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onboundary = (event: any) => {
-      if (typeof event?.charIndex === 'number') {
+      if (typeof event?.charIndex === "number") {
         // Add offset for position tracking when resuming
         this.currentPosition = offset + event.charIndex;
         this.emitProgress(hooks);
@@ -260,7 +290,7 @@ export class TTSEngine implements PlaybackController {
   }
 
   private emitProgress(hooks: PlaybackHooks): void {
-    if (typeof hooks.onProgress !== 'function') {
+    if (typeof hooks.onProgress !== "function") {
       return;
     }
     hooks.onProgress(this.calculateProgress());
@@ -277,7 +307,7 @@ export class TTSEngine implements PlaybackController {
   private cleanup(): void {
     this.utterance = null;
     this.isPaused = false;
-    this.currentText = '';
+    this.currentText = "";
     this.currentPosition = 0;
     this.totalLength = 0;
     this.isResuming = false;
@@ -292,14 +322,14 @@ export class TTSEngine implements PlaybackController {
       }
 
       const listener = () => {
-        this.speech.removeEventListener?.('voiceschanged', listener as any);
+        this.speech.removeEventListener?.("voiceschanged", listener as any);
         resolve(this.speech.getVoices());
       };
 
-      this.speech.addEventListener?.('voiceschanged', listener as any);
+      this.speech.addEventListener?.("voiceschanged", listener as any);
 
       setTimeout(() => {
-        this.speech.removeEventListener?.('voiceschanged', listener as any);
+        this.speech.removeEventListener?.("voiceschanged", listener as any);
         resolve(this.speech.getVoices());
       }, 3000);
     });
