@@ -1,107 +1,185 @@
-# title: 全タブ一括キュー投入とドメイン除外柔軟化
+# title: 設定ウィンドウを閉じた際の読み上げ継続問題の修正
 
 ## 概要
-- ブラウザで開いているタブを一括で読み上げキューへ投入できるバックグラウンド処理とUI操作を追加し、将来のドメイン除外指定にも適用できる柔軟な構成を整える。
+- 設定ウィンドウ（options page）を閉じても、音声読み上げが途中で止まらずに継続される機能を実現する
 
 ### goal
-- 利用者がポップアップからワンクリックで現在のウィンドウ内タブを読み上げキューに登録し、不要なドメインを除外したうえで連続再生できる。
+- ユーザが設定画面を開いて設定を変更した後、ウィンドウを閉じても読み上げが中断されない
+- バックグラウンドで安定的に読み上げが実行される
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- 全タブ一括追加のコマンドとバックエンド処理を提供し、TabManager／UI が効率的に複数タブを扱えるようにする。
-- ドメイン除外ロジックをサービス化して、将来のテキストエリア経由での除外指定に備える。
+- Chrome (Manifest V3) でOffscreen Document APIを使用し、Service Worker停止時も読み上げを継続
+- Firefox (Manifest V2) でpersistent background scriptを有効化し、読み上げの継続性を確保
+- 両ブラウザでクロスブラウザ対応を維持しながら、安定した音声合成を実現
+
+## 問題の根本原因
+
+### Chrome (Manifest V3)
+- `src/manifest/manifest.chrome.json:16` で `"service_worker": "background.js"` として実装
+- Service Workerは非永続的で、アイドル状態になると数秒～数十秒で自動停止される
+- 設定ページを閉じるとService Workerがアイドル状態になり停止
+- `src/background/ttsEngine.ts:31` で `globalThis.speechSynthesis` を使用しているが、Service Workerコンテキストでは不安定
+- Service Workerが停止すると、進行中の音声合成も中断される
+
+### Firefox (Manifest V2)
+- `src/manifest/manifest.firefox.json:14` で `"persistent": false` として設定
+- Event Pageとして動作し、同様にアイドル時に停止する可能性がある
+- 設定ページを閉じるとバックグラウンドスクリプトが停止する可能性
 
 ## 実装仕様
-- `QueueCommandMessage` に `QUEUE_ADD_OPEN_TABS` を追加。payload: `{ scope, includePinned, position, autoStart, excludeDomains }`。
-- 背景側に `OpenTabsQueueService`（新規）を追加し、`chrome.tabs.query` で取得したタブから読み上げ可能なものだけを `QueueTabInput[]` に変換。
-- ドメイン除外の判定を `DomainIgnoreService`（新規、TabManagerと共有）で行い、永続設定＋一時オーバーライド両方に対応。
-- `TabManager` に `addTabsBulk` を追加し、バルク投入時の重複排除・位置決定・persist／emit の集約と `autoStart` 処理を行う。既存 `addTab` は内部で `addTabsBulk` を呼ぶようリファクタ。
-- `useTabQueue` に `addOpenTabs` 関数を追加し、ポップアップの新ボタンから `QUEUE_ADD_OPEN_TABS` を送信。
-- ポップアップ `ControlButtons` に「全タブをキューへ」ボタンを追加し、処理結果（追加／スキップ件数）をユーザーに通知。
-- 既存連続読み上げフロー（`processNext` と `handlePlaybackEnd`）を活用し動作検証する。
+
+### アプローチA: シンプル実装（採用）
+
+#### Firefox側の修正
+- `persistent: false` → `persistent: true` に変更
+- バックグラウンドスクリプトを永続化し、Web Speech APIが安定動作
+
+#### Chrome側の修正
+- Offscreen Document APIを実装
+- TTSEngineをOffscreen Document内で実行
+- Service Worker ↔ Offscreen Document間でメッセージング
+- Service Workerは制御とメッセージングのみを担当
 
 ## 生成AIの学習用コンテキスト
-### TypeScript
-- src/background/service.ts
-- src/background/tabManager.ts
-- src/background/openTabsQueue.ts (新規予定)
-- src/background/domainIgnoreService.ts (新規予定)
-- src/shared/messages.ts
-- src/shared/types/queue.ts
-- src/shared/utils/storage.ts
-- src/popup/hooks/useTabQueue.ts
-- src/popup/components/ControlButtons.tsx
-- src/popup/components/IgnoreListManager.tsx
-  - Optional: 除外ドメイン管理UIの現状把握
-- src/background/__tests__/backgroundService.test.ts
-- src/background/__tests__/tabManager.*.test.ts
-- src/popup/hooks/__tests__/useTabQueue.test.tsx
+
+### Manifest ファイル
+- `src/manifest/manifest.chrome.json`
+  - Service Worker設定と権限定義
+- `src/manifest/manifest.firefox.json`
+  - Background Script設定（persistent設定含む）
+
+### Background Scripts
+- `src/background/index.ts`
+  - バックグラウンドスクリプトのエントリーポイント
+- `src/background/service.ts`
+  - BackgroundOrchestrator クラス（メッセージング・制御ロジック）
+- `src/background/ttsEngine.ts`
+  - TTSEngine クラス（Web Speech API実装）
+
+### Build Configuration
+- `webpack.config.js`
+  - ブラウザ別ビルド設定
 
 ## Process
-### process1 コマンドとサービス抽象の追加
-#### sub1 Queueコマンド拡張とサービス層追加
-@target: src/shared/messages.ts
-@ref: src/background/service.ts
-- [ ] `QueueCommandMessage` に `QUEUE_ADD_OPEN_TABS` を追加し、型定義とバリデーションを更新
-  - Optional: 既存テスト (`src/shared/__tests__/types.test.ts`) を更新
-- [ ] `OpenTabsQueueService` を作成し、タブ収集・フィルタ・TabInfo変換を実装
-- [ ] `DomainIgnoreService` を作成し、永続ドメインとオーバーライドのマージ機能を提供
-- [ ] 型チェックとユニットテストを実行し、動作を検証する
 
-### process2 TabManagerのバルク投入対応
-#### sub1 addTabsBulkの実装
-@target: src/background/tabManager.ts
-@ref: src/background/tabManager.ts
-- [ ] `addTabsBulk` を追加し、既存 `addTab` を内部委譲するようリファクタ
-- [ ] 永続化と `emitStatus` をバッチ向けに最適化（呼び出し回数削減）
-- [ ] DomainIgnoreService の判定を利用して `isIgnored` を設定
-- [ ] 型チェックとユニットテストを実行し、動作を検証する
+### process1 Firefox永続化対応
+#### sub1 manifest.firefox.json の修正
+@target: `src/manifest/manifest.firefox.json`
+- [x] Line 14: `"persistent": false` → `"persistent": true` に変更
+  - バックグラウンドスクリプトを永続化し、設定ページを閉じても動作継続
 
-### process3 背景オーケストレーターの対応
-#### sub1 コマンド処理委譲
-@target: src/background/service.ts
-@ref: src/background/service.ts
-- [ ] `processCommand` に `QUEUE_ADD_OPEN_TABS` を追加し、OpenTabsQueueService へ委譲
-- [ ] 処理結果（追加数・除外数）を `QUEUE_COMMAND_RESULT` として返却
-- [ ] 型チェックとユニットテストを実行し、動作を検証する
+### process2 Chrome Offscreen Document実装
+#### sub1 Offscreen Document HTML/TypeScript作成
+@target: `src/background/offscreen/offscreen.html` (新規)
+@target: `src/background/offscreen/offscreen.ts` (新規)
+- [ ] `src/background/offscreen/` ディレクトリを作成
+- [ ] `offscreen.html` を作成
+  - 基本的なHTML構造
+  - offscreen.jsをロード
+- [ ] `offscreen.ts` を作成
+  - TTSEngineのインスタンス化
+  - Service Workerからのメッセージ受信
+  - 音声合成の実行
+  - 進捗状況のブロードキャスト
 
-### process4 Popup UI / Hook 拡張
-#### sub1 useTabQueueとUI更新
-@target: src/popup/hooks/useTabQueue.ts
-@ref: src/popup/components/ControlButtons.tsx
-- [ ] `addOpenTabs` メソッドを追加し、`QUEUE_ADD_OPEN_TABS` を送信
-- [ ] 結果のコマンドレスポンスを受けてトースト／メッセージ表示を実装
-- [ ] `ControlButtons` に「全タブキュー投入」トリガーを追加
-- [ ] 型チェックとユニットテストを実行し、動作を検証する
+#### sub2 Service Worker側のOffscreen管理実装
+@target: `src/background/index.ts`
+@target: `src/background/service.ts`
+@ref: `src/background/ttsEngine.ts`
+- [ ] BackgroundOrchestratorにOffscreen Document管理ロジックを追加
+  - Offscreen Document作成API呼び出し
+  - 既存のOffscreen Documentチェック
+  - ライフサイクル管理
+- [ ] TTSコマンドをOffscreen Documentに転送するメッセージングを実装
+  - start/pause/resume/stop コマンドの転送
+  - 設定更新の転送
+- [ ] Offscreen Document からの状態更新を受信して、Popupにブロードキャスト
+  - 進捗状況
+  - ステータス変更
+  - エラー通知
 
-### process5 ドメイン除外オーバーライド準備
-#### sub1 IgnoreListManager連携の検討
-@target: src/popup/components/IgnoreListManager.tsx
-@ref: src/popup/components/IgnoreListManager.tsx
-- [ ] 今回は変更不要だが、DomainIgnoreService のAPI公開内容を整理してコメントを追加
-- [ ] 型チェックとユニットテストを実行し、動作を検証する
+#### sub3 メッセージング型定義の拡張
+@target: `src/shared/messages.ts`
+- [ ] Offscreen Document用のメッセージ型を追加
+  - `OFFSCREEN_TTS_START`
+  - `OFFSCREEN_TTS_PAUSE`
+  - `OFFSCREEN_TTS_RESUME`
+  - `OFFSCREEN_TTS_STOP`
+  - `OFFSCREEN_TTS_UPDATE_SETTINGS`
+  - `OFFSCREEN_TTS_PROGRESS`
+  - `OFFSCREEN_TTS_STATUS`
+  - `OFFSCREEN_TTS_ERROR`
+
+#### sub4 Manifest更新
+@target: `src/manifest/manifest.chrome.json`
+- [ ] `"offscreen"` 権限を追加
+  - Line 10付近に `"offscreen"` を追加
+
+#### sub5 Webpack設定更新
+@target: `webpack.config.js`
+- [ ] offscreen.html のビルド設定を追加
+  - HtmlPluginでoffscreen.htmlを生成
+  - offscreen.tsをエントリーポイントに追加
+- [ ] Chrome用のtarget設定を調整
+  - background: 'webworker'
+  - offscreen: 'web'
+
+### process3 ブラウザ判定とアダプター拡張
+#### sub1 ブラウザアダプター拡張
+@target: `src/shared/utils/browser.ts`
+@ref: `src/background/service.ts`
+- [ ] Offscreen Document APIのラッパーを追加
+  - `createOffscreenDocument()`
+  - `closeOffscreenDocument()`
+  - `hasOffscreenDocument()`
+- [ ] Firefox用のフォールバック実装
+  - Firefoxの場合はOffscreen APIを使用しない
 
 ### process10 ユニットテスト
-- [ ] `OpenTabsQueueService` の単体テスト（タブフィルタ／除外判定／バルク出力）
-- [ ] `TabManager.addTabsBulk` のテストで persist／emit 呼び出し回数と `autoStart` を検証
-- [ ] 背景コマンド経路の結合テスト（`QUEUE_ADD_OPEN_TABS` → TabManager）
-- [ ] `useTabQueue` 新関数のフックテスト更新
+#### sub1 Offscreen Document のテスト
+@target: `src/background/offscreen/__tests__/offscreen.test.ts` (新規)
+- [ ] Offscreen Document内のTTSEngine動作テスト
+  - メッセージ受信テスト
+  - start/pause/resume/stop 動作テスト
+  - 設定更新テスト
+
+#### sub2 BackgroundOrchestrator Offscreen統合テスト
+@target: `src/background/__tests__/backgroundService.test.ts`
+- [ ] Offscreen Document作成・管理のテスト
+- [ ] Service Worker ↔ Offscreen メッセージング テスト
+- [ ] ブラウザ別分岐のテスト（Chrome/Firefox）
 
 ### process50 フォローアップ
-{{実装後に仕様変更などが発生した場合は、ここにProcessを追加する}}
+
+#### sub1 動作確認テスト
+- [ ] Chromeで拡張機能をロードし、以下を確認:
+  - 設定ページを開いて読み上げ開始
+  - 設定ページを閉じても読み上げ継続
+  - Service Workerが停止しても読み上げ継続（devtoolsで確認）
+- [ ] Firefoxで拡張機能をロードし、以下を確認:
+  - 設定ページを開いて読み上げ開始
+  - 設定ページを閉じても読み上げ継続
+  - バックグラウンドスクリプトが永続化されていることを確認
+
+#### sub2 既存機能の回帰テスト
+- [ ] 再生/一時停止/停止の動作確認
+- [ ] キューへのタブ追加・削除
+- [ ] スキップ機能（次/前）
+- [ ] 設定変更（速度・音量・ピッチ・音声選択）
 
 ### process100 リファクタリング
-- [ ] DomainIgnoreService 適用後に既存 `TabManager` 内 `ignoredDomains` プロパティの整理と旧ロジックの削除
+- [ ] コードレビューによる改善点の洗い出し
+- [ ] エラーハンドリングの強化
+- [ ] ログ出力の整理
 
 ### process200 ドキュメンテーション
-- [ ] README または `PLAN.md` に全タブ一括投入機能と利用方法を追記
-
-## 調査サマリ
-- 背景サービスは `BackgroundOrchestrator` がキュー操作コマンドを受け取り、実処理は `TabManager` が担っている（`src/background/service.ts:168`, `src/background/tabManager.ts:206`）。
-- `TabManager` は `ignoredDomains` を同期ストレージからロードしてURLごとに `isIgnored` フラグを設定している（`src/background/tabManager.ts:104`, `src/shared/utils/storage.ts:83`）。
-- 連続読み上げは `processNext` と `handlePlaybackEnd` で既に実現済み（`src/background/tabManager.ts:311`, `src/background/tabManager.ts:650`）。
-- 現状キュー追加は単一タブ想定の `addTab` のみであり、複数タブ追加には persist/emit の呼び出し最適化が必要。
-- UI 側には除外ドメイン管理コンポーネント (`IgnoreListManager`) があり、今後のテキストエリア入力に流用できる。今回の設計は DomainIgnoreService による判定抽象化で柔軟性を確保する。
-
+- [ ] `CLAUDE.md` の更新
+  - Offscreen Document実装に関する説明追加
+  - クロスブラウザ対応の詳細記述
+- [ ] `README.md` の更新
+  - 技術仕様セクションにOffscreen Document APIについて追記
+- [ ] コード内コメントの追加
+  - Offscreen Document関連ロジックの説明
