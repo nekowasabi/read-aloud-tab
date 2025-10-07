@@ -190,6 +190,91 @@
 - [ ] スキップ機能（次/前）
 - [ ] 設定変更（速度・音量・ピッチ・音声選択）
 
+### process51 Phase1 - Firefox既存実装のデバッグと検証
+
+#### sub1 問題の詳細調査
+- [ ] Firefoxで拡張機能をロード、デバッグコンソールを開く
+- [ ] `about:debugging` でバックグラウンドスクリプトのログを確認
+- [ ] 設定ウィンドウを開いて読み上げ開始、ログを観察
+- [ ] 設定ウィンドウを閉じた瞬間のログとイベントを記録
+- [ ] `persistent: true` が正しく機能しているか確認
+- [ ] TTSEngine の状態遷移を追跡
+
+#### sub2 根本原因の特定
+- [ ] バックグラウンドスクリプトが停止しているか確認
+- [ ] `speechSynthesis.speaking` の状態を確認
+- [ ] イベントリスナーの喪失の有無を確認
+- [ ] Storage APIの状態同期を確認
+
+#### sub3 修正の実施
+@target: `src/background/service.ts`, `src/background/ttsEngine.ts`, `src/manifest/manifest.firefox.json`
+- [ ] 問題に応じた修正を実施
+  - オプション1: TTSEngine のライフサイクル管理の見直し
+  - オプション2: イベントリスナーの再登録機構
+  - オプション3: Storage同期のタイミング調整
+- [ ] 修正後の動作確認（設定ウィンドウを閉じても継続するか）
+- [ ] ユニットテストの追加・更新
+- [ ] 型チェックとビルド確認
+
+### process52 Phase2 - ミニプレーヤー実装（Phase1で解決しない場合のみ）
+
+#### sub1 ミニプレーヤーUI作成
+@target: `src/miniplayer/` (新規ディレクトリ)
+- [ ] `src/miniplayer/` ディレクトリを作成
+- [ ] `index.html` を作成（300x120px の小ウィンドウ用UI）
+- [ ] `index.tsx` を作成（Reactコンポーネント）
+  - 再生/一時停止/停止ボタン
+  - 進捗バー
+  - 現在のタブタイトル表示
+  - 最小化ボタン
+- [ ] `styles.css` を作成（ミニマルなスタイル）
+
+#### sub2 ミニプレーヤー制御ロジック
+@target: `src/miniplayer/ttsController.ts` (新規)
+@target: `src/background/miniplayerManager.ts` (新規)
+- [ ] `ttsController.ts` を作成
+  - TTSEngineのラッパー
+  - Service Workerからのコマンド受信
+  - 状態のブロードキャスト
+- [ ] `miniplayerManager.ts` を作成
+  - `chrome.windows.create()` でウィンドウ作成
+  - ウィンドウのライフサイクル管理
+  - ウィンドウIDの追跡と再利用
+
+#### sub3 BackgroundOrchestrator統合
+@target: `src/background/service.ts`
+- [ ] ミニプレーヤーモード判定ロジックを追加
+- [ ] 読み上げ開始時にミニプレーヤーを自動起動
+- [ ] 停止時のウィンドウクローズオプション
+- [ ] ミニプレーヤー ↔ Service Worker メッセージング
+
+#### sub4 Manifest とビルド設定更新
+@target: `src/manifest/manifest.firefox.json`, `webpack.config.js`
+- [ ] manifest.json に miniplayer.html を追加
+- [ ] webpack.config.js にエントリーポイント追加
+  - `miniplayer: './src/miniplayer/index.tsx'`
+  - HtmlPlugin で miniplayer.html を生成
+- [ ] 型チェックとビルド確認
+
+#### sub5 設定UIの追加
+@target: `src/options/`
+- [ ] ミニプレーヤーモードのON/OFF設定を追加
+- [ ] ウィンドウサイズのカスタマイズ設定（オプション）
+- [ ] Storage APIで設定を永続化
+
+#### sub6 動作確認とテスト
+- [ ] Firefoxでミニプレーヤーが正しく表示されるか確認
+- [ ] ウィンドウを閉じずに最小化した状態で読み上げ継続を確認
+- [ ] ミニプレーヤーからの操作が正しく動作するか確認
+- [ ] ユニットテストの追加
+- [ ] 既存機能の回帰テスト
+
+### 実施順序
+1. **process51を実施** → Firefox既存実装のデバッグ
+2. process51で解決した場合 → process100（リファクタリング）へ
+3. process51で解決しない場合 → **process52を実施**
+4. process52完了後 → process100（リファクタリング）へ
+
 ### process100 リファクタリング
 - [ ] コードレビューによる改善点の洗い出し
 - [ ] エラーハンドリングの強化
