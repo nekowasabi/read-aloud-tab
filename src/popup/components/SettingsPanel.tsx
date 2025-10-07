@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { TTSSettings } from '../../shared/types';
 import IgnoreListManager from './IgnoreListManager';
 
@@ -8,9 +8,25 @@ interface Props {
   onClose: () => void;
 }
 
+// Debounce function to prevent rapid successive calls
+function debounce<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      func(...args);
+    }, delay);
+  };
+}
+
 export default function SettingsPanel({ settings, onChange, onClose }: Props) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [localSettings, setLocalSettings] = useState<TTSSettings>(settings);
+
+  // Create debounced onChange handler (300ms delay)
+  const debouncedOnChange = useMemo(() => debounce(onChange, 300), [onChange]);
 
   useEffect(() => {
     loadVoices();
@@ -34,8 +50,10 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
 
   const handleSettingChange = (key: keyof TTSSettings, value: number | string) => {
     const newSettings = { ...localSettings, [key]: value };
+    // Update local state immediately for instant UI feedback
     setLocalSettings(newSettings);
-    onChange(newSettings);
+    // Debounce actual onChange call to prevent race conditions
+    debouncedOnChange(newSettings);
   };
 
   const formatValue = (value: number, decimals: number = 1): string => {

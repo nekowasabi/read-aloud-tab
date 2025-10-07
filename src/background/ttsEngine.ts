@@ -155,7 +155,14 @@ export class TTSEngine implements PlaybackController {
     if (!this.currentSettings) {
       return;
     }
+
     this.currentSettings = settings;
+
+    // If currently speaking, pause to let user manually resume with new settings
+    if (this.speech && this.speech.speaking && !this.isPaused) {
+      this.logger.info('[TTSEngine] Settings changed during playback, pausing for user to resume');
+      this.pause();
+    }
   }
 
   getDebugInfo(): object {

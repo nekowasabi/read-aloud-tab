@@ -521,8 +521,12 @@ export class TabManager {
     const validated = StorageManager.validateSettings(merged);
     this.queue.settings = validated;
 
-    // Update TTSEngine's current settings if paused
-    if (this.queue.status === 'paused') {
+    // Update TTSEngine's current settings
+    // If reading, TTSEngine will pause, so update queue status to match
+    if (this.queue.status === 'reading') {
+      this.playback.updateSettings(validated);
+      this.queue.status = 'paused';
+    } else if (this.queue.status === 'paused') {
       this.playback.updateSettings(validated);
     }
 

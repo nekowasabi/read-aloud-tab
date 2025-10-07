@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { TTSSettings, QueueStatus } from '../../shared/types';
 import { StorageManager } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
@@ -16,6 +16,9 @@ const DEFAULT_SETTINGS: TTSSettings = {
   volume: 1.0,
   voice: null,
 };
+
+// Additional debounce for settings changes (insurance layer)
+const SETTINGS_DEBOUNCE_MS = 300;
 
 export default function App() {
   const {
@@ -37,6 +40,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Debounce timer for settings changes (insurance layer)
+  const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -165,12 +171,28 @@ export default function App() {
     async (newSettings: TTSSettings) => {
       try {
         const validated = StorageManager.validateSettings(newSettings);
+        // Update local state immediately for UI feedback
         setSettings(validated);
-        await StorageManager.saveSettings(validated);
-        await updateSettings(validated);
-      } catch (saveError) {
-        console.error('Failed to save settings:', saveError);
-        const message = saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
+
+        // Clear existing timer
+        if (settingsTimerRef.current) {
+          clearTimeout(settingsTimerRef.current);
+        }
+
+        // Debounce actual save and background update (insurance layer)
+        settingsTimerRef.current = setTimeout(async () => {
+          try {
+            await StorageManager.saveSettings(validated);
+            await updateSettings(validated);
+          } catch (saveError) {
+            console.error('Failed to save settings:', saveError);
+            const message = saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
+            setError(message);
+          }
+        }, SETTINGS_DEBOUNCE_MS);
+      } catch (validationError) {
+        console.error('Failed to validate settings:', validationError);
+        const message = validationError instanceof Error ? validationError.message : '設定の検証に失敗しました';
         setError(message);
       }
     },

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TTSSettings } from '../../shared/types';
 
 interface Props {
@@ -6,10 +6,26 @@ interface Props {
   onChange: (settings: TTSSettings) => void;
 }
 
+// Debounce function to prevent rapid successive calls
+function debounce<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      func(...args);
+    }, delay);
+  };
+}
+
 export default function QuickControls({ settings, onChange }: Props) {
+  // Create debounced onChange handler (300ms delay, same as SettingsPanel)
+  const debouncedOnChange = useMemo(() => debounce(onChange, 300), [onChange]);
+
   const handleSettingChange = (key: keyof TTSSettings, value: number) => {
     const newSettings = { ...settings, [key]: value };
-    onChange(newSettings);
+    debouncedOnChange(newSettings);
   };
 
   return (
