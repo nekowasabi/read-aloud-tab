@@ -73,6 +73,7 @@ async openOptionsPage(): Promise<void> {
   - OpenRouterモデル名入力（type="text"）
   - AI要約有効化チェックボックス
 - エクスポート/インポートにAI設定を含める
+  - セキュリティを考慮して、APIキーはエクスポートから除外
 
 ## 生成AIの学習用コンテキスト
 
