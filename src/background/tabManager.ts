@@ -420,10 +420,6 @@ export class TabManager {
 
     this.reloadingTabs.add(tabId);
 
-    if (index === this.queue.currentIndex && this.queue.status === 'reading') {
-      this.pause();
-    }
-
     const tab = this.queue.tabs[index];
     if (tab) {
       tab.content = undefined;

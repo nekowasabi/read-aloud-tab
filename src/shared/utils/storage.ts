@@ -101,11 +101,11 @@ export async function loadQueue(): Promise<ReadingQueue> {
     ]);
 
     // Handle schema migration
-    if (result[STORAGE_KEYS.SCHEMA_VERSION] === 1) {
+    if (result && result[STORAGE_KEYS.SCHEMA_VERSION] === 1) {
       return await migrateStorageSchema(result);
     }
 
-    if (result[STORAGE_KEYS.READING_QUEUE]) {
+    if (result && result[STORAGE_KEYS.READING_QUEUE]) {
       // Convert Date strings back to Date objects
       const queue = result[STORAGE_KEYS.READING_QUEUE] as ReadingQueue;
       queue.tabs = queue.tabs.map(tab => ({
