@@ -148,15 +148,58 @@ export class BrowserAdapter implements BrowserAPI {
   }
 
   // Feature Detection
-  static isFeatureSupported(feature: string): boolean {
+  static isFeatureSupported(feature: 'speechSynthesis' | 'storageSync' | 'offscreen' | string): boolean {
     switch (feature) {
       case 'speechSynthesis':
         return typeof speechSynthesis !== 'undefined';
       case 'storageSync':
         return (typeof chrome !== 'undefined' && !!chrome.storage?.sync) ||
                (typeof browser !== 'undefined' && !!browser.storage?.sync);
+      case 'offscreen':
+        return typeof chrome !== 'undefined' && !!chrome.offscreen;
       default:
         return false;
+    }
+  }
+
+  // Offscreen Document API (Chrome only)
+  static async createOffscreenDocument(url: string, reasons: chrome.offscreen.Reason[], justification: string): Promise<void> {
+    if (!this.isFeatureSupported('offscreen')) {
+      throw new Error('Offscreen API is not supported in this browser');
+    }
+
+    // @ts-ignore - chrome.offscreen is only available in Chrome
+    await chrome.offscreen.createDocument({
+      url,
+      reasons,
+      justification,
+    });
+  }
+
+  static async closeOffscreenDocument(): Promise<void> {
+    if (!this.isFeatureSupported('offscreen')) {
+      return; // No-op for browsers without offscreen API
+    }
+
+    // @ts-ignore - chrome.offscreen is only available in Chrome
+    await chrome.offscreen.closeDocument();
+  }
+
+  static async hasOffscreenDocument(): Promise<boolean> {
+    if (!this.isFeatureSupported('offscreen')) {
+      return false;
+    }
+
+    try {
+      // @ts-ignore - chrome.runtime.getContexts and OFFSCREEN_DOCUMENT are only available in Chrome MV3
+      const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT' as any],
+      });
+      // @ts-ignore
+      return existingContexts.length > 0;
+    } catch (error) {
+      console.error('Failed to check offscreen document', error);
+      return false;
     }
   }
 }

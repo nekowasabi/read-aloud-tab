@@ -7,6 +7,9 @@ import {
   QueueErrorPayload,
   QueueAddPayload,
   isQueueCommandMessage,
+  OffscreenCommandMessage,
+  OffscreenBroadcastMessage,
+  isOffscreenBroadcastMessage,
 } from '../shared/messages';
 import { TabManager, LoggerLike } from './tabManager';
 import { BrowserAdapter } from '../shared/utils/browser';
@@ -21,7 +24,7 @@ interface ChromeRuntimePort {
 interface ChromeRuntimeLike {
   onMessage: { addListener: (listener: RuntimeMessageListener) => void };
   onConnect: { addListener: (listener: (port: ChromeRuntimePort) => void) => void };
-  sendMessage: (message: QueueBroadcastMessage) => Promise<unknown> | void;
+  sendMessage: (message: QueueBroadcastMessage | OffscreenCommandMessage) => Promise<unknown> | void;
   lastError?: chrome.runtime.LastError | null;
 }
 
@@ -77,11 +80,42 @@ export class BackgroundOrchestrator {
     }
 
     await this.tabManager.initialize();
+    await this.setupOffscreenDocument();
     this.registerTabManagerListeners();
     this.registerRuntimeListeners();
     this.registerCommandListeners();
 
     this.initialized = true;
+  }
+
+  /**
+   * Setup Offscreen Document for Chrome Manifest V3
+   * Offscreen Document provides persistent context for Web Speech API
+   */
+  private async setupOffscreenDocument(): Promise<void> {
+    if (BrowserAdapter.getBrowserType() !== 'chrome' || !BrowserAdapter.isFeatureSupported('offscreen')) {
+      this.logger.info('[BackgroundOrchestrator] Offscreen API not available, skipping setup');
+      return;
+    }
+
+    try {
+      const hasOffscreen = await BrowserAdapter.hasOffscreenDocument();
+      if (hasOffscreen) {
+        this.logger.info('[BackgroundOrchestrator] Offscreen document already exists');
+        return;
+      }
+
+      await BrowserAdapter.createOffscreenDocument(
+        'offscreen.html',
+        ['AUDIO_PLAYBACK' as any],
+        'Text-to-speech audio playback'
+      );
+      this.logger.info('[BackgroundOrchestrator] Offscreen document created successfully');
+    } catch (error) {
+      this.logger.error('[BackgroundOrchestrator] Failed to setup offscreen document', error);
+      // Don't throw - allow initialization to continue without offscreen support
+      this.logger.warn('[BackgroundOrchestrator] Continuing without offscreen document support');
+    }
   }
 
   private registerTabManagerListeners(): void {
@@ -120,6 +154,17 @@ export class BackgroundOrchestrator {
           });
         return true as unknown as void;
       }
+    }
+
+    // Handle Offscreen Document broadcast messages
+    if (isOffscreenBroadcastMessage(message)) {
+      this.handleOffscreenBroadcast(message)
+        .then(() => sendResponse({ success: true }))
+        .catch((error: Error) => {
+          this.logger.error('BackgroundOrchestrator: offscreen broadcast handling failed', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true as unknown as void;
     }
 
     if (!isQueueCommandMessage(message)) {
@@ -183,7 +228,7 @@ export class BackgroundOrchestrator {
         await this.handleControlCommand(message.payload.action);
         return { success: true };
       case 'QUEUE_UPDATE_SETTINGS':
-        await this.tabManager.updateSettings(message.payload.settings);
+        await this.handleUpdateSettings(message.payload.settings);
         return { success: true };
       case 'REQUEST_QUEUE_STATE':
         return { success: true, payload: this.tabManager.getSnapshot() };
@@ -253,6 +298,13 @@ export class BackgroundOrchestrator {
   }
 
   private async handleControlCommand(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
+    // For Chrome with Offscreen API, delegate TTS control to offscreen document
+    if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+      await this.forwardToOffscreen(action);
+      return;
+    }
+
+    // For Firefox or Chrome without offscreen, use direct TTS control
     switch (action) {
       case 'start':
         await this.ensureActiveTabInQueue();
@@ -269,6 +321,101 @@ export class BackgroundOrchestrator {
         break;
       default:
         throw new Error(`Unsupported control action: ${action}`);
+    }
+  }
+
+  /**
+   * Forward TTS control commands to Offscreen Document
+   */
+  private async forwardToOffscreen(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
+    let message: OffscreenCommandMessage;
+
+    switch (action) {
+      case 'start': {
+        const snapshot = this.tabManager.getSnapshot();
+        const currentTab = snapshot.tabs[snapshot.currentIndex];
+        if (!currentTab) {
+          throw new Error('No tab available to start playback');
+        }
+        message = {
+          type: 'OFFSCREEN_TTS_START',
+          payload: {
+            tab: currentTab as any,
+            settings: snapshot.settings,
+          },
+        };
+        break;
+      }
+      case 'pause':
+        message = { type: 'OFFSCREEN_TTS_PAUSE' };
+        break;
+      case 'resume':
+        message = { type: 'OFFSCREEN_TTS_RESUME' };
+        break;
+      case 'stop':
+        message = { type: 'OFFSCREEN_TTS_STOP' };
+        break;
+      default:
+        throw new Error(`Unsupported offscreen action: ${action}`);
+    }
+
+    try {
+      await this.chrome.runtime.sendMessage(message);
+      this.logger.info(`[BackgroundOrchestrator] Forwarded ${action} command to offscreen`);
+    } catch (error) {
+      this.logger.error(`[BackgroundOrchestrator] Failed to forward ${action} to offscreen`, error);
+      // Don't throw - log error and continue
+    }
+  }
+
+  /**
+   * Handle settings update - forward to both TabManager and Offscreen Document
+   */
+  private async handleUpdateSettings(settings: any): Promise<void> {
+    // Update TabManager settings
+    await this.tabManager.updateSettings(settings);
+
+    // For Chrome with Offscreen API, also forward to offscreen document
+    if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+      const message: OffscreenCommandMessage = {
+        type: 'OFFSCREEN_TTS_UPDATE_SETTINGS',
+        payload: { settings },
+      };
+
+      try {
+        await this.chrome.runtime.sendMessage(message);
+        this.logger.info('[BackgroundOrchestrator] Forwarded settings update to offscreen');
+      } catch (error) {
+        this.logger.error('[BackgroundOrchestrator] Failed to forward settings to offscreen', error);
+        // Don't throw - log error and continue
+      }
+    }
+  }
+
+  /**
+   * Handle broadcast messages from Offscreen Document
+   */
+  private async handleOffscreenBroadcast(message: OffscreenBroadcastMessage): Promise<void> {
+    this.logger.info('[BackgroundOrchestrator] Received offscreen broadcast', message.type);
+
+    switch (message.type) {
+      case 'OFFSCREEN_TTS_STATUS':
+        // Map offscreen status to queue status and broadcast
+        const status = message.payload.status;
+        // Broadcast to popup/options pages
+        break;
+      case 'OFFSCREEN_TTS_PROGRESS':
+        // Forward progress updates
+        break;
+      case 'OFFSCREEN_TTS_ERROR':
+        this.logger.error('[BackgroundOrchestrator] Offscreen TTS error', message.payload);
+        break;
+      case 'OFFSCREEN_TTS_END':
+        // Handle playback end - move to next tab
+        await this.tabManager.skipTab('next');
+        break;
+      default:
+        this.logger.warn('[BackgroundOrchestrator] Unknown offscreen message type', message);
     }
   }
 

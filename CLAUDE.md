@@ -49,9 +49,15 @@ npm run typecheck
 src/
 ├── background/           # Service Worker (Chrome) / Background Script (Firefox)
 │   ├── index.ts         # メインバックグラウンドスクリプト
+│   ├── service.ts       # BackgroundOrchestrator（メッセージング統合）
 │   ├── tabManager.ts    # タブ管理ロジック
 │   ├── ttsEngine.ts     # 音声合成エンジン
-│   └── summarizer.ts    # OpenRouter API連携
+│   ├── summarizer.ts    # OpenRouter API連携
+│   ├── offscreen/       # Offscreen Document (Chrome Manifest V3)
+│   │   ├── offscreen.html    # Offscreen Document HTML
+│   │   ├── offscreen.ts      # Offscreen TTS Controller
+│   │   └── __tests__/        # Offscreenテスト (13テスト)
+│   └── __tests__/       # Backgroundテスト (offscreenIntegration含む16テスト)
 ├── content/             # Content Scripts
 │   ├── index.ts         # コンテンツ抽出メイン
 │   ├── extractor.ts     # テキスト抽出ロジック
@@ -67,10 +73,13 @@ src/
 │   ├── types.ts         # TypeScript型定義
 │   ├── constants.ts     # 定数定義
 │   ├── storage.ts       # Storage API ラッパー
-│   └── messages.ts      # メッセージ通信ユーティリティ
+│   ├── messages.ts      # メッセージ通信ユーティリティ（Offscreen対応）
+│   └── utils/
+│       ├── browser.ts   # BrowserAdapter（クロスブラウザAPI抽象化）
+│       └── __tests__/   # BrowserAdapterテスト (28テスト)
 └── manifest/            # マニフェストファイル
-    ├── manifest.chrome.json  # Chrome用 Manifest V3
-    └── manifest.firefox.json # Firefox用 WebExtensions
+    ├── manifest.chrome.json  # Chrome用 Manifest V3 (offscreen権限含む)
+    └── manifest.firefox.json # Firefox用 WebExtensions (persistent: true)
 ```
 
 ## 主要機能の実装アーキテクチャ
@@ -128,20 +137,94 @@ class SummaryService {
 
 ### 3. クロスブラウザ対応
 
-**抽象化レイヤーの実装**:
+**Chrome Manifest V3でのService Worker制約への対応**:
+
+Chrome Manifest V3ではService Workerが非永続的で、アイドル時に自動停止されます。Web Speech APIはService Workerコンテキストでは不安定なため、**Offscreen Document API**を使用して音声合成を実行します。
+
+#### Chrome: Offscreen Document アーキテクチャ
 
 ```typescript
-// Browser API抽象化
-class BrowserAdapter {
-  static tabs: TabsAPI;
-  static storage: StorageAPI;
-  static runtime: RuntimeAPI;
+// Service Worker (src/background/service.ts)
+// - Offscreen Documentの作成・管理
+// - コマンドのフォワーディング
+// - 状態のブロードキャスト
 
-  static init() {
-    const isChrome = typeof chrome !== 'undefined';
-    const isFirefox = typeof browser !== 'undefined';
-    // APIの差異を吸収
+// Offscreen Document (src/background/offscreen/offscreen.ts)
+// - TTSEngineの実行コンテキスト
+// - Web Speech APIの実行
+// - 進捗状況の送信
+
+class OffscreenTTSController {
+  private ttsEngine: TTSEngine;
+
+  initialize() {
+    // Service Workerからのメッセージを受信
+    chrome.runtime.onMessage.addListener(async (message) => {
+      switch (message.type) {
+        case 'OFFSCREEN_TTS_START':
+          await this.handleStart(message.payload);
+          break;
+        case 'OFFSCREEN_TTS_PAUSE':
+          this.handlePause();
+          break;
+        // ...
+      }
+    });
   }
+}
+```
+
+#### Firefox: Persistent Background Script
+
+Firefoxでは`"persistent": true`を設定し、バックグラウンドスクリプトを永続化することで、Web Speech APIを安定して実行できます。
+
+```json
+// manifest.firefox.json
+{
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true  // 永続化
+  }
+}
+```
+
+#### BrowserAdapter実装
+
+```typescript
+// src/shared/utils/browser.ts
+class BrowserAdapter {
+  // ブラウザ判定
+  static getBrowserType(): 'chrome' | 'firefox' | 'unknown' {
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      return 'chrome';
+    } else if (typeof browser !== 'undefined' && browser.runtime) {
+      return 'firefox';
+    }
+    return 'unknown';
+  }
+
+  // 機能サポート判定
+  static isFeatureSupported(feature: 'offscreen' | 'speechSynthesis' | 'storageSync'): boolean {
+    switch (feature) {
+      case 'offscreen':
+        return typeof chrome !== 'undefined' && !!chrome.offscreen;
+      case 'speechSynthesis':
+        return typeof speechSynthesis !== 'undefined';
+      case 'storageSync':
+        return !!chrome?.storage?.sync || !!browser?.storage?.sync;
+    }
+  }
+
+  // Offscreen Document API (Chrome専用)
+  static async createOffscreenDocument(
+    url: string,
+    reasons: chrome.offscreen.Reason[],
+    justification: string
+  ): Promise<void>;
+
+  static async closeOffscreenDocument(): Promise<void>;
+
+  static async hasOffscreenDocument(): Promise<boolean>;
 }
 ```
 

@@ -84,6 +84,8 @@
   - Service Workerからのメッセージ受信
   - 音声合成の実行
   - 進捗状況のブロードキャスト
+- [ ] 型チェックを実行
+- [ ] npm run build:firefox を実行してビルド確認
 
 #### sub2 Service Worker側のOffscreen管理実装
 @target: `src/background/index.ts`
@@ -100,6 +102,8 @@
   - 進捗状況
   - ステータス変更
   - エラー通知
+- [ ] 型チェックを実行
+- [ ] npm run build:firefox を実行してビルド確認
 
 #### sub3 メッセージング型定義の拡張
 @target: `src/shared/messages.ts`
@@ -126,31 +130,47 @@
 - [ ] Chrome用のtarget設定を調整
   - background: 'webworker'
   - offscreen: 'web'
+- [ ] 型チェックを実行
+- [ ] npm run build:firefox を実行してビルド確認
 
 ### process3 ブラウザ判定とアダプター拡張
 #### sub1 ブラウザアダプター拡張
 @target: `src/shared/utils/browser.ts`
 @ref: `src/background/service.ts`
-- [ ] Offscreen Document APIのラッパーを追加
+- [x] Offscreen Document APIのラッパーを追加
   - `createOffscreenDocument()`
   - `closeOffscreenDocument()`
   - `hasOffscreenDocument()`
-- [ ] Firefox用のフォールバック実装
+- [x] Firefox用のフォールバック実装
   - Firefoxの場合はOffscreen APIを使用しない
+- [x] 型チェックを実行
+- [x] npm run build:firefox を実行してビルド確認
+- [x] ユニットテストを追加（`src/shared/utils/__tests__/browser.test.ts`）
+  - 28個のテストケースが全て成功
 
 ### process10 ユニットテスト
 #### sub1 Offscreen Document のテスト
 @target: `src/background/offscreen/__tests__/offscreen.test.ts` (新規)
-- [ ] Offscreen Document内のTTSEngine動作テスト
-  - メッセージ受信テスト
+- [x] Offscreen Document内のTTSEngine動作テスト
+  - メッセージ受信テスト (OFFSCREEN_TTS_START, PAUSE, RESUME, STOP, UPDATE_SETTINGS)
   - start/pause/resume/stop 動作テスト
   - 設定更新テスト
+  - エラーハンドリングテスト（無効なメッセージ、ペイロード欠如、TTS起動失敗）
+  - 連続コマンドテスト
+- [x] 型チェックを実行
+- [x] npm run build:chrome を実行してビルド確認
+- [x] npm run build:firefox を実行してビルド確認
 
 #### sub2 BackgroundOrchestrator Offscreen統合テスト
-@target: `src/background/__tests__/backgroundService.test.ts`
-- [ ] Offscreen Document作成・管理のテスト
-- [ ] Service Worker ↔ Offscreen メッセージング テスト
-- [ ] ブラウザ別分岐のテスト（Chrome/Firefox）
+@target: `src/background/__tests__/offscreenIntegration.test.ts`
+- [x] Offscreen Document作成・管理のテスト
+- [x] Service Worker ↔ Offscreen メッセージング テスト
+- [x] ブラウザ別分岐のテスト（Chrome/Firefox）
+- [x] エラーハンドリング（Offscreen作成失敗、sendMessage失敗、API非サポート）
+- [x] 設定更新のフォワーディングテスト
+- [x] 型チェックを実行
+- [x] npm run build:chrome を実行してビルド確認
+- [x] npm run build:firefox を実行してビルド確認
 
 ### process50 フォローアップ
 

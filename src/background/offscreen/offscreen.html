@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Read Aloud Tab - Offscreen Document</title>
+</head>
+<body>
+  <!--
+    Offscreen Document for Chrome Manifest V3
+
+    This hidden document provides a persistent context for Web Speech API,
+    allowing TTS to continue even when the Service Worker is inactive.
+  -->
+  <div id="offscreen-status" style="display: none;">
+    Offscreen Document Active
+  </div>
+  <script src="offscreen.js"></script>
+</body>
+</html>

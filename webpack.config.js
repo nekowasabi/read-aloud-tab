@@ -6,15 +6,22 @@ module.exports = (env, argv) => {
   const browser = env.browser || 'chrome';
   const isDev = argv.mode === 'development';
 
+  const entries = {
+    background: './src/background/index.ts',
+    content: './src/content/index.ts',
+    popup: './src/popup/index.tsx',
+    options: './src/options/index.tsx',
+  };
+
+  // Add offscreen entry only for Chrome
+  if (browser === 'chrome') {
+    entries.offscreen = './src/background/offscreen/offscreen.ts';
+  }
+
   return {
     mode: argv.mode || 'development',
     devtool: isDev ? 'inline-source-map' : false,
-    entry: {
-      background: './src/background/index.ts',
-      content: './src/content/index.ts',
-      popup: './src/popup/index.tsx',
-      options: './src/options/index.tsx',
-    },
+    entry: entries,
     output: {
       path: path.resolve(__dirname, `dist/${browser}`),
       filename: '[name].js',
@@ -63,8 +70,19 @@ module.exports = (env, argv) => {
         filename: 'options.html',
         chunks: ['options'],
       }),
+      // Add offscreen HTML only for Chrome
+      ...(browser === 'chrome'
+        ? [
+            new HtmlPlugin({
+              template: 'src/background/offscreen/offscreen.html',
+              filename: 'offscreen.html',
+              chunks: ['offscreen'],
+            }),
+          ]
+        : []),
     ],
     // Service Workerのためのtarget設定
+    // Note: offscreen document uses 'web' target, not 'webworker'
     target: browser === 'chrome' ? 'webworker' : 'web',
   };
 };

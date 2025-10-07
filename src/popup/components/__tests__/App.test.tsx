@@ -53,9 +53,18 @@ jest.mock('../../hooks/useTabQueue', () => ({
 describe('App integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (chrome.tabs.query as jest.Mock).mockResolvedValue([
-      { id: 99, url: 'https://active.com', title: 'Active Tab' },
-    ]);
+
+    // Mock chrome.tabs.query (callback-based API)
+    (chrome.tabs.query as jest.Mock).mockImplementation((queryInfo, callback) => {
+      callback([{ id: 99, url: 'https://active.com', title: 'Active Tab' }]);
+    });
+
+    // Mock chrome.storage.sync.get (callback-based API)
+    (chrome.storage.sync.get as jest.Mock).mockImplementation((keys, callback) => {
+      callback({
+        tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      });
+    });
   });
 
   test('アクティブタブをキューに追加する', async () => {
@@ -83,8 +92,8 @@ describe('App integration', () => {
   test('再生コントロールが control を呼び出す', async () => {
     render(<App />);
 
-    const startButton = await screen.findByRole('button', { name: /読み上げ開始/ });
-    fireEvent.click(startButton);
+    const playButton = await screen.findByRole('button', { name: /再生/ });
+    fireEvent.click(playButton);
 
     expect(mockControl).toHaveBeenCalledWith('start');
   });

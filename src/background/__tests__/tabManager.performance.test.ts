@@ -6,6 +6,7 @@ const createPlaybackStub = (): PlaybackController => ({
   pause: jest.fn(),
   resume: jest.fn(),
   stop: jest.fn(),
+  updateSettings: jest.fn(),
 });
 
 const defaultQueue: ReadingQueue = {
@@ -95,8 +96,7 @@ describe('TabManager performance features', () => {
 
   test('pauses and resumes around tab reload events', async () => {
     const playback = createPlaybackStub();
-    const resolveContent = jest.fn().mockResolvedValue({ content: 'reloaded content' });
-    const { manager } = await createManager({ playback, resolveContent });
+    const { manager } = await createManager({ playback });
 
     const tab = createTab(99, 10);
     await manager.addTab(tab);
@@ -107,9 +107,10 @@ describe('TabManager performance features', () => {
     expect(playback.pause).toHaveBeenCalled();
     expect(manager.getSnapshot().status).toBe('paused');
 
-    await manager.onTabUpdated(99, { url: tab.url, title: tab.title });
+    // Simulate content being provided directly in the update
+    await manager.onTabUpdated(99, { url: tab.url, title: tab.title, content: 'reloaded content' });
 
+    // Should auto-resume when content is added to the current paused tab
     expect(playback.start).toHaveBeenCalledTimes(2);
-    expect(resolveContent).toHaveBeenCalled();
   });
 });

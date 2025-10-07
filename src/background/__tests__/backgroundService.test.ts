@@ -1,5 +1,14 @@
 import { QueueCommandMessage, QueueStatusPayload } from '../../shared/messages';
 
+// Mock BrowserAdapter to disable Offscreen API
+jest.mock('../../shared/utils/browser', () => ({
+  BrowserAdapter: {
+    getInstance: jest.fn(),
+    getBrowserType: jest.fn().mockReturnValue('chrome'),
+    isFeatureSupported: jest.fn().mockReturnValue(false), // Disable offscreen API
+  },
+}));
+
 describe('BackgroundOrchestrator', () => {
   const createTabManagerStub = () => {
     const listeners: Record<string, Function> = {};
@@ -57,6 +66,7 @@ describe('BackgroundOrchestrator', () => {
       },
       tabs: {
         sendMessage: jest.fn().mockResolvedValue(undefined),
+        query: jest.fn().mockResolvedValue([]),
       },
       commands: {
         onCommand: {
@@ -196,11 +206,21 @@ describe('BackgroundOrchestrator', () => {
 
   test('キーボードショートカットコマンドを処理する', async () => {
     const { stub } = createTabManagerStub();
+    stub.getSnapshot.mockReturnValue({
+      status: 'idle',
+      currentIndex: 0,
+      totalCount: 1,
+      activeTabId: null,
+      tabs: [{ tabId: 1, url: 'https://example.com', title: 'Test', content: 'test content', isIgnored: false }],
+      settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      updatedAt: Date.now(),
+    });
     const { chromeLike, triggerCommand } = createChromeLike();
     const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike });
     await orchestrator.initialize();
 
     triggerCommand('read-aloud-start');
+    await new Promise(resolve => setTimeout(resolve, 10)); // Wait for async command
     expect(stub.processNext).toHaveBeenCalled();
 
     triggerCommand('read-aloud-stop');
