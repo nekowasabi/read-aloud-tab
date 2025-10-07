@@ -74,6 +74,24 @@ export class BrowserAdapter implements BrowserAPI {
           }
         });
       },
+
+      remove: async (keys: string | string[]): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.sync.remove(keys, () => {
+              if (chrome.runtime.lastError) {
+                reject(chrome.runtime.lastError);
+              } else {
+                resolve();
+              }
+            });
+          } else if (typeof browser !== 'undefined' && browser.storage) {
+            browser.storage.sync.remove(keys).then(resolve).catch(reject);
+          } else {
+            resolve();
+          }
+        });
+      },
     },
   };
 

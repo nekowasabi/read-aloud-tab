@@ -1,4 +1,5 @@
 import { TTSSettings, STORAGE_KEYS, ReadingQueue, TabInfo } from '../types';
+import { BrowserAdapter } from './browser';
 
 export class StorageManager {
   private static readonly DEFAULT_SETTINGS: TTSSettings = {
@@ -24,7 +25,8 @@ export class StorageManager {
 
   static async getSettings(): Promise<TTSSettings> {
     try {
-      const result = await chrome.storage.sync.get(STORAGE_KEYS.TTS_SETTINGS);
+      const browserAPI = BrowserAdapter.getInstance();
+      const result = await browserAPI.storage.sync.get(STORAGE_KEYS.TTS_SETTINGS);
       return result[STORAGE_KEYS.TTS_SETTINGS] || this.DEFAULT_SETTINGS;
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -34,7 +36,8 @@ export class StorageManager {
 
   static async saveSettings(settings: TTSSettings): Promise<void> {
     try {
-      await chrome.storage.sync.set({ [STORAGE_KEYS.TTS_SETTINGS]: settings });
+      const browserAPI = BrowserAdapter.getInstance();
+      await browserAPI.storage.sync.set({ [STORAGE_KEYS.TTS_SETTINGS]: settings });
     } catch (error) {
       console.error('Failed to save settings:', error);
       throw error;
@@ -43,7 +46,8 @@ export class StorageManager {
 
   static async clearSettings(): Promise<void> {
     try {
-      await chrome.storage.sync.remove(STORAGE_KEYS.TTS_SETTINGS);
+      const browserAPI = BrowserAdapter.getInstance();
+      await browserAPI.storage.sync.remove(STORAGE_KEYS.TTS_SETTINGS);
     } catch (error) {
       console.error('Failed to clear settings:', error);
       throw error;
@@ -139,7 +143,8 @@ export async function clearQueue(): Promise<void> {
  */
 export async function getIgnoredDomains(): Promise<string[]> {
   try {
-    const result = await chrome.storage.sync.get([STORAGE_KEYS.IGNORED_DOMAINS]);
+    const browserAPI = BrowserAdapter.getInstance();
+    const result = await browserAPI.storage.sync.get([STORAGE_KEYS.IGNORED_DOMAINS]);
     return result[STORAGE_KEYS.IGNORED_DOMAINS] || [];
   } catch (error) {
     console.error('Failed to get ignored domains:', error);
@@ -158,14 +163,16 @@ export async function addIgnoredDomain(domain: string): Promise<void> {
     const normalizedDomain = domain.toLowerCase().trim();
     const currentDomains = await getIgnoredDomains();
 
+    const browserAPI = BrowserAdapter.getInstance();
+
     if (!currentDomains.includes(normalizedDomain)) {
       currentDomains.push(normalizedDomain);
-      await chrome.storage.sync.set({
+      await browserAPI.storage.sync.set({
         [STORAGE_KEYS.IGNORED_DOMAINS]: currentDomains,
       });
     } else {
       // Domain already exists, save anyway to ensure consistency
-      await chrome.storage.sync.set({
+      await browserAPI.storage.sync.set({
         [STORAGE_KEYS.IGNORED_DOMAINS]: currentDomains,
       });
     }
@@ -186,7 +193,8 @@ export async function removeIgnoredDomain(domain: string): Promise<void> {
     const currentDomains = await getIgnoredDomains();
     const filteredDomains = currentDomains.filter(d => d !== normalizedDomain);
 
-    await chrome.storage.sync.set({
+    const browserAPI = BrowserAdapter.getInstance();
+    await browserAPI.storage.sync.set({
       [STORAGE_KEYS.IGNORED_DOMAINS]: filteredDomains,
     });
   } catch (error) {

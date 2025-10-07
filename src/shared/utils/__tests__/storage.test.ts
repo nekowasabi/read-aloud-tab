@@ -3,6 +3,25 @@
  * TDD RED Phase: These tests will fail until storage methods are implemented
  */
 
+import { ReadingQueue, TabInfo } from '../../types';
+
+// Mock BrowserAdapter first
+const mockBrowserStorage = {
+  sync: {
+    get: jest.fn(),
+    set: jest.fn(),
+    remove: jest.fn(),
+  },
+};
+
+jest.mock('../browser', () => ({
+  BrowserAdapter: {
+    getInstance: jest.fn(() => ({
+      storage: mockBrowserStorage,
+    })),
+  },
+}));
+
 import {
   saveQueue,
   loadQueue,
@@ -12,16 +31,9 @@ import {
   getIgnoredDomains,
   migrateStorageSchema,
 } from '../storage';
-import { ReadingQueue, TabInfo } from '../../types';
+import { BrowserAdapter } from '../browser';
 
-// Mock chrome.storage for testing
-const mockSyncStorage = {
-  get: jest.fn(),
-  set: jest.fn(),
-  remove: jest.fn(),
-  clear: jest.fn(),
-};
-
+// Mock chrome.storage for local storage (not using BrowserAdapter yet)
 const mockLocalStorage = {
   get: jest.fn(),
   set: jest.fn(),
@@ -34,11 +46,12 @@ global.chrome = {
   // @ts-ignore
   storage: {
     // @ts-ignore
-    sync: mockSyncStorage,
-    // @ts-ignore
     local: mockLocalStorage,
   },
 };
+
+// Helper to get mocked BrowserAdapter storage
+const getMockBrowserStorage = () => mockBrowserStorage;
 
 describe('Storage Utilities - Queue Management', () => {
   beforeEach(() => {
@@ -199,18 +212,20 @@ describe('Storage Utilities - Ignored Domains', () => {
 
   describe('getIgnoredDomains', () => {
     it('should return list of ignored domains', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: ['example.com', 'test.org'],
       });
 
       const domains = await getIgnoredDomains();
 
-      expect(mockSyncStorage.get).toHaveBeenCalledWith(['ignoredDomains']);
+      expect(mockStorage.sync.get).toHaveBeenCalledWith(['ignoredDomains']);
       expect(domains).toEqual(['example.com', 'test.org']);
     });
 
     it('should return empty array when no domains are ignored', async () => {
-      mockSyncStorage.get.mockResolvedValue({});
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({});
 
       const domains = await getIgnoredDomains();
 
@@ -220,40 +235,43 @@ describe('Storage Utilities - Ignored Domains', () => {
 
   describe('addIgnoredDomain', () => {
     it('should add domain to ignored list', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: ['existing.com'],
       });
-      mockSyncStorage.set.mockResolvedValue(undefined);
+      mockStorage.sync.set.mockResolvedValue(undefined);
 
       await addIgnoredDomain('newdomain.com');
 
-      expect(mockSyncStorage.set).toHaveBeenCalledWith({
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
         ignoredDomains: ['existing.com', 'newdomain.com'],
       });
     });
 
     it('should not add duplicate domains', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: ['existing.com'],
       });
-      mockSyncStorage.set.mockResolvedValue(undefined);
+      mockStorage.sync.set.mockResolvedValue(undefined);
 
       await addIgnoredDomain('existing.com');
 
-      expect(mockSyncStorage.set).toHaveBeenCalledWith({
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
         ignoredDomains: ['existing.com'],
       });
     });
 
     it('should normalize domain names', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: [],
       });
-      mockSyncStorage.set.mockResolvedValue(undefined);
+      mockStorage.sync.set.mockResolvedValue(undefined);
 
       await addIgnoredDomain('EXAMPLE.COM');
 
-      expect(mockSyncStorage.set).toHaveBeenCalledWith({
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
         ignoredDomains: ['example.com'],
       });
     });
@@ -261,27 +279,29 @@ describe('Storage Utilities - Ignored Domains', () => {
 
   describe('removeIgnoredDomain', () => {
     it('should remove domain from ignored list', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: ['keep.com', 'remove.com', 'also-keep.org'],
       });
-      mockSyncStorage.set.mockResolvedValue(undefined);
+      mockStorage.sync.set.mockResolvedValue(undefined);
 
       await removeIgnoredDomain('remove.com');
 
-      expect(mockSyncStorage.set).toHaveBeenCalledWith({
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
         ignoredDomains: ['keep.com', 'also-keep.org'],
       });
     });
 
     it('should handle removing non-existent domain', async () => {
-      mockSyncStorage.get.mockResolvedValue({
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({
         ignoredDomains: ['keep.com'],
       });
-      mockSyncStorage.set.mockResolvedValue(undefined);
+      mockStorage.sync.set.mockResolvedValue(undefined);
 
       await removeIgnoredDomain('notfound.com');
 
-      expect(mockSyncStorage.set).toHaveBeenCalledWith({
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
         ignoredDomains: ['keep.com'],
       });
     });

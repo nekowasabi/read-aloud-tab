@@ -521,15 +521,9 @@ export class BackgroundOrchestrator {
   }
 
   private broadcast(message: QueueBroadcastMessage): void {
-    try {
-      const sendResult = this.chrome.runtime.sendMessage(message);
-      if (sendResult instanceof Promise) {
-        sendResult.catch((error) => this.logger.debug('BackgroundOrchestrator: runtime sendMessage failed', error));
-      }
-    } catch (error) {
-      this.logger.debug('BackgroundOrchestrator: runtime sendMessage threw', error);
-    }
-
+    // Port通信のみを使用（接続されたクライアントにのみ配信）
+    // runtime.sendMessageはbackground script自身への送信となり、
+    // 受信側が存在しないためFirefoxでエラーログが発生する問題を回避
     for (const port of this.ports) {
       try {
         port.postMessage(message);

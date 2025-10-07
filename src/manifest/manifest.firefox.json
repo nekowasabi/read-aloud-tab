@@ -3,6 +3,11 @@
   "name": "Read Aloud Tab",
   "version": "1.0.0",
   "description": "Read web page content aloud using text-to-speech",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "read-aloud-tab@example.com"
+    }
+  },
   "permissions": [
     "tabs",
     "activeTab",
