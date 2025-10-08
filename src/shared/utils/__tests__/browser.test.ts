@@ -347,4 +347,63 @@ describe('BrowserAdapter', () => {
       expect(instance.commands.onCommand).toBeDefined();
     });
   });
+
+  describe('openOptionsPage()', () => {
+    let originalChrome: any;
+    let originalBrowser: any;
+
+    beforeEach(() => {
+      originalChrome = (global as any).chrome;
+      originalBrowser = (global as any).browser;
+    });
+
+    afterEach(() => {
+      (global as any).chrome = originalChrome;
+      (global as any).browser = originalBrowser;
+    });
+
+    it('should call chrome.runtime.openOptionsPage for Chrome', async () => {
+      const mockOpenOptionsPage = jest.fn((callback?: () => void) => {
+        if (callback) callback();
+      });
+      (global as any).chrome = {
+        runtime: {
+          openOptionsPage: mockOpenOptionsPage,
+          getManifest: jest.fn(),
+        },
+      };
+      (global as any).browser = undefined;
+
+      const instance = BrowserAdapter.getInstance();
+      await instance.runtime.openOptionsPage();
+
+      expect(mockOpenOptionsPage).toHaveBeenCalled();
+    });
+
+    it('should call browser.runtime.openOptionsPage for Firefox', async () => {
+      const mockOpenOptionsPage = jest.fn().mockResolvedValue(undefined);
+      (global as any).chrome = undefined;
+      (global as any).browser = {
+        runtime: {
+          openOptionsPage: mockOpenOptionsPage,
+        },
+      };
+
+      const instance = BrowserAdapter.getInstance();
+      await instance.runtime.openOptionsPage();
+
+      expect(mockOpenOptionsPage).toHaveBeenCalled();
+    });
+
+    it('should throw error when browser API is not available', async () => {
+      (global as any).chrome = undefined;
+      (global as any).browser = undefined;
+
+      const instance = BrowserAdapter.getInstance();
+
+      await expect(instance.runtime.openOptionsPage()).rejects.toThrow(
+        'Browser API not available'
+      );
+    });
+  });
 });

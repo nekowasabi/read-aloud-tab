@@ -1,4 +1,4 @@
-import { TTSSettings, STORAGE_KEYS, ReadingQueue, TabInfo } from '../types';
+import { TTSSettings, STORAGE_KEYS, ReadingQueue, TabInfo, AiSettings } from '../types';
 import { BrowserAdapter } from './browser';
 
 export class StorageManager {
@@ -19,6 +19,12 @@ export class StorageManager {
       volume: 1.0,
       voice: null,
     },
+  };
+
+  private static readonly DEFAULT_AI_SETTINGS: AiSettings = {
+    openRouterApiKey: '',
+    openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+    enableAiSummary: false,
   };
 
   private static readonly CURRENT_SCHEMA_VERSION = 2;
@@ -66,6 +72,36 @@ export class StorageManager {
 
   private static clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
+  }
+
+  // AI Settings methods
+  static async getAiSettings(): Promise<AiSettings> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      const result = await browserAPI.storage.sync.get([STORAGE_KEYS.AI_SETTINGS]);
+      return result[STORAGE_KEYS.AI_SETTINGS] || this.DEFAULT_AI_SETTINGS;
+    } catch (error) {
+      console.error('Failed to load AI settings:', error);
+      return this.DEFAULT_AI_SETTINGS;
+    }
+  }
+
+  static async saveAiSettings(settings: AiSettings): Promise<void> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      await browserAPI.storage.sync.set({ [STORAGE_KEYS.AI_SETTINGS]: settings });
+    } catch (error) {
+      console.error('Failed to save AI settings:', error);
+      throw error;
+    }
+  }
+
+  static validateAiSettings(settings: Partial<AiSettings>): AiSettings {
+    return {
+      openRouterApiKey: (settings.openRouterApiKey || this.DEFAULT_AI_SETTINGS.openRouterApiKey).trim(),
+      openRouterModel: settings.openRouterModel || this.DEFAULT_AI_SETTINGS.openRouterModel,
+      enableAiSummary: settings.enableAiSummary ?? this.DEFAULT_AI_SETTINGS.enableAiSummary,
+    };
   }
 }
 

@@ -6,12 +6,14 @@ const mockAddTab = jest.fn();
 const mockRemoveTab = jest.fn();
 const mockReorderTabs = jest.fn();
 const mockControl = jest.fn();
+const mockOpenOptionsPage = jest.fn();
 
 beforeEach(() => {
   mockAddTab.mockResolvedValue(undefined);
   mockRemoveTab.mockResolvedValue(undefined);
   mockReorderTabs.mockResolvedValue(undefined);
   mockControl.mockResolvedValue(undefined);
+  mockOpenOptionsPage.mockResolvedValue(undefined);
 });
 
 jest.mock('../../hooks/useTabQueue', () => ({
@@ -50,9 +52,36 @@ jest.mock('../../hooks/useTabQueue', () => ({
   }),
 }));
 
+const mockBrowserQuery = jest.fn();
+const mockBrowserGetStorage = jest.fn();
+
+jest.mock('../../../shared/utils/browser', () => ({
+  BrowserAdapter: {
+    getInstance: jest.fn(() => ({
+      tabs: {
+        query: mockBrowserQuery,
+      },
+      storage: {
+        sync: {
+          get: mockBrowserGetStorage,
+        },
+      },
+      runtime: {
+        openOptionsPage: mockOpenOptionsPage,
+      },
+    })),
+  },
+}));
+
 describe('App integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Mock BrowserAdapter methods
+    mockBrowserQuery.mockResolvedValue([{ id: 99, url: 'https://active.com', title: 'Active Tab' }]);
+    mockBrowserGetStorage.mockResolvedValue({
+      tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+    });
 
     // Mock chrome.tabs.query (callback-based API)
     (chrome.tabs.query as jest.Mock).mockImplementation((queryInfo, callback) => {
@@ -96,5 +125,14 @@ describe('App integration', () => {
     fireEvent.click(playButton);
 
     expect(mockControl).toHaveBeenCalledWith('start');
+  });
+
+  test('歯車ボタンをクリックすると openOptionsPage が呼ばれる', async () => {
+    render(<App />);
+
+    const settingsButton = await screen.findByTitle('設定');
+    fireEvent.click(settingsButton);
+
+    expect(mockOpenOptionsPage).toHaveBeenCalled();
   });
 });

@@ -141,6 +141,24 @@ export class BrowserAdapter implements BrowserAPI {
         }
       },
     },
+
+    openOptionsPage: async (): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
+          chrome.runtime.openOptionsPage(() => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+            } else {
+              resolve();
+            }
+          });
+        } else if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.openOptionsPage) {
+          browser.runtime.openOptionsPage().then(resolve).catch(reject);
+        } else {
+          reject(new Error('Browser API not available'));
+        }
+      });
+    },
   };
 
   commands = {

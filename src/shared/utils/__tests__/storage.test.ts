@@ -3,7 +3,7 @@
  * TDD RED Phase: These tests will fail until storage methods are implemented
  */
 
-import { ReadingQueue, TabInfo } from '../../types';
+import { ReadingQueue, TabInfo, AiSettings } from '../../types';
 
 // Mock BrowserAdapter first
 const mockBrowserStorage = {
@@ -30,6 +30,7 @@ import {
   removeIgnoredDomain,
   getIgnoredDomains,
   migrateStorageSchema,
+  StorageManager,
 } from '../storage';
 import { BrowserAdapter } from '../browser';
 
@@ -380,6 +381,129 @@ describe('Storage Migration', () => {
       const result = await migrateStorageSchema(v2Data);
 
       expect(result).toEqual(v2Data.readingQueue);
+    });
+  });
+});
+
+describe('StorageManager - AI Settings', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('getAiSettings', () => {
+    it('should return AI settings from storage', async () => {
+      const mockStorage = getMockBrowserStorage();
+      const mockAiSettings: AiSettings = {
+        openRouterApiKey: 'test-api-key',
+        openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+        enableAiSummary: true,
+      };
+
+      mockStorage.sync.get.mockResolvedValue({
+        ai_settings: mockAiSettings,
+      });
+
+      const result = await StorageManager.getAiSettings();
+
+      expect(mockStorage.sync.get).toHaveBeenCalledWith(['ai_settings']);
+      expect(result).toEqual(mockAiSettings);
+    });
+
+    it('should return default AI settings when no data exists', async () => {
+      const mockStorage = getMockBrowserStorage();
+      mockStorage.sync.get.mockResolvedValue({});
+
+      const result = await StorageManager.getAiSettings();
+
+      expect(result).toEqual({
+        openRouterApiKey: '',
+        openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+        enableAiSummary: false,
+      });
+    });
+  });
+
+  describe('saveAiSettings', () => {
+    it('should save AI settings to storage', async () => {
+      const mockStorage = getMockBrowserStorage();
+      const aiSettings: AiSettings = {
+        openRouterApiKey: 'new-api-key',
+        openRouterModel: 'gpt-4',
+        enableAiSummary: true,
+      };
+
+      mockStorage.sync.set.mockResolvedValue(undefined);
+
+      await StorageManager.saveAiSettings(aiSettings);
+
+      expect(mockStorage.sync.set).toHaveBeenCalledWith({
+        ai_settings: aiSettings,
+      });
+    });
+
+    it('should handle storage errors gracefully', async () => {
+      const mockStorage = getMockBrowserStorage();
+      const aiSettings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+      };
+
+      mockStorage.sync.set.mockRejectedValue(new Error('Storage error'));
+
+      await expect(StorageManager.saveAiSettings(aiSettings)).rejects.toThrow(
+        'Storage error'
+      );
+    });
+  });
+
+  describe('validateAiSettings', () => {
+    it('should return valid settings as-is', () => {
+      const validSettings: AiSettings = {
+        openRouterApiKey: 'valid-key',
+        openRouterModel: 'valid-model',
+        enableAiSummary: true,
+      };
+
+      const result = StorageManager.validateAiSettings(validSettings);
+
+      expect(result).toEqual(validSettings);
+    });
+
+    it('should apply default values for missing fields', () => {
+      const partialSettings: Partial<AiSettings> = {
+        enableAiSummary: true,
+      };
+
+      const result = StorageManager.validateAiSettings(partialSettings);
+
+      expect(result).toEqual({
+        openRouterApiKey: '',
+        openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+        enableAiSummary: true,
+      });
+    });
+
+    it('should handle empty object', () => {
+      const result = StorageManager.validateAiSettings({});
+
+      expect(result).toEqual({
+        openRouterApiKey: '',
+        openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+        enableAiSummary: false,
+      });
+    });
+
+    it('should trim API key', () => {
+      const settingsWithWhitespace: AiSettings = {
+        openRouterApiKey: '  test-key  ',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+      };
+
+      const result = StorageManager.validateAiSettings(settingsWithWhitespace);
+
+      expect(result.openRouterApiKey).toBe('test-key');
     });
   });
 });

@@ -110,7 +110,7 @@ describe('BackgroundOrchestrator', () => {
 
   test('初期化時にTabManagerへ初期化要求とリスナー登録を行う', async () => {
     const { stub, listeners } = createTabManagerStub();
-    const { chromeLike } = createChromeLike();
+    const { chromeLike, connectPort } = createChromeLike();
 
     const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike });
     await orchestrator.initialize();
@@ -119,9 +119,13 @@ describe('BackgroundOrchestrator', () => {
     expect(stub.addStatusListener).toHaveBeenCalled();
     expect(stub.addCommandListener).toHaveBeenCalled();
 
+    // Port接続
+    const port = connectPort();
+
     const statusListener = listeners.status;
     expect(typeof statusListener).toBe('function');
 
+    // ステータス更新をトリガー
     statusListener({
       status: 'reading',
       currentIndex: 0,
@@ -132,7 +136,8 @@ describe('BackgroundOrchestrator', () => {
       updatedAt: Date.now(),
     });
 
-    expect(chromeLike.runtime.sendMessage).toHaveBeenCalledWith({
+    // Port経由でメッセージが送信されることを検証
+    expect(port.postMessage).toHaveBeenCalledWith({
       type: 'QUEUE_STATUS_UPDATE',
       payload: expect.objectContaining({ status: 'reading' }),
     });

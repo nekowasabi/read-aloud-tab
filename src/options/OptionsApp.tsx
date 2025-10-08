@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import IgnoreListManager from '../popup/components/IgnoreListManager';
 import { StorageManager } from '../shared/utils/storage';
 import { getIgnoredDomains } from '../shared/utils/storage';
-import { STORAGE_KEYS, TTSSettings } from '../shared/types';
+import { STORAGE_KEYS, TTSSettings, AiSettings } from '../shared/types';
 
 interface ExportPayload {
   version: number;
   settings: TTSSettings;
   ignoredDomains: string[];
+  aiSettings?: AiSettings;
 }
 
 const DEFAULT_SETTINGS: TTSSettings = {
@@ -17,9 +18,16 @@ const DEFAULT_SETTINGS: TTSSettings = {
   voice: null,
 };
 
+const DEFAULT_AI_SETTINGS: AiSettings = {
+  openRouterApiKey: '',
+  openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+  enableAiSummary: false,
+};
+
 export default function OptionsApp() {
   const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
   const [ignoredDomains, setIgnoredDomains] = useState<string[]>([]);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [exportData, setExportData] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -29,12 +37,14 @@ export default function OptionsApp() {
 
   const loadInitialData = async () => {
     try {
-      const [loadedSettings, domains] = await Promise.all([
+      const [loadedSettings, domains, loadedAiSettings] = await Promise.all([
         StorageManager.getSettings(),
         getIgnoredDomains(),
+        StorageManager.getAiSettings(),
       ]);
       setSettings(loadedSettings);
       setIgnoredDomains(domains);
+      setAiSettings(loadedAiSettings);
     } catch (error) {
       console.error('OptionsApp: failed to load data', error);
       setMessage('設定の読み込みに失敗しました');
@@ -58,12 +68,33 @@ export default function OptionsApp() {
     }
   };
 
+  const handleAiSettingChange = async (key: keyof AiSettings, value: string | boolean) => {
+    const updated: AiSettings = {
+      ...aiSettings,
+      [key]: value,
+    };
+
+    setAiSettings(updated);
+
+    try {
+      await StorageManager.saveAiSettings(updated);
+      setMessage('AI設定を保存しました');
+    } catch (error) {
+      console.error('OptionsApp: failed to save AI settings', error);
+      setMessage('AI設定の保存に失敗しました');
+    }
+  };
+
   const handleExport = async () => {
     try {
       const payload: ExportPayload = {
         version: 2,
         settings,
         ignoredDomains,
+        aiSettings: {
+          ...aiSettings,
+          openRouterApiKey: '', // セキュリティのためAPIキーは除外
+        },
       };
       setExportData(JSON.stringify(payload));
       setMessage('エクスポートデータを生成しました');
@@ -82,6 +113,11 @@ export default function OptionsApp() {
 
       await StorageManager.saveSettings(parsed.settings);
       await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
+
+      if (parsed.aiSettings) {
+        await StorageManager.saveAiSettings(parsed.aiSettings);
+        setAiSettings(parsed.aiSettings);
+      }
 
       setSettings(parsed.settings);
       setIgnoredDomains(parsed.ignoredDomains);
@@ -162,6 +198,44 @@ export default function OptionsApp() {
       <section className="options-section">
         <h2>無視リスト</h2>
         <IgnoreListManager onChange={handleIgnoreListChange} />
+      </section>
+
+      <section className="options-section">
+        <h2>AI 要約設定</h2>
+        <div className="setting-item">
+          <label htmlFor="enableAiSummary">
+            <input
+              id="enableAiSummary"
+              type="checkbox"
+              checked={aiSettings.enableAiSummary}
+              onChange={(event) => handleAiSettingChange('enableAiSummary', event.target.checked)}
+              aria-label="AI要約を有効化"
+            />
+            AI要約を有効化
+          </label>
+        </div>
+        <div className="setting-item">
+          <label htmlFor="openRouterApiKey">OpenRouter APIキー</label>
+          <input
+            id="openRouterApiKey"
+            type="password"
+            value={aiSettings.openRouterApiKey}
+            onChange={(event) => handleAiSettingChange('openRouterApiKey', event.target.value)}
+            placeholder="sk-or-..."
+            aria-label="OpenRouter APIキー"
+          />
+        </div>
+        <div className="setting-item">
+          <label htmlFor="openRouterModel">OpenRouterモデル名</label>
+          <input
+            id="openRouterModel"
+            type="text"
+            value={aiSettings.openRouterModel}
+            onChange={(event) => handleAiSettingChange('openRouterModel', event.target.value)}
+            placeholder="meta-llama/llama-3.2-1b-instruct"
+            aria-label="OpenRouterモデル名"
+          />
+        </div>
       </section>
 
       <section className="options-section">

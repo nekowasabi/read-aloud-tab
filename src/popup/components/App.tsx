@@ -4,7 +4,6 @@ import { StorageManager } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
 import QuickControls from './QuickControls';
-import SettingsPanel from './SettingsPanel';
 import StatusDisplay from './StatusDisplay';
 import TabQueueList from './TabQueueList';
 import useTabQueue from '../hooks/useTabQueue';
@@ -37,7 +36,6 @@ export default function App() {
 
   const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
   const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -240,7 +238,12 @@ export default function App() {
         <h1>Read Aloud Tab</h1>
         <button
           className="settings-toggle"
-          onClick={() => setShowSettings(!showSettings)}
+          onClick={() => {
+            BrowserAdapter.getInstance().runtime.openOptionsPage().catch((err) => {
+              console.error('Failed to open options page:', err);
+              setError('設定画面を開けませんでした');
+            });
+          }}
           title="設定"
         >
           ⚙️
@@ -305,14 +308,6 @@ export default function App() {
           });
         }}
       />
-
-      {showSettings && (
-        <SettingsPanel
-          settings={settings}
-          onChange={handleSettingsChange}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
 
       <footer className="footer">
         <small>Version 1.0.0</small>

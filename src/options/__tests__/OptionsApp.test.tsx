@@ -7,6 +7,8 @@ jest.mock('../../shared/utils/storage', () => ({
   StorageManager: {
     getSettings: jest.fn(),
     saveSettings: jest.fn(),
+    getAiSettings: jest.fn(),
+    saveAiSettings: jest.fn(),
   },
   getIgnoredDomains: jest.fn(),
 }));
@@ -18,6 +20,11 @@ describe('OptionsApp', () => {
     jest.clearAllMocks();
     (chrome.storage.sync.get as jest.Mock).mockResolvedValue({});
     (chrome.storage.sync.set as jest.Mock).mockResolvedValue(undefined);
+    storage.StorageManager.getAiSettings.mockResolvedValue({
+      openRouterApiKey: '',
+      openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+      enableAiSummary: false,
+    });
   });
 
   test('初期表示で設定値と無視リストをロードしてフォームに反映する', async () => {
@@ -69,6 +76,98 @@ describe('OptionsApp', () => {
     await waitFor(() => {
       expect(storage.StorageManager.saveSettings).toHaveBeenCalledWith({ rate: 1.5, pitch: 1.2, volume: 0.6, voice: 'Import Voice' });
       expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [STORAGE_KEYS.IGNORED_DOMAINS]: ['imported.com'] });
+    });
+  });
+
+  test('AI設定UIがレンダリングされる', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+    storage.StorageManager.getAiSettings.mockResolvedValue({
+      openRouterApiKey: 'test-key',
+      openRouterModel: 'test-model',
+      enableAiSummary: true,
+    });
+
+    render(<OptionsApp />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI要約を有効化')).toBeInTheDocument();
+      expect(screen.getByLabelText('OpenRouter APIキー')).toBeInTheDocument();
+      expect(screen.getByLabelText('OpenRouterモデル名')).toBeInTheDocument();
+    });
+  });
+
+  test('AI設定を変更すると保存される', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+    storage.StorageManager.saveAiSettings.mockResolvedValue(undefined);
+
+    render(<OptionsApp />);
+
+    const enableCheckbox = await screen.findByLabelText('AI要約を有効化');
+    fireEvent.click(enableCheckbox);
+
+    await waitFor(() => {
+      expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ enableAiSummary: true })
+      );
+    });
+  });
+
+  test('エクスポートにAI設定が含まれる（APIキーは除外）', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+    storage.StorageManager.getAiSettings.mockResolvedValue({
+      openRouterApiKey: 'secret-key',
+      openRouterModel: 'test-model',
+      enableAiSummary: true,
+    });
+
+    render(<OptionsApp />);
+
+    const exportButton = await screen.findByRole('button', { name: 'エクスポート' });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      const textarea = screen.getByLabelText('エクスポートデータ') as HTMLTextAreaElement;
+      const parsed = JSON.parse(textarea.value);
+      expect(parsed.aiSettings).toBeDefined();
+      expect(parsed.aiSettings.openRouterApiKey).toBe(''); // APIキーは除外
+      expect(parsed.aiSettings.openRouterModel).toBe('test-model');
+      expect(parsed.aiSettings.enableAiSummary).toBe(true);
+    });
+  });
+
+  test('インポートでAI設定が復元される', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+
+    render(<OptionsApp />);
+
+    const textarea = await screen.findByLabelText('エクスポートデータ');
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify({
+          version: 2,
+          settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+          ignoredDomains: [],
+          aiSettings: {
+            openRouterApiKey: '',
+            openRouterModel: 'imported-model',
+            enableAiSummary: true,
+          },
+        }),
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'インポート' }));
+
+    await waitFor(() => {
+      expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith({
+        openRouterApiKey: '',
+        openRouterModel: 'imported-model',
+        enableAiSummary: true,
+      });
     });
   });
 });
