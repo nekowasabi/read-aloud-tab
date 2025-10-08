@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { TTSSettings, QueueStatus } from '../../shared/types';
-import { StorageManager } from '../../shared/utils/storage';
+import { StorageManager, getIgnoredDomains } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
 import QuickControls from './QuickControls';
@@ -155,6 +155,75 @@ export default function App() {
     }
   }, [activeTab, addTab]);
 
+  const handleAddAllTabs = useCallback(async () => {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      const tabs = await browserAPI.tabs.query({ currentWindow: true });
+
+      // Get ignored domains
+      const ignoredDomains = await getIgnoredDomains();
+      const ignoredSet = new Set(ignoredDomains.map(d => d.toLowerCase()));
+
+      // Filter out invalid tabs (chrome://, chrome-extension://, about:) and ignored domains
+      const validTabs = tabs.filter((tab) => {
+        if (!tab.id || !tab.url) return false;
+
+        // Filter invalid URLs
+        if (
+          tab.url.startsWith('chrome://') ||
+          tab.url.startsWith('chrome-extension://') ||
+          tab.url.startsWith('about:')
+        ) {
+          return false;
+        }
+
+        // Filter ignored domains
+        try {
+          const url = new URL(tab.url);
+          const hostname = url.hostname.toLowerCase();
+          if (ignoredSet.has(hostname)) {
+            return false;
+          }
+        } catch (error) {
+          console.error('Failed to parse URL:', tab.url, error);
+          return false;
+        }
+
+        return true;
+      });
+
+      if (validTabs.length === 0) {
+        setError('追加できるタブがありません');
+        return;
+      }
+
+      let successCount = 0;
+      for (const tab of validTabs) {
+        try {
+          await addTab({
+            tabId: tab.id!,
+            url: tab.url!,
+            title: tab.title || tab.url!,
+          });
+          successCount++;
+        } catch (tabError) {
+          console.error('Failed to add tab:', tab.id, tabError);
+        }
+      }
+
+      if (successCount > 0) {
+        setError(`${successCount}個のタブをキューに追加しました`);
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError('タブの追加に失敗しました');
+      }
+    } catch (commandError) {
+      console.error('Failed to add all tabs:', commandError);
+      const message = commandError instanceof Error ? commandError.message : 'すべてのタブの追加に失敗しました';
+      setError(message);
+    }
+  }, [addTab]);
+
   const handleRemoveTab = useCallback(
     async (tabId: number) => {
       try {
@@ -291,6 +360,13 @@ export default function App() {
           disabled={!activeTab}
         >
           キューに追加
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleAddAllTabs}
+        >
+          すべてのタブを追加
         </button>
       </div>
 

@@ -141,4 +141,80 @@ describe('App integration', () => {
 
     expect(mockOpenOptionsPage).toHaveBeenCalled();
   });
+
+  test('すべてのタブをキューに追加する', async () => {
+    // Mock multiple tabs
+    mockBrowserQuery.mockResolvedValue([
+      { id: 1, url: 'https://example1.com', title: 'Tab 1' },
+      { id: 2, url: 'https://example2.com', title: 'Tab 2' },
+      { id: 3, url: 'chrome://extensions', title: 'Extensions' }, // Should be filtered out
+      { id: 4, url: 'about:blank', title: 'Blank' }, // Should be filtered out
+    ]);
+
+    render(<App />);
+
+    const addAllButton = await screen.findByRole('button', { name: /すべてのタブを追加/ });
+    fireEvent.click(addAllButton);
+
+    // Wait for async operations
+    await screen.findByText(/2個のタブをキューに追加しました/);
+
+    // Should only add valid tabs (chrome:// and about: are filtered)
+    expect(mockAddTab).toHaveBeenCalledTimes(2);
+    expect(mockAddTab).toHaveBeenCalledWith({
+      tabId: 1,
+      url: 'https://example1.com',
+      title: 'Tab 1',
+    });
+    expect(mockAddTab).toHaveBeenCalledWith({
+      tabId: 2,
+      url: 'https://example2.com',
+      title: 'Tab 2',
+    });
+  });
+
+  test('無視リストのドメインを除外してすべてのタブを追加する', async () => {
+    // Mock ignored domains
+    mockBrowserGetStorage.mockResolvedValue({
+      ignoredDomains: ['docs.google.com', 'example2.com'],
+      tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+    });
+
+    // Mock multiple tabs including ignored domains
+    mockBrowserQuery.mockResolvedValue([
+      { id: 1, url: 'https://example1.com', title: 'Tab 1' },
+      { id: 2, url: 'https://docs.google.com/document/1', title: 'Google Doc' }, // Should be filtered out
+      { id: 3, url: 'https://example2.com', title: 'Tab 2' }, // Should be filtered out
+      { id: 4, url: 'https://example3.com', title: 'Tab 3' },
+    ]);
+
+    render(<App />);
+
+    const addAllButton = await screen.findByRole('button', { name: /すべてのタブを追加/ });
+    fireEvent.click(addAllButton);
+
+    // Wait for async operations
+    await screen.findByText(/2個のタブをキューに追加しました/);
+
+    // Should only add tabs not in ignored list
+    expect(mockAddTab).toHaveBeenCalledTimes(2);
+    expect(mockAddTab).toHaveBeenCalledWith({
+      tabId: 1,
+      url: 'https://example1.com',
+      title: 'Tab 1',
+    });
+    expect(mockAddTab).toHaveBeenCalledWith({
+      tabId: 4,
+      url: 'https://example3.com',
+      title: 'Tab 3',
+    });
+
+    // Should NOT add ignored domains
+    expect(mockAddTab).not.toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://docs.google.com/document/1' })
+    );
+    expect(mockAddTab).not.toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example2.com' })
+    );
+  });
 });

@@ -25,6 +25,21 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+// Listen for storage changes to refresh ignored domains (Chrome/Firefox)
+const handleStorageChange = (changes: any, areaName: string) => {
+  if (areaName === 'sync' && changes.ignoredDomains) {
+    tabManager.refreshIgnoredDomains().catch((error) => {
+      console.warn('Failed to refresh ignored domains on change', error);
+    });
+  }
+};
+
+if (typeof chrome !== 'undefined' && chrome.storage) {
+  chrome.storage.onChanged.addListener(handleStorageChange);
+} else if (typeof browser !== 'undefined' && browser.storage) {
+  browser.storage.onChanged.addListener(handleStorageChange);
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabManager.onTabClosed(tabId).catch((error) => {
     console.warn('Failed to handle tab removal', error);
