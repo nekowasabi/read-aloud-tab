@@ -25,6 +25,7 @@ export class StorageManager {
     openRouterApiKey: '',
     openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
     enableAiSummary: false,
+    enableAiTranslation: false,
   };
 
   private static readonly CURRENT_SCHEMA_VERSION = 2;
@@ -101,6 +102,7 @@ export class StorageManager {
       openRouterApiKey: (settings.openRouterApiKey || this.DEFAULT_AI_SETTINGS.openRouterApiKey).trim(),
       openRouterModel: settings.openRouterModel || this.DEFAULT_AI_SETTINGS.openRouterModel,
       enableAiSummary: settings.enableAiSummary ?? this.DEFAULT_AI_SETTINGS.enableAiSummary,
+      enableAiTranslation: settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
     };
   }
 }

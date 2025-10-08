@@ -22,6 +22,7 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
   openRouterApiKey: '',
   openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
   enableAiSummary: false,
+  enableAiTranslation: false,
 };
 
 export default function OptionsApp() {
@@ -212,6 +213,18 @@ export default function OptionsApp() {
               aria-label="AI要約を有効化"
             />
             AI要約を有効化
+          </label>
+        </div>
+        <div className="setting-item">
+          <label htmlFor="enableAiTranslation">
+            <input
+              id="enableAiTranslation"
+              type="checkbox"
+              checked={aiSettings.enableAiTranslation}
+              onChange={(event) => handleAiSettingChange('enableAiTranslation', event.target.checked)}
+              aria-label="AI翻訳を有効化"
+            />
+            AI翻訳を有効化
           </label>
         </div>
         <div className="setting-item">

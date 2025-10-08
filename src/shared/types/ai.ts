@@ -8,4 +8,6 @@ export interface AiSettings {
   openRouterModel: string;
   /** AI要約機能の有効化フラグ */
   enableAiSummary: boolean;
+  /** AI翻訳機能の有効化フラグ */
+  enableAiTranslation: boolean;
 }
