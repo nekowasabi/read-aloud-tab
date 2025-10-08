@@ -1,208 +1,235 @@
-# title: 設定画面を別タブで開く機能とAI要約設定の追加
+# title: OpenRouter API 接続機能の実装
 
 ## 概要
-- ポップアップの歯車ボタンをクリックすると、別タブで設定画面が開くようになる
-- 設定画面にAI要約機能の設定項目（OpenRouter APIトークン、モデル名、要約有効化フラグ）を追加する
+- 設定画面でOpenRouter APIキーを入力し、接続テストを実行できる機能を実装
+- ユニットテストで実際の疎通確認を行い、API統合の基盤を構築
 
 ### goal
-- ユーザーが歯車ボタンをクリックして、広い設定画面で各種設定を管理できる
-- ユーザーがOpenRouter APIを使用したAI要約機能を有効化・設定できる
+- ユーザがOpenRouter APIキーを設定画面で入力し、「接続テスト」ボタンで疎通確認できる
+- テスト結果（成功/失敗）が明確に表示され、エラー時には具体的なメッセージが表示される
+- 今後のAI要約・翻訳機能の基盤となるAPIクライアントが整備される
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- ポップアップの歯車ボタンから別タブで設定画面を開けるようにする
-- AI要約機能の設定（APIトークン、モデル名、要約有効化）を保存・管理できるようにする
-- セキュリティを考慮したAPIキーの保存方法を実装する
+- OpenRouter API との安全な通信を実現するクライアントライブラリを実装
+- 設定画面でAPIキーの接続テストをユーザが実行できるUIを提供
+- モック・実APIの両方を網羅したユニットテストで品質を保証
+- Phase 3（AI要約機能）の実装に向けた基盤を整備
 
 ## 実装仕様
 
-### 追加する型定義
-```typescript
-// src/shared/types/ai.ts (新規ファイル)
-export interface AiSettings {
-  openRouterApiKey: string;
-  openRouterModel: string;
-  enableAiSummary: boolean;
-}
-```
+### OpenRouter APIクライアント仕様
+- **エンドポイント**: `https://openrouter.ai/api/v1/chat/completions`
+- **認証**: `Authorization: Bearer ${apiKey}` ヘッダー
+- **リクエスト形式**: JSON (Content-Type: application/json)
+- **機能**:
+  1. 接続テスト: 最小限のリクエストで認証・疎通を確認
+  2. テキスト要約: コンテンツを要約するリクエスト送信
+  3. エラーハンドリング: 401 (認証), 429 (レート制限), ネットワークエラーの処理
 
-### ストレージキーの追加
-```typescript
-export const STORAGE_KEYS = {
-  // ... 既存
-  AI_SETTINGS: 'ai_settings',
-} as const;
-```
+### 設定画面UI仕様
+- 既存のAI設定セクションに「接続テスト」ボタンを追加
+- テスト実行中: ローディングインジケータ表示、ボタン無効化
+- テスト成功: 成功メッセージを表示（緑色）
+- テスト失敗: エラーメッセージを表示（赤色）、具体的な原因を含む
+- APIキー未入力時: バリデーションエラーを表示
 
-### StorageManager の拡張
-```typescript
-class StorageManager {
-  private static readonly DEFAULT_AI_SETTINGS: AiSettings = {
-    openRouterApiKey: '',
-    openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
-    enableAiSummary: false,
-  };
-
-  static async getAiSettings(): Promise<AiSettings>
-  static async saveAiSettings(settings: AiSettings): Promise<void>
-  static validateAiSettings(settings: Partial<AiSettings>): AiSettings
-}
-```
-
-### BrowserAdapter の拡張
-```typescript
-async openOptionsPage(): Promise<void> {
-  if (this.browserType === 'chrome') {
-    return chrome.runtime.openOptionsPage();
-  } else if (this.browserType === 'firefox') {
-    return browser.runtime.openOptionsPage();
-  }
-  throw new Error('Unsupported browser');
-}
-```
-
-### ポップアップの変更
-- 歯車ボタンのクリックハンドラを `BrowserAdapter.openOptionsPage()` 呼び出しに変更
-- `showSettings` 状態と `SettingsPanel` コンポーネントの使用箇所を削除（不要）
-
-### 設定画面の拡張
-- AI要約設定セクションを追加
-  - OpenRouter APIトークン入力（type="password"）
-  - OpenRouterモデル名入力（type="text"）
-  - AI要約有効化チェックボックス
-- エクスポート/インポートにAI設定を含める
-  - セキュリティを考慮して、APIキーはエクスポートから除外
+### テスト仕様
+- **モックテスト**: fetch APIをモックして各種レスポンスパターンをテスト
+- **実API疎通テスト**: 環境変数 `OPENROUTER_API_KEY` がある場合のみ実行
+  - 実際のAPIへリクエスト送信
+  - レスポンス構造の検証
+  - エラーハンドリングの確認
 
 ## 生成AIの学習用コンテキスト
 
-### 既存実装ファイル
-- `src/popup/components/App.tsx`
-  - ポップアップのメインコンポーネント（歯車ボタンあり）
+### 既存実装
 - `src/options/OptionsApp.tsx`
-  - 設定画面のメインコンポーネント
+  - AI設定UIの既存実装（APIキー入力、モデル選択、有効化フラグ）
 - `src/shared/utils/storage.ts`
-  - ストレージ管理クラス
-- `src/shared/utils/browser.ts`
-  - BrowserAdapterクラス
-- `src/shared/types/index.ts`
-  - 型定義のエントリーポイント
-- `src/shared/types/tts.ts`
-  - TTS設定の型定義（参考）
+  - StorageManager.getAiSettings(), saveAiSettings()
+- `src/shared/types/ai.ts`
+  - AiSettings インターフェース定義
+- `src/options/__tests__/OptionsApp.test.tsx`
+  - 既存のUI/設定保存テスト
 
-### 参考実装
-- `src/popup/components/IgnoreListManager.tsx`
-  - リスト管理UIの実装例
+### テスト環境
+- `jest.config.js`
+  - Jest設定（ts-jest, jsdom環境）
+- `package.json`
+  - テストスクリプト: `npm run test`, `npm run test:watch`
 
 ## Process
 
-### process1 型定義の追加
-#### sub1 AI設定の型定義ファイルを作成
-@target: `src/shared/types/ai.ts` (新規)
-@ref: `src/shared/types/tts.ts`
-- [ ] `AiSettings` インターフェースを定義
-  - `openRouterApiKey: string`
-  - `openRouterModel: string`
-  - `enableAiSummary: boolean`
-
-#### sub2 型定義のエクスポートを追加
-@target: `src/shared/types/index.ts`
-@ref: なし
-- [ ] `export * from './ai';` を追加
-
-#### sub3 ストレージキーの追加
-@target: `src/shared/types/index.ts`
-@ref: なし
-- [ ] `STORAGE_KEYS` に `AI_SETTINGS: 'ai_settings'` を追加
-
-### process2 ストレージ層の拡張
-#### sub1 StorageManagerクラスにAI設定メソッドを追加
-@target: `src/shared/utils/storage.ts`
-@ref: `src/shared/types/ai.ts`
-- [ ] `DEFAULT_AI_SETTINGS` 定数を定義
-- [ ] `getAiSettings(): Promise<AiSettings>` メソッドを実装
-- [ ] `saveAiSettings(settings: AiSettings): Promise<void>` メソッドを実装
-- [ ] `validateAiSettings(settings: Partial<AiSettings>): AiSettings` メソッドを実装
-  - APIキーの空文字列チェック
-  - モデル名のデフォルト設定
-
-### process3 BrowserAdapterの拡張
-#### sub1 openOptionsPageメソッドを追加
-@target: `src/shared/utils/browser.ts`
-@ref: なし
-- [ ] `openOptionsPage(): Promise<void>` メソッドを実装
-  - Chrome: `chrome.runtime.openOptionsPage()`
-  - Firefox: `browser.runtime.openOptionsPage()`
-  - エラーハンドリング
-
-### process4 ポップアップの修正
-#### sub1 歯車ボタンの動作を変更
-@target: `src/popup/components/App.tsx`
-@ref: `src/shared/utils/browser.ts`
-- [ ] 歯車ボタンの `onClick` ハンドラを変更
-  - `BrowserAdapter.getInstance().runtime.openOptionsPage()` を呼び出し
-- [ ] `showSettings` 状態を削除
-- [ ] `SettingsPanel` コンポーネントの使用箇所を削除（309-315行目）
-- [ ] 不要なインポートを削除
-
-### process5 設定画面の拡張
-#### sub1 AI設定の状態管理を追加
-@target: `src/options/OptionsApp.tsx`
+### process1 OpenRouter APIクライアントの実装
+#### sub1 APIクライアントクラスの作成
+@target: `src/shared/services/openrouter.ts` (新規作成)
 @ref: `src/shared/types/ai.ts`, `src/shared/utils/storage.ts`
-- [ ] `AiSettings` のインポートを追加
-- [ ] `aiSettings` 状態を追加
-- [ ] `loadInitialData` 関数で AI設定を読み込み
-- [ ] `handleAiSettingChange` ハンドラを実装
 
-#### sub2 AI要約設定セクションのUIを追加
+- [ ] `OpenRouterClient` クラスを作成
+  - コンストラクタでAPIキーとモデル名を受け取る
+  - プライベートメソッド `_makeRequest()` で共通リクエスト処理
+- [ ] `testConnection()` メソッドを実装
+  - 最小限のリクエストで接続テスト（軽量なプロンプトを使用）
+  - レスポンスのステータスコードとボディを検証
+  - 成功時は `{ success: true }` を返す
+  - 失敗時は `{ success: false, error: string }` を返す
+- [ ] `summarize(content: string, maxTokens: number)` メソッドを実装
+  - Phase 3で使用する要約機能の基礎実装
+  - システムプロンプト: "Summarize the following content concisely."
+  - ユーザープロンプト: content
+- [ ] エラーハンドリングを実装
+  - 401 Unauthorized: "APIキーが無効です"
+  - 429 Too Many Requests: "リクエスト制限に達しました。しばらく待ってから再試行してください"
+  - 500系エラー: "サーバーエラーが発生しました"
+  - ネットワークエラー: "ネットワーク接続を確認してください"
+- [ ] TypeScript型定義を追加
+  - `OpenRouterRequest`, `OpenRouterResponse`, `ConnectionTestResult`
+
+#### sub2 サービスディレクトリの作成
+@target: `src/shared/services/` (新規ディレクトリ)
+
+- [ ] ディレクトリを作成
+- [ ] 今後の拡張に備えた構造を整備（他のAIサービス統合も想定）
+
+### process2 設定画面への接続テスト機能追加
+#### sub1 UIコンポーネントの更新
 @target: `src/options/OptionsApp.tsx`
-@ref: なし
-- [ ] AI要約設定セクションを追加（「無視リスト」セクションの後）
-  - セクションタイトル「AI 要約設定」
-  - 要約有効化チェックボックス
-  - OpenRouter APIトークン入力（type="password"）
-  - OpenRouterモデル名入力（placeholder付き）
+@ref: `src/shared/services/openrouter.ts`
 
-#### sub3 エクスポート/インポートにAI設定を含める
-@target: `src/options/OptionsApp.tsx`
-@ref: なし
-- [ ] `ExportPayload` インターフェースに `aiSettings` を追加
-- [ ] `handleExport` 関数で AI設定を含める
-- [ ] `handleImport` 関数で AI設定を復元
+- [ ] 状態管理を追加
+  - `const [isTestingConnection, setIsTestingConnection] = useState(false)`
+  - `const [connectionTestResult, setConnectionTestResult] = useState<{success: boolean, message: string} | null>(null)`
+- [ ] `handleConnectionTest()` 関数を実装
+  - APIキーの存在チェック（未入力時は早期リターン）
+  - `setIsTestingConnection(true)` でローディング開始
+  - `OpenRouterClient` インスタンス生成
+  - `testConnection()` を呼び出し
+  - 結果を `connectionTestResult` に設定
+  - 成功/失敗に応じたメッセージを表示
+  - finally ブロックで `setIsTestingConnection(false)`
+- [ ] AI設定セクションに「接続テスト」ボタンを追加
+  - ボタンラベル: "接続テスト"
+  - `disabled={isTestingConnection || !aiSettings.openRouterApiKey}`
+  - `onClick={handleConnectionTest}`
+- [ ] テスト結果表示エリアを追加
+  - 成功時: 緑色のメッセージ "✓ 接続に成功しました"
+  - 失敗時: 赤色のメッセージ "✗ 接続に失敗しました: {エラー詳細}"
+  - テスト未実行時: 非表示
+- [ ] ローディングインジケータを追加
+  - テスト実行中は "接続テスト中..." と表示
 
-### process6 スタイルの調整（必要に応じて）
-@target: `src/options/styles.css` または該当するCSSファイル
-@ref: 既存のスタイル
-- [ ] AI設定セクションのスタイルを調整（必要な場合）
-- [ ] パスワード入力フィールドのスタイルを確認
+#### sub2 スタイリングの追加
+@target: `src/options/OptionsApp.tsx` (インラインまたは別CSSファイル)
+
+- [ ] 接続テストボタンのスタイル
+- [ ] 結果表示エリアのスタイル（成功=緑、失敗=赤）
+- [ ] ローディング中のスタイル
+
+### process3 型定義の拡張
+#### sub1 OpenRouter関連の型定義
+@target: `src/shared/types/ai.ts`
+
+- [ ] `ConnectionTestResult` インターフェースを追加
+  ```typescript
+  export interface ConnectionTestResult {
+    success: boolean;
+    message?: string;
+    error?: string;
+  }
+  ```
+- [ ] `OpenRouterRequest`, `OpenRouterResponse` インターフェースを追加
+  - OpenRouter APIのリクエスト/レスポンス構造に対応
 
 ### process10 ユニットテスト
-#### sub1 StorageManagerのテストを追加
-@target: `src/shared/utils/__tests__/storage.test.ts`
-@ref: `src/shared/utils/storage.ts`
-- [ ] `getAiSettings` のテスト
-- [ ] `saveAiSettings` のテスト
-- [ ] `validateAiSettings` のテスト
+#### sub1 OpenRouterClientのモックテスト
+@target: `src/shared/services/__tests__/openrouter.test.ts` (新規作成)
+@ref: `src/shared/services/openrouter.ts`
 
-#### sub2 BrowserAdapterのテストを追加
-@target: `src/shared/utils/__tests__/browser.test.ts`
-@ref: `src/shared/utils/browser.ts`
-- [ ] `openOptionsPage` のテスト（Chrome/Firefox）
+- [ ] テスト環境のセットアップ
+  - `global.fetch` をモック
+  - テスト用のAPIキー、モデル名を定義
+- [ ] 接続テスト成功ケース
+  - モックで200レスポンスを返す
+  - `testConnection()` が `{ success: true }` を返すことを検証
+- [ ] 接続テスト失敗ケース（401 Unauthorized）
+  - モックで401レスポンスを返す
+  - エラーメッセージに "APIキーが無効" が含まれることを検証
+- [ ] 接続テスト失敗ケース（429 Too Many Requests）
+  - モックで429レスポンスを返す
+  - エラーメッセージに "リクエスト制限" が含まれることを検証
+- [ ] ネットワークエラーケース
+  - モックでネットワークエラーをスロー
+  - エラーメッセージに "ネットワーク" が含まれることを検証
+- [ ] `summarize()` メソッドのテスト
+  - 正常系: 要約テキストが返ることを検証
+  - リクエストボディに正しいプロンプトが含まれることを検証
 
-#### sub3 OptionsAppのテストを追加
+#### sub2 OpenRouterClient実API疎通テスト
+@target: `src/shared/services/__tests__/openrouter.integration.test.ts` (新規作成)
+
+- [ ] 環境変数チェック
+  - `process.env.OPENROUTER_API_KEY` が存在する場合のみテストを実行
+  - 存在しない場合は `test.skip()` でスキップ
+- [ ] 実際のAPI接続テスト
+  - 本物のAPIキーを使用して `testConnection()` を呼び出し
+  - レスポンスが成功することを検証
+  - タイムアウト設定（10秒程度）
+- [ ] 実際の要約リクエストテスト
+  - 短いテキストを `summarize()` に渡す
+  - レスポンスが文字列であることを検証
+  - レスポンスが空でないことを検証
+- [ ] エラーハンドリングテスト（無効なAPIキー）
+  - 意図的に無効なAPIキーを使用
+  - 401エラーが適切にハンドリングされることを検証
+
+#### sub3 OptionsAppコンポーネントのテスト拡張
 @target: `src/options/__tests__/OptionsApp.test.tsx`
-@ref: `src/options/OptionsApp.tsx`
-- [ ] AI設定UIのレンダリングテスト
-- [ ] AI設定変更のテスト
-- [ ] エクスポート/インポートにAI設定が含まれるテスト
+@ref: `src/shared/services/openrouter.ts`
+
+- [ ] OpenRouterClientのモック
+  - `jest.mock('../../shared/services/openrouter')` を追加
+  - `testConnection` メソッドをモック化
+- [ ] 接続テストボタンの存在確認
+  - "接続テスト" ボタンがレンダリングされることを確認
+- [ ] APIキー未入力時の挙動
+  - APIキーが空の場合、ボタンがdisabledになることを確認
+- [ ] 接続テスト成功ケース
+  - モックで成功レスポンスを返す
+  - ボタンクリック後、成功メッセージが表示されることを確認
+  - "接続に成功しました" が含まれることを確認
+- [ ] 接続テスト失敗ケース
+  - モックで失敗レスポンスを返す
+  - ボタンクリック後、エラーメッセージが表示されることを確認
+  - エラー詳細が含まれることを確認
+- [ ] ローディング状態のテスト
+  - テスト実行中、ボタンがdisabledになることを確認
+  - "接続テスト中..." が表示されることを確認
 
 ### process50 フォローアップ
+#### sub1 エラーメッセージの多言語対応（将来対応）
+- [ ] 現在は日本語のみ、将来的にi18nライブラリ導入時に対応
+
+#### sub2 リトライ機能の検討（将来対応）
+- [ ] 429エラー時の自動リトライ機能（Phase 3で実装検討）
 
 ### process100 リファクタリング
-- [ ] 不要になった `SettingsPanel` コンポーネントの削除を検討
-- [ ] 設定画面のコンポーネント分割を検討（AI設定セクションを独立コンポーネント化）
+- [ ] エラーメッセージを定数化
+  - `src/shared/constants.ts` にエラーメッセージ定数を追加
+- [ ] API通信の共通ロジックを抽出
+  - 今後、他のAIサービス（Google Gemini等）統合時に再利用可能な構造に
+- [ ] TypeScript型定義の整理
+  - `src/shared/types/api.ts` など、API関連の型を別ファイルに分離検討
 
 ### process200 ドキュメンテーション
-- [ ] CLAUDE.mdにAI設定機能の説明を追加
-- [ ] README.mdにOpenRouter API設定方法を追加
+- [ ] `CLAUDE.md` のPhase 3セクションを更新
+  - OpenRouter API統合の進捗状況を記載
+  - 次のステップ（要約機能の実装）を明記
+- [ ] `README.md` の更新（該当セクションがあれば）
+  - OpenRouter APIキーの取得方法を記載
+  - 環境変数設定方法（テスト実行用）を記載
+- [ ] JSDocコメントの追加
+  - OpenRouterClientの各メソッドに詳細なドキュメントを記載
+  - パラメータ、戻り値、エラーケースを明記
