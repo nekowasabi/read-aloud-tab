@@ -94,6 +94,12 @@ describe('App integration', () => {
         tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
       });
     });
+
+    // Mock chrome.storage.onChanged (listener API)
+    (chrome.storage as any).onChanged = {
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+    };
   });
 
   test('アクティブタブをキューに追加する', async () => {

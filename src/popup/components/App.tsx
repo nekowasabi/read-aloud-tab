@@ -94,6 +94,32 @@ export default function App() {
     };
   }, []);
 
+  // Listen for settings changes from options page
+  useEffect(() => {
+    const handleStorageChange = (changes: any, areaName: string) => {
+      if (areaName === 'sync' && changes.tts_settings) {
+        const newSettings = changes.tts_settings.newValue;
+        if (newSettings) {
+          console.log('[Popup] Settings changed externally:', newSettings);
+          setSettings(newSettings);
+        }
+      }
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+      return () => {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      };
+    } else if (typeof browser !== 'undefined' && browser.storage) {
+      browser.storage.onChanged.addListener(handleStorageChange);
+      return () => {
+        browser.storage.onChanged.removeListener(handleStorageChange);
+      };
+    }
+    return undefined;
+  }, []);
+
   useEffect(() => {
     if (queueError) {
       setError(queueError);

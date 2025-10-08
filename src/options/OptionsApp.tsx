@@ -153,7 +153,7 @@ export default function OptionsApp() {
             id="rate"
             type="number"
             min={0.5}
-            max={2}
+            max={3}
             step={0.1}
             value={settings.rate}
             onChange={(event) => handleSettingChange('rate', parseFloat(event.target.value))}
