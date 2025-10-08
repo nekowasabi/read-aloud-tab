@@ -184,16 +184,6 @@ export default function OptionsApp() {
             onChange={(event) => handleSettingChange('volume', parseFloat(event.target.value))}
           />
         </div>
-        <div className="setting-item">
-          <label htmlFor="voice">音声</label>
-          <input
-            id="voice"
-            type="text"
-            value={settings.voice ?? ''}
-            onChange={(event) => handleSettingChange('voice', event.target.value || null)}
-            placeholder="システムデフォルト"
-          />
-        </div>
       </section>
 
       <section className="options-section">

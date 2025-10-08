@@ -397,6 +397,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: 'test-api-key',
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
+        enableAiTranslation: false,
       };
 
       mockStorage.sync.get.mockResolvedValue({
@@ -419,6 +420,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: '',
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
+        enableAiTranslation: false,
       });
     });
   });
@@ -430,6 +432,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: 'new-api-key',
         openRouterModel: 'gpt-4',
         enableAiSummary: true,
+        enableAiTranslation: false,
       };
 
       mockStorage.sync.set.mockResolvedValue(undefined);
@@ -447,6 +450,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: 'test-key',
         openRouterModel: 'test-model',
         enableAiSummary: false,
+        enableAiTranslation: false,
       };
 
       mockStorage.sync.set.mockRejectedValue(new Error('Storage error'));
@@ -463,6 +467,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: 'valid-key',
         openRouterModel: 'valid-model',
         enableAiSummary: true,
+        enableAiTranslation: true,
       };
 
       const result = StorageManager.validateAiSettings(validSettings);
@@ -481,6 +486,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: '',
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
+        enableAiTranslation: false,
       });
     });
 
@@ -491,6 +497,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: '',
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
+        enableAiTranslation: false,
       });
     });
 
@@ -499,6 +506,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterApiKey: '  test-key  ',
         openRouterModel: 'test-model',
         enableAiSummary: false,
+        enableAiTranslation: false,
       };
 
       const result = StorageManager.validateAiSettings(settingsWithWhitespace);
