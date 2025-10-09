@@ -336,7 +336,7 @@ export interface TabInfo {
 #### sub1 Chrome拡張機能のビルドとインストール
 @target: なし
 @ref: なし
-- [ ] `npm run build:chrome`を実行
+- [x] `npm run build:chrome`を実行（✅ ビルド成功）
 - [ ] chrome://extensions/でデベロッパーモードを有効化
 - [ ] dist/chromeフォルダを読み込み
 
@@ -376,7 +376,7 @@ export interface TabInfo {
 #### sub6 Firefox拡張機能のテスト
 @target: なし
 @ref: なし
-- [ ] `npm run build:firefox`を実行
+- [x] `npm run build:firefox`を実行（✅ ビルド成功）
 - [ ] about:debuggingで一時的なアドオンを読み込み
 - [ ] 上記のテストケース（sub2-sub5）をFirefoxでも実行
 - [ ] Chrome版と同様に動作することを確認
