@@ -47,25 +47,28 @@ export class TTSEngine implements PlaybackController {
     settings: TTSSettings,
     hooks: PlaybackHooks,
   ): Promise<void> {
-    if (!tab.content || tab.content.trim().length === 0) {
+    // AI処理済みコンテンツがあればそれを優先、なければ元のコンテンツを使用
+    const textToSpeak = tab.processedContent || tab.content;
+
+    if (!textToSpeak || textToSpeak.trim().length === 0) {
       throw new Error("No readable content available for the selected tab");
     }
 
     this.stop();
 
     // Store for Firefox pause/resume support
-    this.originalText = tab.content;
+    this.originalText = textToSpeak;
     this.currentSettings = settings;
     this.currentHooks = hooks;
     this.pausedPosition = 0;
 
-    this.currentText = tab.content;
-    this.totalLength = tab.content.length;
+    this.currentText = textToSpeak;
+    this.totalLength = textToSpeak.length;
     this.currentPosition = 0;
     this.isPaused = false;
 
-    const utterance = this.createUtteranceFn(tab.content);
-    utterance.text = tab.content;
+    const utterance = this.createUtteranceFn(textToSpeak);
+    utterance.text = textToSpeak;
     this.utterance = utterance;
 
     this.applySettings(utterance, settings);

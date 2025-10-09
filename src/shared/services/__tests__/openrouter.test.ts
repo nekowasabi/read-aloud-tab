@@ -215,4 +215,85 @@ describe('OpenRouterClient', () => {
       await expect(client.translate('test', 'ja', 400)).rejects.toThrow('APIキーが無効');
     });
   });
+
+  describe('translate', () => {
+    const mockContent = 'This is a test content to translate.';
+    const mockTranslation = 'これはテスト用の翻訳コンテンツです。';
+
+    test('翻訳リクエストが成功した場合、翻訳テキストを返す', async () => {
+      // Arrange
+      const mockResponse: OpenRouterResponse = {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: mockTranslation,
+            },
+            finish_reason: 'stop',
+          },
+        ],
+        model: mockModel,
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      });
+
+      const client = new OpenRouterClient(mockApiKey, mockModel);
+
+      // Act
+      const result = await client.translate(mockContent, 2000);
+
+      // Assert
+      expect(result).toBe(mockTranslation);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // リクエストボディの検証
+      const callArgs = (global.fetch as jest.Mock).mock.calls[0];
+      const requestBody = JSON.parse(callArgs[1].body);
+      expect(requestBody.messages).toHaveLength(2);
+      expect(requestBody.messages[0].role).toBe('system');
+      expect(requestBody.messages[0].content).toContain('Translate');
+      expect(requestBody.messages[0].content).toContain('Japanese');
+      expect(requestBody.messages[1].role).toBe('user');
+      expect(requestBody.messages[1].content).toBe(mockContent);
+      expect(requestBody.max_tokens).toBe(2000);
+    });
+
+    test('翻訳リクエストが失敗した場合、エラーをスローする', async () => {
+      // Arrange
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => ({ error: 'Server error' }),
+      });
+
+      const client = new OpenRouterClient(mockApiKey, mockModel);
+
+      // Act & Assert
+      await expect(client.translate(mockContent, 2000)).rejects.toThrow('サーバーエラーが発生しました');
+    });
+
+    test('レスポンスにchoicesが含まれない場合、エラーをスローする', async () => {
+      // Arrange
+      const invalidResponse = {
+        choices: [],
+        model: mockModel,
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => invalidResponse,
+      });
+
+      const client = new OpenRouterClient(mockApiKey, mockModel);
+
+      // Act & Assert
+      await expect(client.translate(mockContent, 2000)).rejects.toThrow();
+    });
+  });
 });

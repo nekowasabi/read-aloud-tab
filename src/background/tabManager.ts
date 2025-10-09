@@ -23,6 +23,7 @@ import {
   QUEUE_CONTENT_RESERVE_ACTIVE,
 } from '../shared/constants';
 import { createExtensionError, formatErrorLog } from '../shared/errors';
+import { AiProcessor } from './aiProcessor';
 
 export interface PlaybackHooks {
   onEnd: () => void;
@@ -92,6 +93,7 @@ export class TabManager {
   private readonly resolveContent?: ContentResolver;
   private readonly logger: LoggerLike;
   private readonly now: () => number;
+  private readonly aiProcessor: AiProcessor;
 
   private ignoredDomains: Set<string> = new Set();
 
@@ -121,6 +123,10 @@ export class TabManager {
     this.resolveContent = options.resolveContent;
     this.logger = options.logger || console;
     this.now = options.now || (() => Date.now());
+    this.aiProcessor = new AiProcessor({
+      maxSummaryTokens: 500,
+      maxTranslationTokens: 2000,
+    });
   }
 
   async initialize(): Promise<void> {
@@ -160,6 +166,14 @@ export class TabManager {
       } catch (error) {
         this.logger.warn('TabManager: failed to load ignored domains', error);
       }
+    }
+
+    // AI設定を読み込み、AiProcessorを初期化
+    try {
+      const aiSettings = await StorageManager.getAiSettings();
+      this.aiProcessor.updateSettings(aiSettings);
+    } catch (error) {
+      this.logger.warn('TabManager: failed to load AI settings', error);
     }
 
     this.refreshIgnoredFlags();
@@ -593,6 +607,19 @@ export class TabManager {
       this.playback.updateSettings(validated);
     }
 
+    // AI設定を更新し、既存タブのprocessedContentをクリア
+    try {
+      const aiSettings = await StorageManager.getAiSettings();
+      this.aiProcessor.updateSettings(aiSettings);
+
+      // 既存タブのprocessedContentをクリア
+      for (const tab of this.queue.tabs) {
+        tab.processedContent = undefined;
+      }
+    } catch (error) {
+      this.logger.warn('TabManager: failed to update AI settings', error);
+    }
+
     await Promise.all([
       this.persistQueue(),
       StorageManager.saveSettings(validated),
@@ -895,16 +922,19 @@ export class TabManager {
           }
           if (result.extractedAt) {
             tab.extractedAt = new Date(result.extractedAt);
-          } else {
-            tab.extractedAt = new Date();
           }
-          this.enforceContentBudget();
-          await this.persistQueue();
-          return true;
+        } else {
+          this.emitContentRequest(tab.tabId, 'missing');
+          return false;
         }
       } catch (error) {
         this.logError('CONTENT_RESOLVE_FAILED', 'TabManager: content resolver failed', error);
+        this.emitContentRequest(tab.tabId, 'missing');
+        return false;
       }
+    } else {
+      this.emitContentRequest(tab.tabId, 'missing');
+      return false;
     }
 
     // Fallback: if no resolver or resolver failed, check if we have content
