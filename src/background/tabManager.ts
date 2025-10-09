@@ -937,13 +937,25 @@ export class TabManager {
       return false;
     }
 
-    // Fallback: if no resolver or resolver failed, check if we have content
-    if (tab.content && tab.content.length > 0) {
-      return true;
+    // AI処理ブロック: 要約・翻訳が有効な場合に適用
+    // タイムアウト30秒、5000文字制限でAPI呼び出し
+    // エラー時は元のcontentで動作を継続（フォールバック）
+    try {
+      const aiSettings = await StorageManager.getAiSettings();
+      if (this.aiProcessor.isEnabled(aiSettings)) {
+        const processed = await this.aiProcessor.processContent(tab, aiSettings);
+        if (processed) {
+          tab.processedContent = processed;
+        }
+      }
+    } catch (error) {
+      this.logError('AI_PROCESSING_FAILED', 'TabManager: AI processing failed', error);
+      // エラー時もフローを継続（元のcontentで動作）
     }
 
-    this.emitContentRequest(tab.tabId, 'missing');
-    return false;
+    this.enforceContentBudget();
+    await this.persistQueue();
+    return true;
   }
 
   private enforceContentBudget(): void {
