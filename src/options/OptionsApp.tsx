@@ -165,6 +165,7 @@ export default function OptionsApp() {
     }
   };
 
+
   return (
     <div className="options-container">
       <header className="options-header">
@@ -337,6 +338,7 @@ export default function OptionsApp() {
             )}
           </div>
         )}
+
       </section>
 
       <section className="options-section">

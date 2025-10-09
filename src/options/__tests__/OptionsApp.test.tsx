@@ -369,4 +369,131 @@ describe('OptionsApp', () => {
       });
     });
   });
+
+  describe('OpenRouter接続テスト', () => {
+    test('接続テストボタンが表示される', async () => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+
+      render(<OptionsApp />);
+
+      const testButton = await screen.findByRole('button', { name: '接続テスト' });
+      expect(testButton).toBeInTheDocument();
+    });
+
+    test('APIキー未入力の場合、接続テストボタンが無効化される', async () => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: '',
+        openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      render(<OptionsApp />);
+
+      const testButton = await screen.findByRole('button', { name: '接続テスト' });
+      expect(testButton).toBeDisabled();
+    });
+
+    test('接続テストが成功した場合、成功メッセージが表示される', async () => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      const mockTestConnection = jest.fn().mockResolvedValue({
+        success: true,
+        message: '接続に成功しました',
+      });
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const testButton = await screen.findByRole('button', { name: '接続テスト' });
+      expect(testButton).not.toBeDisabled();
+
+      fireEvent.click(testButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/接続に成功しました/i)).toBeInTheDocument();
+      });
+
+      expect(mockTestConnection).toHaveBeenCalledTimes(1);
+    });
+
+    test('接続テストが失敗した場合、エラーメッセージが表示される', async () => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'invalid-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      const mockTestConnection = jest.fn().mockResolvedValue({
+        success: false,
+        error: 'APIキーが無効です',
+      });
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const testButton = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(testButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/接続に失敗しました.*APIキーが無効です/i)).toBeInTheDocument();
+      });
+    });
+
+    test('接続テスト実行中はボタンが無効化され、ローディング表示になる', async () => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      let resolveTestConnection: (value: any) => void;
+      const testConnectionPromise = new Promise((resolve) => {
+        resolveTestConnection = resolve;
+      });
+
+      const mockTestConnection = jest.fn().mockReturnValue(testConnectionPromise);
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const testButton = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(testButton);
+
+      // ローディング中の確認
+      await waitFor(() => {
+        expect(screen.getByText('接続テスト中...')).toBeInTheDocument();
+      });
+      expect(testButton).toBeDisabled();
+
+      // テスト完了
+      resolveTestConnection!({ success: true, message: '接続に成功しました' });
+
+      await waitFor(() => {
+        expect(screen.queryByText('接続テスト中...')).not.toBeInTheDocument();
+      });
+    });
+  });
 });
