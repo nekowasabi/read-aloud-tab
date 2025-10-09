@@ -132,173 +132,173 @@ export interface TabInfo {
 #### sub1 TabInfo型にprocessedContentフィールドを追加
 @target: `src/shared/types/tab.ts`
 @ref: `src/shared/types/index.ts`
-- [ ] `processedContent?: string`フィールドを追加
-- [ ] JSDocコメントで用途を説明（"AI処理後のコンテンツ（要約・翻訳）"）
+- [x] `processedContent?: string`フィールドを追加
+- [x] JSDocコメントで用途を説明（"AI処理後のコンテンツ（要約・翻訳）"）
 
 #### sub2 型定義の整合性確認
 @target: `src/shared/types/index.ts`
 @ref: なし
-- [ ] TabInfo型のexportを確認
-- [ ] 他の型との整合性を確認
+- [x] TabInfo型のexportを確認
+- [x] 他の型との整合性を確認
 
 ### process2 OpenRouterClient拡張
 #### sub1 translate()メソッドの実装
 @target: `src/shared/services/openrouter.ts`
 @ref: `src/shared/services/baseApiClient.ts`, `src/shared/types/ai.ts`
-- [ ] `translate(content: string, maxTokens: number): Promise<string>`メソッドを実装
-- [ ] システムプロンプトを設定（日本語翻訳、意味と口調を維持）
-- [ ] OpenRouterRequestを構築
-- [ ] エラーハンドリング（API_ERROR_MESSAGES.INVALID_RESPONSE）
-- [ ] 既存のsummarize()メソッドと同様の構造を維持
+- [x] `translate(content: string, maxTokens: number): Promise<string>`メソッドを実装
+- [x] システムプロンプトを設定（日本語翻訳、意味と口調を維持）
+- [x] OpenRouterRequestを構築
+- [x] エラーハンドリング（API_ERROR_MESSAGES.INVALID_RESPONSE）
+- [x] 既存のsummarize()メソッドと同様の構造を維持
 
 #### sub2 translate()メソッドの単体テスト
 @target: `src/shared/services/__tests__/openrouter.test.ts`
 @ref: 同ファイルの既存テスト
-- [ ] 正常系テスト: API成功時に翻訳テキストを返す
-- [ ] 異常系テスト: API失敗時にエラーをスロー
-- [ ] 異常系テスト: 空のレスポンス時にエラーをスロー
-- [ ] モックAPIレスポンスを作成
+- [x] 正常系テスト: API成功時に翻訳テキストを返す
+- [x] 異常系テスト: API失敗時にエラーをスロー
+- [x] 異常系テスト: 空のレスポンス時にエラーをスロー
+- [x] モックAPIレスポンスを作成
 
 ### process3 AiProcessorサービスの実装
 #### sub1 AiProcessorクラスの骨格作成
 @target: `src/background/aiProcessor.ts`（新規作成）
 @ref: `src/shared/services/openrouter.ts`, `src/shared/types/ai.ts`, `src/shared/types/tab.ts`
-- [ ] AiProcessorOptionsインターフェースを定義（maxSummaryTokens, maxTranslationTokens）
-- [ ] AiProcessorクラスを作成
-- [ ] プロパティ: `private client: OpenRouterClient | null`
-- [ ] プロパティ: `private readonly options: Required<AiProcessorOptions>`
-- [ ] コンストラクタでデフォルトオプションを設定（要約500、翻訳2000）
+- [x] AiProcessorOptionsインターフェースを定義（maxSummaryTokens, maxTranslationTokens）
+- [x] AiProcessorクラスを作成
+- [x] プロパティ: `private client: OpenRouterClient | null`
+- [x] プロパティ: `private readonly options: Required<AiProcessorOptions>`
+- [x] コンストラクタでデフォルトオプションを設定（要約500、翻訳2000）
 
 #### sub2 updateSettings()メソッドの実装
 @target: `src/background/aiProcessor.ts`
 @ref: なし
-- [ ] `updateSettings(settings: AiSettings): void`メソッドを実装
-- [ ] APIキーとモデルが存在する場合、OpenRouterClientを初期化
-- [ ] APIキーが未設定の場合、clientをnullに設定
+- [x] `updateSettings(settings: AiSettings): void`メソッドを実装
+- [x] APIキーとモデルが存在する場合、OpenRouterClientを初期化
+- [x] APIキーが未設定の場合、clientをnullに設定
 
 #### sub3 isEnabled()メソッドの実装
 @target: `src/background/aiProcessor.ts`
 @ref: なし
-- [ ] `isEnabled(settings: AiSettings): boolean`メソッドを実装
-- [ ] enableAiSummaryまたはenableAiTranslationがtrueかつclientがnullでない場合にtrueを返す
+- [x] `isEnabled(settings: AiSettings): boolean`メソッドを実装
+- [x] enableAiSummaryまたはenableAiTranslationがtrueかつclientがnullでない場合にtrueを返す
 
 #### sub4 processContent()メソッドの実装
 @target: `src/background/aiProcessor.ts`
 @ref: なし
-- [ ] `processContent(tab: TabInfo, settings: AiSettings): Promise<string | null>`メソッドを実装
-- [ ] AI処理が不要な場合、元のcontentを返す
-- [ ] clientが未初期化の場合、警告ログを出力して元のcontentを返す
-- [ ] contentが空の場合、nullを返す
-- [ ] try-catchでエラーハンドリング
-- [ ] enableAiSummaryがtrueの場合、summarize()を呼び出し
-- [ ] enableAiTranslationがtrueの場合、translate()を呼び出し
-- [ ] 両方trueの場合、summarize() → translate()の順で実行
-- [ ] エラー時は元のcontentを返す（フォールバック）
+- [x] `processContent(tab: TabInfo, settings: AiSettings): Promise<string | null>`メソッドを実装
+- [x] AI処理が不要な場合、元のcontentを返す
+- [x] clientが未初期化の場合、警告ログを出力して元のcontentを返す
+- [x] contentが空の場合、nullを返す
+- [x] try-catchでエラーハンドリング
+- [x] enableAiSummaryがtrueの場合、summarize()を呼び出し
+- [x] enableAiTranslationがtrueの場合、translate()を呼び出し
+- [x] 両方trueの場合、summarize() → translate()の順で実行
+- [x] エラー時は元のcontentを返す（フォールバック）
 
 #### sub5 AiProcessorの単体テスト作成
 @target: `src/background/__tests__/aiProcessor.test.ts`（新規作成）
 @ref: `src/background/aiProcessor.ts`
-- [ ] updateSettings()のテスト: APIキー設定時にclientが初期化される
-- [ ] updateSettings()のテスト: APIキー未設定時にclientがnullになる
-- [ ] isEnabled()のテスト: 要約有効時にtrueを返す
-- [ ] isEnabled()のテスト: 翻訳有効時にtrueを返す
-- [ ] isEnabled()のテスト: 両方無効時にfalseを返す
-- [ ] isEnabled()のテスト: client未初期化時にfalseを返す
-- [ ] processContent()のテスト: 要約のみ有効な場合、summarize()のみが呼ばれる
-- [ ] processContent()のテスト: 翻訳のみ有効な場合、translate()のみが呼ばれる
-- [ ] processContent()のテスト: 両方有効な場合、summarize() → translate()の順で呼ばれる
-- [ ] processContent()のテスト: AI処理無効時、元のcontentを返す
-- [ ] processContent()のテスト: client未初期化時、元のcontentを返す
-- [ ] processContent()のテスト: content空の場合、nullを返す
-- [ ] processContent()のテスト: API失敗時、元のcontentを返す（フォールバック）
-- [ ] OpenRouterClientをモック化
+- [x] updateSettings()のテスト: APIキー設定時にclientが初期化される
+- [x] updateSettings()のテスト: APIキー未設定時にclientがnullになる
+- [x] isEnabled()のテスト: 要約有効時にtrueを返す
+- [x] isEnabled()のテスト: 翻訳有効時にtrueを返す
+- [x] isEnabled()のテスト: 両方無効時にfalseを返す
+- [x] isEnabled()のテスト: client未初期化時にfalseを返す
+- [x] processContent()のテスト: 要約のみ有効な場合、summarize()のみが呼ばれる
+- [x] processContent()のテスト: 翻訳のみ有効な場合、translate()のみが呼ばれる
+- [x] processContent()のテスト: 両方有効な場合、summarize() → translate()の順で呼ばれる
+- [x] processContent()のテスト: AI処理無効時、元のcontentを返す
+- [x] processContent()のテスト: client未初期化時、元のcontentを返す
+- [x] processContent()のテスト: content空の場合、nullを返す
+- [x] processContent()のテスト: API失敗時、元のcontentを返す（フォールバック）
+- [x] OpenRouterClientをモック化
 
 ### process4 TabManager統合
 #### sub1 AiProcessorをTabManagerに追加
 @target: `src/background/tabManager.ts`
 @ref: `src/background/aiProcessor.ts`
-- [ ] import文を追加: `import { AiProcessor } from './aiProcessor';`
-- [ ] プロパティを追加: `private aiProcessor: AiProcessor;`
-- [ ] コンストラクタでAiProcessorをインスタンス化
-- [ ] オプションとして`maxSummaryTokens: 500, maxTranslationTokens: 2000`を設定
+- [x] import文を追加: `import { AiProcessor } from './aiProcessor';`
+- [x] プロパティを追加: `private aiProcessor: AiProcessor;`
+- [x] コンストラクタでAiProcessorをインスタンス化
+- [x] オプションとして`maxSummaryTokens: 500, maxTranslationTokens: 2000`を設定
 
 #### sub2 initialize()メソッドでAI設定を読み込み
 @target: `src/background/tabManager.ts`
 @ref: なし
-- [ ] `const aiSettings = await this.storage.getAiSettings();`を追加
-- [ ] `this.aiProcessor.updateSettings(aiSettings);`を追加
+- [x] `const aiSettings = await this.storage.getAiSettings();`を追加
+- [x] `this.aiProcessor.updateSettings(aiSettings);`を追加
 
 #### sub3 ensureTabReady()メソッドにAI処理を統合
 @target: `src/background/tabManager.ts`
 @ref: なし
-- [ ] processedContentが既に存在する場合、早期リターン（true）
-- [ ] contentが未取得の場合、既存のresolveContent()ロジックを実行
-- [ ] AI処理ブロックを追加（try-catch）
-- [ ] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
-- [ ] `if (this.aiProcessor.isEnabled(aiSettings))`で有効性判定
-- [ ] `const processed = await this.aiProcessor.processContent(tab, aiSettings);`でAI処理実行
-- [ ] `if (processed) { tab.processedContent = processed; }`で結果を保存
-- [ ] エラー時は`this.logError('AI_PROCESSING_FAILED', ...)`でログ記録
-- [ ] エラー時もフローを継続（元のcontentで動作）
+- [x] processedContentが既に存在する場合、早期リターン（true）
+- [x] contentが未取得の場合、既存のresolveContent()ロジックを実行
+- [x] AI処理ブロックを追加（try-catch）
+- [x] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
+- [x] `if (this.aiProcessor.isEnabled(aiSettings))`で有効性判定
+- [x] `const processed = await this.aiProcessor.processContent(tab, aiSettings);`でAI処理実行
+- [x] `if (processed) { tab.processedContent = processed; }`で結果を保存
+- [x] エラー時は`this.logError('AI_PROCESSING_FAILED', ...)`でログ記録
+- [x] エラー時もフローを継続（元のcontentで動作）
 
 #### sub4 updateSettings()メソッドでAiProcessorを更新
 @target: `src/background/tabManager.ts`
 @ref: なし
-- [ ] 既存の設定更新処理の後に追加
-- [ ] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
-- [ ] `this.aiProcessor.updateSettings(aiSettings);`でプロセッサーを更新
-- [ ] 既存タブのprocessedContentをクリア: `for (const tab of this.queue.tabs) { tab.processedContent = undefined; }`
-- [ ] `await this.persistQueue();`で変更を永続化
-- [ ] `this.emitStatus();`でステータス更新を通知
+- [x] 既存の設定更新処理の後に追加
+- [x] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
+- [x] `this.aiProcessor.updateSettings(aiSettings);`でプロセッサーを更新
+- [x] 既存タブのprocessedContentをクリア: `for (const tab of this.queue.tabs) { tab.processedContent = undefined; }`
+- [x] `await this.persistQueue();`で変更を永続化
+- [x] `this.emitStatus();`でステータス更新を通知
 
 #### sub5 TabManager統合テスト作成
 @target: `src/background/__tests__/tabManagerAiIntegration.test.ts`（新規作成）
 @ref: `src/background/__tests__/tabManager.test.ts`
-- [ ] AI要約有効時、processedContentが設定されるテスト
-- [ ] AI翻訳有効時、processedContentが設定されるテスト
-- [ ] 両方有効時、processedContentが設定されるテスト
-- [ ] AI無効時、processedContentが設定されないテスト
-- [ ] API失敗時、processedContentが設定されず元のcontentで動作するテスト
-- [ ] 設定変更時、既存タブのprocessedContentがクリアされるテスト
-- [ ] AiProcessorとStorageManagerをモック化
+- [x] AI要約有効時、processedContentが設定されるテスト
+- [x] AI翻訳有効時、processedContentが設定されるテスト
+- [x] 両方有効時、processedContentが設定されるテスト
+- [x] AI無効時、processedContentが設定されないテスト
+- [x] API失敗時、processedContentが設定されず元のcontentで動作するテスト
+- [x] 設定変更時、既存タブのprocessedContentがクリアされるテスト
+- [x] AiProcessorとStorageManagerをモック化
 
 #### sub6 既存のtabManager.test.tsが成功することを確認
 @target: なし
 @ref: `src/background/__tests__/tabManager.test.ts`
-- [ ] `npm run test -- tabManager.test.ts`を実行
-- [ ] 全テストが成功することを確認
-- [ ] 失敗がある場合、リグレッションを調査して修正
+- [x] `npm run test -- tabManager.test.ts`を実行
+- [x] 全テストが成功することを確認
+- [x] 失敗がある場合、リグレッションを調査して修正
 
 ### process5 TTSEngine統合
 #### sub1 TTSEngineでprocessedContentを優先使用
 @target: `src/background/ttsEngine.ts`
 @ref: `src/shared/types/tab.ts`
-- [ ] `start()`メソッドを修正
-- [ ] `const textToSpeak = tab.processedContent || tab.content;`でprocessedContentを優先
-- [ ] 既存のエラーハンドリングを維持（"No content to read"）
-- [ ] コメントを追加: "AI処理済みコンテンツがあればそれを優先、なければ元のコンテンツを使用"
+- [x] `start()`メソッドを修正
+- [x] `const textToSpeak = tab.processedContent || tab.content;`でprocessedContentを優先
+- [x] 既存のエラーハンドリングを維持（"No content to read"）
+- [x] コメントを追加: "AI処理済みコンテンツがあればそれを優先、なければ元のコンテンツを使用"
 
 #### sub2 TTSEngineテストの更新
 @target: `src/background/__tests__/ttsEngine.test.ts`
 @ref: なし
-- [ ] processedContentがある場合の読み上げテストを追加
-- [ ] processedContentとcontentの両方がある場合、processedContentが優先されることを確認
-- [ ] processedContentがnullでcontentがある場合、contentが使用されることを確認
+- [x] processedContentがある場合の読み上げテストを追加
+- [x] processedContentとcontentの両方がある場合、processedContentが優先されることを確認
+- [x] processedContentがnullでcontentがある場合、contentが使用されることを確認
 
 ### process6 UI統合（オプション設定画面）
 #### sub1 オプション画面の動作確認
 @target: `src/options/OptionsApp.tsx`
 @ref: なし
-- [ ] enableAiSummaryチェックボックスが正しく動作するか確認
-- [ ] enableAiTranslationチェックボックスが正しく動作するか確認
-- [ ] 設定変更がStorageに保存されるか確認
-- [ ] 必要に応じて説明文を追加（"要約機能を有効にすると、長文を短く要約して読み上げます"など）
+- [x] enableAiSummaryチェックボックスが正しく動作するか確認
+- [x] enableAiTranslationチェックボックスが正しく動作するか確認
+- [x] 設定変更がStorageに保存されるか確認
+- [x] 必要に応じて説明文を追加（"要約機能を有効にすると、長文を短く要約して読み上げます"など）
 
 #### sub2 ポップアップUIでの状態表示（オプション）
 @target: `src/popup/components/StatusDisplay.tsx`
 @ref: なし
-- [ ] AI処理中のインジケーター表示を検討（オプション）
-- [ ] 処理済みタブの視覚的マーキングを検討（オプション）
+- [x] AI処理中のインジケーター表示を検討（オプション）
+- [x] 処理済みタブの視覚的マーキングを検討（オプション）
 
 ### process10 ユニットテスト
 #### sub1 OpenRouterClient.translate()のテスト
