@@ -1,245 +1,437 @@
-# title: OpenRouter API 接続機能の実装
+# title: AI要約・翻訳機能の実装
 
 ## 概要
-- 設定画面でOpenRouter APIキーを入力し、接続テストを実行できる機能を実装
-- ユニットテストで実際の疎通確認を行い、API統合の基盤を構築
+- タブのテキストコンテンツを読み上げる際に、OpenRouter APIを使用したAI要約または日本語翻訳を適用する機能を実装します
+- 要約のみ、翻訳のみ、または両方（要約→翻訳）の3つのモードをサポートします
 
 ### goal
-- ユーザがOpenRouter APIキーを設定画面で入力し、「接続テスト」ボタンで疎通確認できる
-- テスト結果（成功/失敗）が明確に表示され、エラー時には具体的なメッセージが表示される
-- 今後のAI要約・翻訳機能の基盤となるAPIクライアントが整備される
+- ユーザーが長いWebページを効率的に音声で把握できるようにする（要約機能）
+- ユーザーが外国語のWebページを日本語音声で理解できるようにする（翻訳機能）
+- 両機能を組み合わせて、外国語の長文を日本語の要約として聞けるようにする
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
+- 後方互換性を維持すること（既存の機能に影響を与えない）
+- テスト駆動開発を実施すること（各実装の前にテストを作成）
+- エラーハンドリングを徹底すること（API失敗時は元のコンテンツで動作）
 
 ## 開発のゴール
-- OpenRouter API との安全な通信を実現するクライアントライブラリを実装
-- 設定画面でAPIキーの接続テストをユーザが実行できるUIを提供
-- モック・実APIの両方を網羅したユニットテストで品質を保証
-- Phase 3（AI要約機能）の実装に向けた基盤を整備
+- AI要約機能が有効な場合、タブコンテンツを要約して読み上げる
+- AI翻訳機能が有効な場合、タブコンテンツを日本語に翻訳して読み上げる
+- 両方が有効な場合、要約してから日本語に翻訳して読み上げる
+- API呼び出し失敗時も拡張機能が正常に動作する
+- 既存のテストが全て成功し、新規テストのカバレッジが80%以上となる
 
 ## 実装仕様
 
-### OpenRouter APIクライアント仕様
-- **エンドポイント**: `https://openrouter.ai/api/v1/chat/completions`
-- **認証**: `Authorization: Bearer ${apiKey}` ヘッダー
-- **リクエスト形式**: JSON (Content-Type: application/json)
-- **機能**:
-  1. 接続テスト: 最小限のリクエストで認証・疎通を確認
-  2. テキスト要約: コンテンツを要約するリクエスト送信
-  3. エラーハンドリング: 401 (認証), 429 (レート制限), ネットワークエラーの処理
+### アーキテクチャ概要
 
-### 設定画面UI仕様
-- 既存のAI設定セクションに「接続テスト」ボタンを追加
-- テスト実行中: ローディングインジケータ表示、ボタン無効化
-- テスト成功: 成功メッセージを表示（緑色）
-- テスト失敗: エラーメッセージを表示（赤色）、具体的な原因を含む
-- APIキー未入力時: バリデーションエラーを表示
+#### 処理フロー
+```
+[Content Script] テキスト抽出
+    ↓
+[TabManager.ensureTabReady()] コンテンツ取得
+    ↓
+[AiProcessor.processContent()] AI処理判定
+    ├─ 要約のみ → OpenRouterClient.summarize()
+    ├─ 翻訳のみ → OpenRouterClient.translate()
+    └─ 両方 → summarize() → translate()
+    ↓
+[TabInfo.processedContent] 処理結果を保存
+    ↓
+[TTSEngine.start()] 読み上げ実行（processedContent優先）
+```
 
-### テスト仕様
-- **モックテスト**: fetch APIをモックして各種レスポンスパターンをテスト
-- **実API疎通テスト**: 環境変数 `OPENROUTER_API_KEY` がある場合のみ実行
-  - 実際のAPIへリクエスト送信
-  - レスポンス構造の検証
-  - エラーハンドリングの確認
+#### データモデル拡張
+
+**TabInfo型の拡張**
+```typescript
+export interface TabInfo {
+  tabId: number;
+  url: string;
+  title: string;
+  content?: string;           // 元のコンテンツ
+  processedContent?: string;  // AI処理後のコンテンツ（新規追加）
+  summary?: string;           // 後方互換性のため維持
+  isIgnored: boolean;
+  extractedAt?: Date;
+  error?: string;
+  loading?: boolean;
+}
+```
+
+#### 新規コンポーネント
+
+**AiProcessor クラス**
+- 役割: AI要約・翻訳処理を統合管理
+- 責務:
+  - OpenRouterClientの初期化と管理
+  - 要約・翻訳の処理パイプライン制御
+  - エラーハンドリングとフォールバック
+- 主要メソッド:
+  - `updateSettings(settings: AiSettings): void` - AI設定を更新
+  - `processContent(tab: TabInfo, settings: AiSettings): Promise<string | null>` - コンテンツにAI処理を適用
+  - `isEnabled(settings: AiSettings): boolean` - AI処理が有効かどうか判定
+
+**OpenRouterClient 拡張**
+- 新規メソッド: `translate(content: string, maxTokens: number): Promise<string>`
+- システムプロンプト: "Translate the following content to Japanese. Maintain the original meaning and tone."
+
+#### 統合ポイント
+
+**TabManager 統合**
+- `aiProcessor`プロパティを追加
+- `initialize()`でAI設定を読み込み、AiProcessorを初期化
+- `ensureTabReady()`でAI処理を実行し、`processedContent`に保存
+- `updateSettings()`でAI設定変更時に既存タブの`processedContent`をクリア
+
+**TTSEngine 統合**
+- `start()`メソッドで`tab.processedContent || tab.content`を優先的に使用
+
+#### パフォーマンス最適化
+- トークン制限: 要約500トークン、翻訳2000トークン
+- タイムアウト: 30秒
+- 長文の事前トリミング: 5000文字まで
+- キャッシング: `processedContent`をストレージに永続化
+
+#### セキュリティ
+- APIキー保護: 既存のStorageManagerの暗号化機能を利用
+- プロンプトインジェクション対策: システムプロンプトを固定
 
 ## 生成AIの学習用コンテキスト
 
-### 既存実装
-- `src/options/OptionsApp.tsx`
-  - AI設定UIの既存実装（APIキー入力、モデル選択、有効化フラグ）
-- `src/shared/utils/storage.ts`
-  - StorageManager.getAiSettings(), saveAiSettings()
+### 型定義
+- `src/shared/types/tab.ts`
+  - TabInfo型の確認と拡張
 - `src/shared/types/ai.ts`
-  - AiSettings インターフェース定義
-- `src/options/__tests__/OptionsApp.test.tsx`
-  - 既存のUI/設定保存テスト
+  - AiSettings型の確認
 
-### テスト環境
-- `jest.config.js`
-  - Jest設定（ts-jest, jsdom環境）
-- `package.json`
-  - テストスクリプト: `npm run test`, `npm run test:watch`
+### サービス層
+- `src/shared/services/openrouter.ts`
+  - OpenRouterClientの既存実装を確認
+  - translate()メソッドを追加
+- `src/shared/services/baseApiClient.ts`
+  - 基底クラスのAPI呼び出しロジックを確認
+
+### バックグラウンド処理
+- `src/background/tabManager.ts`
+  - ensureTabReady()の既存実装を確認
+  - AiProcessor統合ポイントを特定
+- `src/background/ttsEngine.ts`
+  - start()メソッドの読み上げロジックを確認
+
+### テスト
+- `src/shared/services/__tests__/openrouter.test.ts`
+  - 既存テストパターンを参考
+- `src/background/__tests__/tabManager.test.ts`
+  - 既存テストパターンを参考
 
 ## Process
 
-### process1 OpenRouter APIクライアントの実装
-#### sub1 APIクライアントクラスの作成
-@target: `src/shared/services/openrouter.ts` (新規作成)
-@ref: `src/shared/types/ai.ts`, `src/shared/utils/storage.ts`
+### process1 データモデル拡張
+#### sub1 TabInfo型にprocessedContentフィールドを追加
+@target: `src/shared/types/tab.ts`
+@ref: `src/shared/types/index.ts`
+- [ ] `processedContent?: string`フィールドを追加
+- [ ] JSDocコメントで用途を説明（"AI処理後のコンテンツ（要約・翻訳）"）
 
-- [x] `OpenRouterClient` クラスを作成
-  - コンストラクタでAPIキーとモデル名を受け取る
-  - プライベートメソッド `_makeRequest()` で共通リクエスト処理
-- [x] `testConnection()` メソッドを実装
-  - 最小限のリクエストで接続テスト（軽量なプロンプトを使用）
-  - レスポンスのステータスコードとボディを検証
-  - 成功時は `{ success: true }` を返す
-  - 失敗時は `{ success: false, error: string }` を返す
-- [x] `summarize(content: string, maxTokens: number)` メソッドを実装
-  - Phase 3で使用する要約機能の基礎実装
-  - システムプロンプト: "Summarize the following content concisely."
-  - ユーザープロンプト: content
-- [x] エラーハンドリングを実装
-  - 401 Unauthorized: "APIキーが無効です"
-  - 429 Too Many Requests: "リクエスト制限に達しました。しばらく待ってから再試行してください"
-  - 500系エラー: "サーバーエラーが発生しました"
-  - ネットワークエラー: "ネットワーク接続を確認してください"
-- [x] TypeScript型定義を追加
-  - `OpenRouterRequest`, `OpenRouterResponse`, `ConnectionTestResult`
-- [x] 型チェックとLintを通過させる
-- [x] npm run test で全テストが通ることを確認
-- [x] npm run build:firefox でビルドが成功することを確認
+#### sub2 型定義の整合性確認
+@target: `src/shared/types/index.ts`
+@ref: なし
+- [ ] TabInfo型のexportを確認
+- [ ] 他の型との整合性を確認
 
-#### sub2 サービスディレクトリの作成
-@target: `src/shared/services/` (新規ディレクトリ)
+### process2 OpenRouterClient拡張
+#### sub1 translate()メソッドの実装
+@target: `src/shared/services/openrouter.ts`
+@ref: `src/shared/services/baseApiClient.ts`, `src/shared/types/ai.ts`
+- [ ] `translate(content: string, maxTokens: number): Promise<string>`メソッドを実装
+- [ ] システムプロンプトを設定（日本語翻訳、意味と口調を維持）
+- [ ] OpenRouterRequestを構築
+- [ ] エラーハンドリング（API_ERROR_MESSAGES.INVALID_RESPONSE）
+- [ ] 既存のsummarize()メソッドと同様の構造を維持
 
-- [ ] ディレクトリを作成
-- [ ] 今後の拡張に備えた構造を整備（他のAIサービス統合も想定）
+#### sub2 translate()メソッドの単体テスト
+@target: `src/shared/services/__tests__/openrouter.test.ts`
+@ref: 同ファイルの既存テスト
+- [ ] 正常系テスト: API成功時に翻訳テキストを返す
+- [ ] 異常系テスト: API失敗時にエラーをスロー
+- [ ] 異常系テスト: 空のレスポンス時にエラーをスロー
+- [ ] モックAPIレスポンスを作成
 
-### process2 設定画面への接続テスト機能追加
-#### sub1 UIコンポーネントの更新
+### process3 AiProcessorサービスの実装
+#### sub1 AiProcessorクラスの骨格作成
+@target: `src/background/aiProcessor.ts`（新規作成）
+@ref: `src/shared/services/openrouter.ts`, `src/shared/types/ai.ts`, `src/shared/types/tab.ts`
+- [ ] AiProcessorOptionsインターフェースを定義（maxSummaryTokens, maxTranslationTokens）
+- [ ] AiProcessorクラスを作成
+- [ ] プロパティ: `private client: OpenRouterClient | null`
+- [ ] プロパティ: `private readonly options: Required<AiProcessorOptions>`
+- [ ] コンストラクタでデフォルトオプションを設定（要約500、翻訳2000）
+
+#### sub2 updateSettings()メソッドの実装
+@target: `src/background/aiProcessor.ts`
+@ref: なし
+- [ ] `updateSettings(settings: AiSettings): void`メソッドを実装
+- [ ] APIキーとモデルが存在する場合、OpenRouterClientを初期化
+- [ ] APIキーが未設定の場合、clientをnullに設定
+
+#### sub3 isEnabled()メソッドの実装
+@target: `src/background/aiProcessor.ts`
+@ref: なし
+- [ ] `isEnabled(settings: AiSettings): boolean`メソッドを実装
+- [ ] enableAiSummaryまたはenableAiTranslationがtrueかつclientがnullでない場合にtrueを返す
+
+#### sub4 processContent()メソッドの実装
+@target: `src/background/aiProcessor.ts`
+@ref: なし
+- [ ] `processContent(tab: TabInfo, settings: AiSettings): Promise<string | null>`メソッドを実装
+- [ ] AI処理が不要な場合、元のcontentを返す
+- [ ] clientが未初期化の場合、警告ログを出力して元のcontentを返す
+- [ ] contentが空の場合、nullを返す
+- [ ] try-catchでエラーハンドリング
+- [ ] enableAiSummaryがtrueの場合、summarize()を呼び出し
+- [ ] enableAiTranslationがtrueの場合、translate()を呼び出し
+- [ ] 両方trueの場合、summarize() → translate()の順で実行
+- [ ] エラー時は元のcontentを返す（フォールバック）
+
+#### sub5 AiProcessorの単体テスト作成
+@target: `src/background/__tests__/aiProcessor.test.ts`（新規作成）
+@ref: `src/background/aiProcessor.ts`
+- [ ] updateSettings()のテスト: APIキー設定時にclientが初期化される
+- [ ] updateSettings()のテスト: APIキー未設定時にclientがnullになる
+- [ ] isEnabled()のテスト: 要約有効時にtrueを返す
+- [ ] isEnabled()のテスト: 翻訳有効時にtrueを返す
+- [ ] isEnabled()のテスト: 両方無効時にfalseを返す
+- [ ] isEnabled()のテスト: client未初期化時にfalseを返す
+- [ ] processContent()のテスト: 要約のみ有効な場合、summarize()のみが呼ばれる
+- [ ] processContent()のテスト: 翻訳のみ有効な場合、translate()のみが呼ばれる
+- [ ] processContent()のテスト: 両方有効な場合、summarize() → translate()の順で呼ばれる
+- [ ] processContent()のテスト: AI処理無効時、元のcontentを返す
+- [ ] processContent()のテスト: client未初期化時、元のcontentを返す
+- [ ] processContent()のテスト: content空の場合、nullを返す
+- [ ] processContent()のテスト: API失敗時、元のcontentを返す（フォールバック）
+- [ ] OpenRouterClientをモック化
+
+### process4 TabManager統合
+#### sub1 AiProcessorをTabManagerに追加
+@target: `src/background/tabManager.ts`
+@ref: `src/background/aiProcessor.ts`
+- [ ] import文を追加: `import { AiProcessor } from './aiProcessor';`
+- [ ] プロパティを追加: `private aiProcessor: AiProcessor;`
+- [ ] コンストラクタでAiProcessorをインスタンス化
+- [ ] オプションとして`maxSummaryTokens: 500, maxTranslationTokens: 2000`を設定
+
+#### sub2 initialize()メソッドでAI設定を読み込み
+@target: `src/background/tabManager.ts`
+@ref: なし
+- [ ] `const aiSettings = await this.storage.getAiSettings();`を追加
+- [ ] `this.aiProcessor.updateSettings(aiSettings);`を追加
+
+#### sub3 ensureTabReady()メソッドにAI処理を統合
+@target: `src/background/tabManager.ts`
+@ref: なし
+- [ ] processedContentが既に存在する場合、早期リターン（true）
+- [ ] contentが未取得の場合、既存のresolveContent()ロジックを実行
+- [ ] AI処理ブロックを追加（try-catch）
+- [ ] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
+- [ ] `if (this.aiProcessor.isEnabled(aiSettings))`で有効性判定
+- [ ] `const processed = await this.aiProcessor.processContent(tab, aiSettings);`でAI処理実行
+- [ ] `if (processed) { tab.processedContent = processed; }`で結果を保存
+- [ ] エラー時は`this.logError('AI_PROCESSING_FAILED', ...)`でログ記録
+- [ ] エラー時もフローを継続（元のcontentで動作）
+
+#### sub4 updateSettings()メソッドでAiProcessorを更新
+@target: `src/background/tabManager.ts`
+@ref: なし
+- [ ] 既存の設定更新処理の後に追加
+- [ ] `const aiSettings = await this.storage.getAiSettings();`でAI設定を取得
+- [ ] `this.aiProcessor.updateSettings(aiSettings);`でプロセッサーを更新
+- [ ] 既存タブのprocessedContentをクリア: `for (const tab of this.queue.tabs) { tab.processedContent = undefined; }`
+- [ ] `await this.persistQueue();`で変更を永続化
+- [ ] `this.emitStatus();`でステータス更新を通知
+
+#### sub5 TabManager統合テスト作成
+@target: `src/background/__tests__/tabManagerAiIntegration.test.ts`（新規作成）
+@ref: `src/background/__tests__/tabManager.test.ts`
+- [ ] AI要約有効時、processedContentが設定されるテスト
+- [ ] AI翻訳有効時、processedContentが設定されるテスト
+- [ ] 両方有効時、processedContentが設定されるテスト
+- [ ] AI無効時、processedContentが設定されないテスト
+- [ ] API失敗時、processedContentが設定されず元のcontentで動作するテスト
+- [ ] 設定変更時、既存タブのprocessedContentがクリアされるテスト
+- [ ] AiProcessorとStorageManagerをモック化
+
+#### sub6 既存のtabManager.test.tsが成功することを確認
+@target: なし
+@ref: `src/background/__tests__/tabManager.test.ts`
+- [ ] `npm run test -- tabManager.test.ts`を実行
+- [ ] 全テストが成功することを確認
+- [ ] 失敗がある場合、リグレッションを調査して修正
+
+### process5 TTSEngine統合
+#### sub1 TTSEngineでprocessedContentを優先使用
+@target: `src/background/ttsEngine.ts`
+@ref: `src/shared/types/tab.ts`
+- [ ] `start()`メソッドを修正
+- [ ] `const textToSpeak = tab.processedContent || tab.content;`でprocessedContentを優先
+- [ ] 既存のエラーハンドリングを維持（"No content to read"）
+- [ ] コメントを追加: "AI処理済みコンテンツがあればそれを優先、なければ元のコンテンツを使用"
+
+#### sub2 TTSEngineテストの更新
+@target: `src/background/__tests__/ttsEngine.test.ts`
+@ref: なし
+- [ ] processedContentがある場合の読み上げテストを追加
+- [ ] processedContentとcontentの両方がある場合、processedContentが優先されることを確認
+- [ ] processedContentがnullでcontentがある場合、contentが使用されることを確認
+
+### process6 UI統合（オプション設定画面）
+#### sub1 オプション画面の動作確認
 @target: `src/options/OptionsApp.tsx`
-@ref: `src/shared/services/openrouter.ts`
+@ref: なし
+- [ ] enableAiSummaryチェックボックスが正しく動作するか確認
+- [ ] enableAiTranslationチェックボックスが正しく動作するか確認
+- [ ] 設定変更がStorageに保存されるか確認
+- [ ] 必要に応じて説明文を追加（"要約機能を有効にすると、長文を短く要約して読み上げます"など）
 
-- [x] 状態管理を追加
-  - `const [isTestingConnection, setIsTestingConnection] = useState(false)`
-  - `const [connectionTestResult, setConnectionTestResult] = useState<{success: boolean, message: string} | null>(null)`
-- [x] `handleConnectionTest()` 関数を実装
-  - APIキーの存在チェック（未入力時は早期リターン）
-  - `setIsTestingConnection(true)` でローディング開始
-  - `OpenRouterClient` インスタンス生成
-  - `testConnection()` を呼び出し
-  - 結果を `connectionTestResult` に設定
-  - 成功/失敗に応じたメッセージを表示
-  - finally ブロックで `setIsTestingConnection(false)`
-- [x] AI設定セクションに「接続テスト」ボタンを追加
-  - ボタンラベル: "接続テスト"
-  - `disabled={isTestingConnection || !aiSettings.openRouterApiKey}`
-  - `onClick={handleConnectionTest}`
-- [x] テスト結果表示エリアを追加
-  - 成功時: 緑色のメッセージ "✓ 接続に成功しました"
-  - 失敗時: 赤色のメッセージ "✗ 接続に失敗しました: {エラー詳細}"
-  - テスト未実行時: 非表示
-- [x] ローディングインジケータを追加
-  - テスト実行中は "接続テスト中..." と表示
-- [x] 型チェックとLintを通過させる
-- [x] npm run test で全テストが通ることを確認
-- [x] npm run build:firefox でビルドが成功することを確認
-
-#### sub2 スタイリングの追加
-@target: `src/options/OptionsApp.tsx` (インラインまたは別CSSファイル)
-
-- [x] 接続テストボタンのスタイル
-- [x] 結果表示エリアのスタイル（成功=緑、失敗=赤）
-- [x] ローディング中のスタイル
-
-### process3 型定義の拡張
-#### sub1 OpenRouter関連の型定義
-@target: `src/shared/types/ai.ts`
-
-- [x] `ConnectionTestResult` インターフェースを追加
-  ```typescript
-  export interface ConnectionTestResult {
-    success: boolean;
-    message?: string;
-    error?: string;
-  }
-  ```
-- [x] `OpenRouterRequest`, `OpenRouterResponse` インターフェースを追加
-  - OpenRouter APIのリクエスト/レスポンス構造に対応
-- [x] 型チェックとLintを通過させる
-- [x] npm run test で全テストが通ることを確認
-- [x] npm run build:firefox でビルドが成功することを確認
+#### sub2 ポップアップUIでの状態表示（オプション）
+@target: `src/popup/components/StatusDisplay.tsx`
+@ref: なし
+- [ ] AI処理中のインジケーター表示を検討（オプション）
+- [ ] 処理済みタブの視覚的マーキングを検討（オプション）
 
 ### process10 ユニットテスト
-#### sub1 OpenRouterClientのモックテスト
-@target: `src/shared/services/__tests__/openrouter.test.ts` (新規作成)
-@ref: `src/shared/services/openrouter.ts`
+#### sub1 OpenRouterClient.translate()のテスト
+@target: `src/shared/services/__tests__/openrouter.test.ts`
+@ref: なし
+- [ ] 全テストケースが実装されていることを確認
+- [ ] カバレッジが80%以上であることを確認
 
-- [x] テスト環境のセットアップ
-  - `global.fetch` をモック
-  - テスト用のAPIキー、モデル名を定義
-- [x] 接続テスト成功ケース
-  - モックで200レスポンスを返す
-  - `testConnection()` が `{ success: true }` を返すことを検証
-- [x] 接続テスト失敗ケース（401 Unauthorized）
-  - モックで401レスポンスを返す
-  - エラーメッセージに "APIキーが無効" が含まれることを検証
-- [x] 接続テスト失敗ケース（429 Too Many Requests）
-  - モックで429レスポンスを返す
-  - エラーメッセージに "リクエスト制限" が含まれることを検証
-- [x] ネットワークエラーケース
-  - モックでネットワークエラーをスロー
-  - エラーメッセージに "ネットワーク" が含まれることを検証
-- [x] `summarize()` メソッドのテスト
-  - 環境変数が設定されている場合にのみ実行
-  - 正常系: 要約テキストが返ることを検証
-  - リクエストボディに正しいプロンプトが含まれることを検証
+#### sub2 AiProcessorのテスト
+@target: `src/background/__tests__/aiProcessor.test.ts`
+@ref: なし
+- [ ] 全テストケースが実装されていることを確認
+- [ ] カバレッジが80%以上であることを確認
 
-#### sub2 OpenRouterClient実API疎通テスト
-@target: `src/shared/services/__tests__/openrouter.integration.test.ts` (新規作成)
+#### sub3 TabManager統合テスト
+@target: `src/background/__tests__/tabManagerAiIntegration.test.ts`
+@ref: なし
+- [ ] 全テストケースが実装されていることを確認
+- [ ] カバレッジが80%以上であることを確認
 
-- [x] 環境変数チェック
-  - `process.env.OPENROUTER_API_KEY` が存在する場合のみテストを実行
-  - 存在しない場合は `test.skip()` でスキップ
-- [x] 実際のAPI接続テスト
-  - 本物のAPIキーを使用して `testConnection()` を呼び出し
-  - レスポンスが成功することを検証
-  - タイムアウト設定（10秒程度）
-- [x] 実際の要約リクエストテスト
-  - 短いテキストを `summarize()` に渡す
-  - レスポンスが文字列であることを検証
-  - レスポンスが空でないことを検証
-- [x] エラーハンドリングテスト（無効なAPIキー）
-  - 意図的に無効なAPIキーを使用
-  - 401エラーが適切にハンドリングされることを検証
+#### sub4 TTSEngineテスト
+@target: `src/background/__tests__/ttsEngine.test.ts`
+@ref: なし
+- [ ] 新規テストケースが実装されていることを確認
+- [ ] 既存テストが全て成功することを確認
 
-#### sub3 OptionsAppコンポーネントのテスト拡張
-@target: `src/options/__tests__/OptionsApp.test.tsx`
-@ref: `src/shared/services/openrouter.ts`
+#### sub5 全体のテストスイート実行
+@target: なし
+@ref: なし
+- [ ] `npm run test`を実行
+- [ ] 全テストが成功することを確認
+- [ ] カバレッジレポートを確認（80%以上）
 
-- [x] OpenRouterClientのモック
-  - `jest.mock('../../shared/services/openrouter')` を追加
-  - `testConnection` メソッドをモック化
-- [x] 接続テストボタンの存在確認
-  - "接続テスト" ボタンがレンダリングされることを確認
-- [x] APIキー未入力時の挙動
-  - APIキーが空の場合、ボタンがdisabledになることを確認
-- [x] 接続テスト成功ケース
-  - モックで成功レスポンスを返す
-  - ボタンクリック後、成功メッセージが表示されることを確認
-  - "接続に成功しました" が含まれることを確認
-- [x] 接続テスト失敗ケース
-  - モックで失敗レスポンスを返す
-  - ボタンクリック後、エラーメッセージが表示されることを確認
-  - エラー詳細が含まれることを確認
-- [x] ローディング状態のテスト
-  - テスト実行中、ボタンがdisabledになることを確認
-  - "接続テスト中..." が表示されることを確認
+### process20 E2Eテストと動作確認
+#### sub1 Chrome拡張機能のビルドとインストール
+@target: なし
+@ref: なし
+- [ ] `npm run build:chrome`を実行
+- [ ] chrome://extensions/でデベロッパーモードを有効化
+- [ ] dist/chromeフォルダを読み込み
+
+#### sub2 要約のみモードのテスト
+@target: なし
+@ref: なし
+- [ ] オプション画面でenableAiSummaryを有効、enableAiTranslationを無効に設定
+- [ ] OpenRouter APIキーを設定
+- [ ] 長文の英語記事タブを開く
+- [ ] タブをキューに追加して読み上げ
+- [ ] 要約された内容が読み上げられることを確認
+
+#### sub3 翻訳のみモードのテスト
+@target: なし
+@ref: なし
+- [ ] オプション画面でenableAiSummaryを無効、enableAiTranslationを有効に設定
+- [ ] 英語記事タブを開く
+- [ ] タブをキューに追加して読み上げ
+- [ ] 日本語に翻訳された内容が読み上げられることを確認
+
+#### sub4 要約+翻訳モードのテスト
+@target: なし
+@ref: なし
+- [ ] オプション画面でenableAiSummaryとenableAiTranslationの両方を有効に設定
+- [ ] 長文の英語記事タブを開く
+- [ ] タブをキューに追加して読み上げ
+- [ ] 要約された日本語が読み上げられることを確認
+
+#### sub5 エラーハンドリングのテスト
+@target: なし
+@ref: なし
+- [ ] 無効なAPIキーを設定
+- [ ] タブをキューに追加
+- [ ] エラーが発生してもアプリケーションがクラッシュしないことを確認
+- [ ] 元のcontentで読み上げが続行されることを確認
+
+#### sub6 Firefox拡張機能のテスト
+@target: なし
+@ref: なし
+- [ ] `npm run build:firefox`を実行
+- [ ] about:debuggingで一時的なアドオンを読み込み
+- [ ] 上記のテストケース（sub2-sub5）をFirefoxでも実行
+- [ ] Chrome版と同様に動作することを確認
 
 ### process50 フォローアップ
-#### sub1 エラーメッセージの多言語対応（将来対応）
-- [ ] 現在は日本語のみ、将来的にi18nライブラリ導入時に対応
-
-#### sub2 リトライ機能の検討（将来対応）
-- [ ] 429エラー時の自動リトライ機能（Phase 3で実装検討）
+<!-- 実装後に仕様変更などが発生した場合は、ここにProcessを追加する -->
 
 ### process100 リファクタリング
-- [ ] エラーメッセージを定数化
-  - `src/shared/constants.ts` にエラーメッセージ定数を追加
-- [ ] API通信の共通ロジックを抽出
-  - 今後、他のAIサービス（Google Gemini等）統合時に再利用可能な構造に
-- [ ] TypeScript型定義の整理
-  - `src/shared/types/api.ts` など、API関連の型を別ファイルに分離検討
+#### sub1 コードレビューとリファクタリング
+@target: `src/background/aiProcessor.ts`, `src/background/tabManager.ts`
+@ref: なし
+- [ ] コードの可読性を確認
+- [ ] 重複コードを削除
+- [ ] エラーハンドリングの一貫性を確認
+- [ ] コメントの充実度を確認
+
+#### sub2 パフォーマンス最適化
+@target: `src/background/aiProcessor.ts`
+@ref: なし
+- [ ] API呼び出しのタイムアウト設定を追加（30秒）
+- [ ] 長文コンテンツの事前トリミングを実装（5000文字制限）
+- [ ] キャッシュ戦略の検証（processedContentの永続化確認）
+
+#### sub3 型安全性の向上
+@target: 各種ファイル
+@ref: なし
+- [ ] `npm run typecheck`を実行
+- [ ] 型エラーがないことを確認
+- [ ] any型の使用を最小限に抑える
 
 ### process200 ドキュメンテーション
-- [ ] `CLAUDE.md` のPhase 3セクションを更新
-  - OpenRouter API統合の進捗状況を記載
-  - 次のステップ（要約機能の実装）を明記
-- [ ] `README.md` の更新（該当セクションがあれば）
-  - OpenRouter APIキーの取得方法を記載
-  - 環境変数設定方法（テスト実行用）を記載
-- [ ] JSDocコメントの追加
-  - OpenRouterClientの各メソッドに詳細なドキュメントを記載
-  - パラメータ、戻り値、エラーケースを明記
+#### sub1 CLAUDE.mdの更新
+@target: `CLAUDE.md`
+@ref: なし
+- [ ] ## AI要約・翻訳機能セクションを追加
+- [ ] アーキテクチャ図を更新（AiProcessorコンポーネントを追加）
+- [ ] 処理フローの説明を追加
+- [ ] データモデル（TabInfo.processedContent）の説明を追加
+
+#### sub2 README.mdの更新
+@target: `README.md`
+@ref: なし
+- [ ] 機能一覧にAI要約・翻訳機能を追加
+- [ ] 使用方法のセクションを追加（オプション設定画面の説明）
+- [ ] 必要なAPIキーの取得方法を説明
+
+#### sub3 コード内のJSDocコメント充実
+@target: `src/background/aiProcessor.ts`, `src/shared/services/openrouter.ts`
+@ref: なし
+- [ ] 各メソッドにJSDocコメントを追加
+- [ ] パラメータと戻り値の説明を追加
+- [ ] 使用例を追加（@example）
+
+#### sub4 PLAN.mdの完了マーク
+@target: `PLAN.md`
+@ref: なし
+- [ ] 全てのチェックボックスが完了していることを確認
+- [ ] 実装の振り返りセクションを追加（学んだこと、改善点など）
