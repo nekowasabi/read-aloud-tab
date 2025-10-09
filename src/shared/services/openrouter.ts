@@ -8,6 +8,7 @@ import { OPENROUTER_ERROR_MESSAGES } from '../constants';
 /**
  * OpenRouter API クライアント
  * OpenRouter APIとの通信を管理するクラス
+ * 接続テスト、テキスト要約機能を提供
  */
 export class OpenRouterClient {
   private readonly apiKey: string;
