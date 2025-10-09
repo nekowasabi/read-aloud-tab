@@ -231,7 +231,11 @@ export default function OptionsApp() {
       </section>
 
       <section className="options-section">
-        <h2>AI 要約設定</h2>
+        <h2>AI 要約・翻訳設定</h2>
+        <p className="section-description">
+          OpenRouter APIを使用して、長文を要約したり日本語に翻訳して読み上げることができます。
+          両方を有効にすると、要約してから日本語に翻訳して読み上げます。
+        </p>
         <div className="setting-item">
           <label htmlFor="enableAiSummary">
             <input
@@ -243,6 +247,9 @@ export default function OptionsApp() {
             />
             AI要約を有効化
           </label>
+          <p className="setting-description">
+            長文を短く要約して読み上げます。効率的に内容を把握できます。
+          </p>
         </div>
         <div className="setting-item">
           <label htmlFor="enableAiTranslation">
@@ -255,6 +262,9 @@ export default function OptionsApp() {
             />
             AI翻訳を有効化
           </label>
+          <p className="setting-description">
+            外国語のコンテンツを日本語に翻訳して読み上げます。
+          </p>
         </div>
         <div className="setting-item">
           <label htmlFor="openRouterApiKey">OpenRouter APIキー</label>

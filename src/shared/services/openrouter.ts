@@ -100,19 +100,21 @@ export class OpenRouterClient extends BaseApiClient {
   }
 
   /**
-   * テキストを要約
-   * @param content - 要約対象のコンテンツ
-   * @param maxTokens - 要約の最大トークン数
-   * @returns 要約されたテキスト
+   * テキストを処理（共通ロジック）
+   * @param systemPrompt - システムプロンプト
+   * @param content - 処理対象のコンテンツ
+   * @param maxTokens - 最大トークン数
+   * @returns 処理されたテキスト
    * @throws エラーが発生した場合
+   * @private
    */
-  async summarize(content: string, maxTokens: number): Promise<string> {
+  private async processText(systemPrompt: string, content: string, maxTokens: number): Promise<string> {
     const request: OpenRouterRequest = {
       model: this.model,
       messages: [
         {
           role: 'system',
-          content: 'Summarize the following content concisely.',
+          content: systemPrompt,
         },
         {
           role: 'user',
@@ -136,5 +138,27 @@ export class OpenRouterClient extends BaseApiClient {
     }
 
     return response.choices[0].message.content;
+  }
+
+  /**
+   * テキストを要約
+   * @param content - 要約対象のコンテンツ
+   * @param maxTokens - 要約の最大トークン数
+   * @returns 要約されたテキスト
+   * @throws エラーが発生した場合
+   */
+  async summarize(content: string, maxTokens: number): Promise<string> {
+    return this.processText('Summarize the following content concisely.', content, maxTokens);
+  }
+
+  /**
+   * テキストを日本語に翻訳
+   * @param content - 翻訳対象のコンテンツ
+   * @param maxTokens - 翻訳の最大トークン数
+   * @returns 翻訳されたテキスト
+   * @throws エラーが発生した場合
+   */
+  async translate(content: string, maxTokens: number): Promise<string> {
+    return this.processText('Translate the following content to Japanese. Maintain the original meaning and tone.', content, maxTokens);
   }
 }

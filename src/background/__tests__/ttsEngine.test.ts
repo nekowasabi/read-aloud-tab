@@ -126,4 +126,61 @@ describe('TTSEngine (PlaybackController)', () => {
     expect(secondUtterance.volume).toBe(0.5);
     expect(secondUtterance.pitch).toBe(1.2);
   });
+
+  test('processedContentがある場合はそれを優先的に読み上げる', async () => {
+    const hooks = {
+      onEnd: jest.fn(),
+      onError: jest.fn(),
+      onProgress: jest.fn(),
+    };
+
+    const tab = createTab({
+      content: 'Original content',
+      processedContent: 'Processed content',
+    });
+
+    const engine = new TTSEngine();
+    await engine.start(tab, defaultSettings, hooks);
+
+    const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+    expect(utterance.text).toBe('Processed content');
+  });
+
+  test('processedContentとcontentの両方がある場合、processedContentが優先される', async () => {
+    const hooks = {
+      onEnd: jest.fn(),
+      onError: jest.fn(),
+      onProgress: jest.fn(),
+    };
+
+    const tab = createTab({
+      content: 'Original long content that will be ignored',
+      processedContent: 'Short summarized content',
+    });
+
+    const engine = new TTSEngine();
+    await engine.start(tab, defaultSettings, hooks);
+
+    const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+    expect(utterance.text).toBe('Short summarized content');
+  });
+
+  test('processedContentがnullでcontentがある場合、contentが使用される', async () => {
+    const hooks = {
+      onEnd: jest.fn(),
+      onError: jest.fn(),
+      onProgress: jest.fn(),
+    };
+
+    const tab = createTab({
+      content: 'Original content',
+      processedContent: undefined,
+    });
+
+    const engine = new TTSEngine();
+    await engine.start(tab, defaultSettings, hooks);
+
+    const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+    expect(utterance.text).toBe('Original content');
+  });
 });
