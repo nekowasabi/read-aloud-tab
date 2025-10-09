@@ -879,7 +879,9 @@ export class TabManager {
       }
     }
 
-    // AI処理ブロック
+    // AI処理ブロック: 要約・翻訳が有効な場合に適用
+    // タイムアウト30秒、5000文字制限でAPI呼び出し
+    // エラー時は元のcontentで動作を継続（フォールバック）
     try {
       const aiSettings = await StorageManager.getAiSettings();
       if (this.aiProcessor.isEnabled(aiSettings)) {

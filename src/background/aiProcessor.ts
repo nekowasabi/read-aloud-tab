@@ -14,6 +14,10 @@ export interface AiProcessorOptions {
   maxSummaryTokens?: number;
   /** 翻訳の最大トークン数 */
   maxTranslationTokens?: number;
+  /** API呼び出しのタイムアウト（ミリ秒） */
+  timeoutMs?: number;
+  /** コンテンツの最大文字数（トリミング用） */
+  maxContentLength?: number;
 }
 
 /**
@@ -31,6 +35,8 @@ export class AiProcessor {
     this.options = {
       maxSummaryTokens: options.maxSummaryTokens ?? 500,
       maxTranslationTokens: options.maxTranslationTokens ?? 2000,
+      timeoutMs: options.timeoutMs ?? 30000, // デフォルト30秒
+      maxContentLength: options.maxContentLength ?? 5000, // デフォルト5000文字
     };
   }
 
@@ -83,21 +89,28 @@ export class AiProcessor {
     }
 
     try {
-      let processedContent = tab.content;
+      // 長文コンテンツの事前トリミング（5000文字制限）
+      let processedContent = this.trimContent(tab.content);
 
-      // 要約処理
+      // 要約処理（タイムアウト付き）
       if (settings.enableAiSummary) {
-        processedContent = await this.client.summarize(
-          processedContent,
-          this.options.maxSummaryTokens
+        processedContent = await this.withTimeout(
+          this.client.summarize(
+            processedContent,
+            this.options.maxSummaryTokens
+          ),
+          this.options.timeoutMs
         );
       }
 
-      // 翻訳処理
+      // 翻訳処理（タイムアウト付き）
       if (settings.enableAiTranslation) {
-        processedContent = await this.client.translate(
-          processedContent,
-          this.options.maxTranslationTokens
+        processedContent = await this.withTimeout(
+          this.client.translate(
+            processedContent,
+            this.options.maxTranslationTokens
+          ),
+          this.options.timeoutMs
         );
       }
 
@@ -107,5 +120,36 @@ export class AiProcessor {
       console.error('[AiProcessor] Error processing content:', error);
       return tab.content || null;
     }
+  }
+
+  /**
+   * コンテンツをトリミング
+   * 最大文字数を超える場合は切り詰める
+   * @param content - トリミング対象のコンテンツ
+   * @returns トリミング後のコンテンツ
+   * @private
+   */
+  private trimContent(content: string): string {
+    if (content.length <= this.options.maxContentLength) {
+      return content;
+    }
+    return content.substring(0, this.options.maxContentLength);
+  }
+
+  /**
+   * Promiseにタイムアウトを適用
+   * @param promise - 実行するPromise
+   * @param timeoutMs - タイムアウト時間（ミリ秒）
+   * @returns Promiseの結果
+   * @throws タイムアウト時にエラーをスロー
+   * @private
+   */
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
   }
 }

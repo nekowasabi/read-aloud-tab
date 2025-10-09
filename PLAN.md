@@ -388,24 +388,24 @@ export interface TabInfo {
 #### sub1 コードレビューとリファクタリング
 @target: `src/background/aiProcessor.ts`, `src/background/tabManager.ts`
 @ref: なし
-- [ ] コードの可読性を確認
-- [ ] 重複コードを削除
-- [ ] エラーハンドリングの一貫性を確認
-- [ ] コメントの充実度を確認
+- [x] コードの可読性を確認
+- [x] 重複コードを削除
+- [x] エラーハンドリングの一貫性を確認
+- [x] コメントの充実度を確認
 
 #### sub2 パフォーマンス最適化
 @target: `src/background/aiProcessor.ts`
 @ref: なし
-- [ ] API呼び出しのタイムアウト設定を追加（30秒）
-- [ ] 長文コンテンツの事前トリミングを実装（5000文字制限）
-- [ ] キャッシュ戦略の検証（processedContentの永続化確認）
+- [x] API呼び出しのタイムアウト設定を追加（30秒）
+- [x] 長文コンテンツの事前トリミングを実装（5000文字制限）
+- [x] キャッシュ戦略の検証（processedContentの永続化確認）
 
 #### sub3 型安全性の向上
 @target: 各種ファイル
 @ref: なし
-- [ ] `npm run typecheck`を実行
-- [ ] 型エラーがないことを確認
-- [ ] any型の使用を最小限に抑える
+- [x] `npm run typecheck`を実行
+- [x] 型エラーがないことを確認
+- [x] any型の使用を最小限に抑える
 
 ### process200 ドキュメンテーション
 #### sub1 CLAUDE.mdの更新

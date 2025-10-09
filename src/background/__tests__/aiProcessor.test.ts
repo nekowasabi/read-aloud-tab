@@ -290,5 +290,86 @@ describe('AiProcessor', () => {
       // Assert
       expect(result).toBe('Original content');
     });
+
+    test('タイムアウト時、元のcontentを返す（フォールバック）', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: true,
+        enableAiTranslation: false,
+      };
+      processor.updateSettings(settings);
+
+      // タイムアウトエラーをシミュレート
+      mockClient.summarize.mockImplementation(() => {
+        return new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Timeout after 30000ms')), 100);
+        });
+      });
+
+      // Act
+      const result = await processor.processContent(mockTab, settings);
+
+      // Assert
+      expect(result).toBe('Original content');
+    });
+
+    test('長文コンテンツ（5000文字超）は事前にトリミングされる', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: true,
+        enableAiTranslation: false,
+      };
+      processor.updateSettings(settings);
+
+      // 6000文字のコンテンツを作成
+      const longContent = 'a'.repeat(6000);
+      const longTab: TabInfo = {
+        ...mockTab,
+        content: longContent,
+      };
+
+      const summarizedContent = 'Summarized long content';
+      mockClient.summarize.mockResolvedValue(summarizedContent);
+
+      // Act
+      await processor.processContent(longTab, settings);
+
+      // Assert
+      // summarizeが呼ばれた際の引数をチェック
+      expect(mockClient.summarize).toHaveBeenCalled();
+      const calledWith = mockClient.summarize.mock.calls[0][0] as string;
+      expect(calledWith.length).toBeLessThanOrEqual(5000);
+    });
+
+    test('短いコンテンツ（5000文字以下）はトリミングされない', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: true,
+        enableAiTranslation: false,
+      };
+      processor.updateSettings(settings);
+
+      // 3000文字のコンテンツを作成
+      const shortContent = 'b'.repeat(3000);
+      const shortTab: TabInfo = {
+        ...mockTab,
+        content: shortContent,
+      };
+
+      const summarizedContent = 'Summarized short content';
+      mockClient.summarize.mockResolvedValue(summarizedContent);
+
+      // Act
+      await processor.processContent(shortTab, settings);
+
+      // Assert
+      expect(mockClient.summarize).toHaveBeenCalledWith(shortContent, 500);
+    });
   });
 });
