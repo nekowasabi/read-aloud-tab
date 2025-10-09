@@ -3,6 +3,7 @@ import IgnoreListManager from '../popup/components/IgnoreListManager';
 import { StorageManager } from '../shared/utils/storage';
 import { getIgnoredDomains } from '../shared/utils/storage';
 import { STORAGE_KEYS, TTSSettings, AiSettings } from '../shared/types';
+import { OpenRouterClient } from '../shared/services/openrouter';
 
 interface ExportPayload {
   version: number;
@@ -31,6 +32,11 @@ export default function OptionsApp() {
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [exportData, setExportData] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -131,6 +137,39 @@ export default function OptionsApp() {
 
   const handleIgnoreListChange = (domains: string[]) => {
     setIgnoredDomains(domains);
+  };
+
+  const handleConnectionTest = async () => {
+    if (!aiSettings.openRouterApiKey) {
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const client = new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel);
+      const result = await client.testConnection();
+
+      if (result.success) {
+        setConnectionTestResult({
+          success: true,
+          message: result.message || '接続に成功しました',
+        });
+      } else {
+        setConnectionTestResult({
+          success: false,
+          message: result.error || '接続に失敗しました',
+        });
+      }
+    } catch (error) {
+      setConnectionTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : '接続に失敗しました',
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
   };
 
   return (
@@ -238,6 +277,34 @@ export default function OptionsApp() {
             placeholder="meta-llama/llama-3.2-1b-instruct"
             aria-label="OpenRouterモデル名"
           />
+        </div>
+        <div className="setting-item">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleConnectionTest}
+            disabled={isTestingConnection || !aiSettings.openRouterApiKey}
+          >
+            接続テスト
+          </button>
+          {isTestingConnection && <span style={{ marginLeft: '10px' }}>接続テスト中...</span>}
+          {connectionTestResult && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '10px',
+                borderRadius: '4px',
+                backgroundColor: connectionTestResult.success ? '#d4edda' : '#f8d7da',
+                color: connectionTestResult.success ? '#155724' : '#721c24',
+                border: `1px solid ${connectionTestResult.success ? '#c3e6cb' : '#f5c6cb'}`,
+              }}
+            >
+              {connectionTestResult.success ? '✓ ' : '✗ '}
+              {connectionTestResult.success
+                ? connectionTestResult.message
+                : `接続に失敗しました: ${connectionTestResult.message}`}
+            </div>
+          )}
         </div>
       </section>
 

@@ -68,25 +68,28 @@
 @target: `src/shared/services/openrouter.ts` (新規作成)
 @ref: `src/shared/types/ai.ts`, `src/shared/utils/storage.ts`
 
-- [ ] `OpenRouterClient` クラスを作成
+- [x] `OpenRouterClient` クラスを作成
   - コンストラクタでAPIキーとモデル名を受け取る
   - プライベートメソッド `_makeRequest()` で共通リクエスト処理
-- [ ] `testConnection()` メソッドを実装
+- [x] `testConnection()` メソッドを実装
   - 最小限のリクエストで接続テスト（軽量なプロンプトを使用）
   - レスポンスのステータスコードとボディを検証
   - 成功時は `{ success: true }` を返す
   - 失敗時は `{ success: false, error: string }` を返す
-- [ ] `summarize(content: string, maxTokens: number)` メソッドを実装
+- [x] `summarize(content: string, maxTokens: number)` メソッドを実装
   - Phase 3で使用する要約機能の基礎実装
   - システムプロンプト: "Summarize the following content concisely."
   - ユーザープロンプト: content
-- [ ] エラーハンドリングを実装
+- [x] エラーハンドリングを実装
   - 401 Unauthorized: "APIキーが無効です"
   - 429 Too Many Requests: "リクエスト制限に達しました。しばらく待ってから再試行してください"
   - 500系エラー: "サーバーエラーが発生しました"
   - ネットワークエラー: "ネットワーク接続を確認してください"
-- [ ] TypeScript型定義を追加
+- [x] TypeScript型定義を追加
   - `OpenRouterRequest`, `OpenRouterResponse`, `ConnectionTestResult`
+- [x] 型チェックとLintを通過させる
+- [x] npm run test で全テストが通ることを確認
+- [x] npm run build:firefox でビルドが成功することを確認
 
 #### sub2 サービスディレクトリの作成
 @target: `src/shared/services/` (新規ディレクトリ)
@@ -99,10 +102,10 @@
 @target: `src/options/OptionsApp.tsx`
 @ref: `src/shared/services/openrouter.ts`
 
-- [ ] 状態管理を追加
+- [x] 状態管理を追加
   - `const [isTestingConnection, setIsTestingConnection] = useState(false)`
   - `const [connectionTestResult, setConnectionTestResult] = useState<{success: boolean, message: string} | null>(null)`
-- [ ] `handleConnectionTest()` 関数を実装
+- [x] `handleConnectionTest()` 関数を実装
   - APIキーの存在チェック（未入力時は早期リターン）
   - `setIsTestingConnection(true)` でローディング開始
   - `OpenRouterClient` インスタンス生成
@@ -110,29 +113,32 @@
   - 結果を `connectionTestResult` に設定
   - 成功/失敗に応じたメッセージを表示
   - finally ブロックで `setIsTestingConnection(false)`
-- [ ] AI設定セクションに「接続テスト」ボタンを追加
+- [x] AI設定セクションに「接続テスト」ボタンを追加
   - ボタンラベル: "接続テスト"
   - `disabled={isTestingConnection || !aiSettings.openRouterApiKey}`
   - `onClick={handleConnectionTest}`
-- [ ] テスト結果表示エリアを追加
+- [x] テスト結果表示エリアを追加
   - 成功時: 緑色のメッセージ "✓ 接続に成功しました"
   - 失敗時: 赤色のメッセージ "✗ 接続に失敗しました: {エラー詳細}"
   - テスト未実行時: 非表示
-- [ ] ローディングインジケータを追加
+- [x] ローディングインジケータを追加
   - テスト実行中は "接続テスト中..." と表示
+- [x] 型チェックとLintを通過させる
+- [x] npm run test で全テストが通ることを確認
+- [x] npm run build:firefox でビルドが成功することを確認
 
 #### sub2 スタイリングの追加
 @target: `src/options/OptionsApp.tsx` (インラインまたは別CSSファイル)
 
-- [ ] 接続テストボタンのスタイル
-- [ ] 結果表示エリアのスタイル（成功=緑、失敗=赤）
-- [ ] ローディング中のスタイル
+- [x] 接続テストボタンのスタイル
+- [x] 結果表示エリアのスタイル（成功=緑、失敗=赤）
+- [x] ローディング中のスタイル
 
 ### process3 型定義の拡張
 #### sub1 OpenRouter関連の型定義
 @target: `src/shared/types/ai.ts`
 
-- [ ] `ConnectionTestResult` インターフェースを追加
+- [x] `ConnectionTestResult` インターフェースを追加
   ```typescript
   export interface ConnectionTestResult {
     success: boolean;
@@ -140,30 +146,33 @@
     error?: string;
   }
   ```
-- [ ] `OpenRouterRequest`, `OpenRouterResponse` インターフェースを追加
+- [x] `OpenRouterRequest`, `OpenRouterResponse` インターフェースを追加
   - OpenRouter APIのリクエスト/レスポンス構造に対応
+- [x] 型チェックとLintを通過させる
+- [x] npm run test で全テストが通ることを確認
+- [x] npm run build:firefox でビルドが成功することを確認
 
 ### process10 ユニットテスト
 #### sub1 OpenRouterClientのモックテスト
 @target: `src/shared/services/__tests__/openrouter.test.ts` (新規作成)
 @ref: `src/shared/services/openrouter.ts`
 
-- [ ] テスト環境のセットアップ
+- [x] テスト環境のセットアップ
   - `global.fetch` をモック
   - テスト用のAPIキー、モデル名を定義
-- [ ] 接続テスト成功ケース
+- [x] 接続テスト成功ケース
   - モックで200レスポンスを返す
   - `testConnection()` が `{ success: true }` を返すことを検証
-- [ ] 接続テスト失敗ケース（401 Unauthorized）
+- [x] 接続テスト失敗ケース（401 Unauthorized）
   - モックで401レスポンスを返す
   - エラーメッセージに "APIキーが無効" が含まれることを検証
-- [ ] 接続テスト失敗ケース（429 Too Many Requests）
+- [x] 接続テスト失敗ケース（429 Too Many Requests）
   - モックで429レスポンスを返す
   - エラーメッセージに "リクエスト制限" が含まれることを検証
-- [ ] ネットワークエラーケース
+- [x] ネットワークエラーケース
   - モックでネットワークエラーをスロー
   - エラーメッセージに "ネットワーク" が含まれることを検証
-- [ ] `summarize()` メソッドのテスト
+- [x] `summarize()` メソッドのテスト
   - 環境変数が設定されている場合にのみ実行
   - 正常系: 要約テキストが返ることを検証
   - リクエストボディに正しいプロンプトが含まれることを検証
@@ -171,18 +180,18 @@
 #### sub2 OpenRouterClient実API疎通テスト
 @target: `src/shared/services/__tests__/openrouter.integration.test.ts` (新規作成)
 
-- [ ] 環境変数チェック
+- [x] 環境変数チェック
   - `process.env.OPENROUTER_API_KEY` が存在する場合のみテストを実行
   - 存在しない場合は `test.skip()` でスキップ
-- [ ] 実際のAPI接続テスト
+- [x] 実際のAPI接続テスト
   - 本物のAPIキーを使用して `testConnection()` を呼び出し
   - レスポンスが成功することを検証
   - タイムアウト設定（10秒程度）
-- [ ] 実際の要約リクエストテスト
+- [x] 実際の要約リクエストテスト
   - 短いテキストを `summarize()` に渡す
   - レスポンスが文字列であることを検証
   - レスポンスが空でないことを検証
-- [ ] エラーハンドリングテスト（無効なAPIキー）
+- [x] エラーハンドリングテスト（無効なAPIキー）
   - 意図的に無効なAPIキーを使用
   - 401エラーが適切にハンドリングされることを検証
 
@@ -190,22 +199,22 @@
 @target: `src/options/__tests__/OptionsApp.test.tsx`
 @ref: `src/shared/services/openrouter.ts`
 
-- [ ] OpenRouterClientのモック
+- [x] OpenRouterClientのモック
   - `jest.mock('../../shared/services/openrouter')` を追加
   - `testConnection` メソッドをモック化
-- [ ] 接続テストボタンの存在確認
+- [x] 接続テストボタンの存在確認
   - "接続テスト" ボタンがレンダリングされることを確認
-- [ ] APIキー未入力時の挙動
+- [x] APIキー未入力時の挙動
   - APIキーが空の場合、ボタンがdisabledになることを確認
-- [ ] 接続テスト成功ケース
+- [x] 接続テスト成功ケース
   - モックで成功レスポンスを返す
   - ボタンクリック後、成功メッセージが表示されることを確認
   - "接続に成功しました" が含まれることを確認
-- [ ] 接続テスト失敗ケース
+- [x] 接続テスト失敗ケース
   - モックで失敗レスポンスを返す
   - ボタンクリック後、エラーメッセージが表示されることを確認
   - エラー詳細が含まれることを確認
-- [ ] ローディング状態のテスト
+- [x] ローディング状態のテスト
   - テスト実行中、ボタンがdisabledになることを確認
   - "接続テスト中..." が表示されることを確認
 
