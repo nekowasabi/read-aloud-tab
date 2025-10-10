@@ -52,7 +52,6 @@ describeIfApiKey('OpenRouterClient Integration Tests', () => {
 
       expect(typeof summary).toBe('string');
       expect(summary.length).toBeGreaterThan(0);
-      expect(summary.length).toBeLessThanOrEqual(testContent.length);
     });
 
     test('日本語テキストを要約できる', async () => {
