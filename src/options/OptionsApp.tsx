@@ -24,6 +24,8 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
   openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
   enableAiSummary: false,
   enableAiTranslation: false,
+  customSummaryPrompt: '',
+  customTranslationPrompt: '',
 };
 
 export default function OptionsApp() {
@@ -286,6 +288,40 @@ export default function OptionsApp() {
             onChange={(event) => handleAiSettingChange('openRouterModel', event.target.value)}
             placeholder="meta-llama/llama-3.2-1b-instruct"
             aria-label="OpenRouterモデル名"
+          />
+        </div>
+        <div className="setting-item">
+          <label htmlFor="customSummaryPrompt">
+            要約プロンプト（オプション）
+          </label>
+          <p className="setting-description">
+            カスタムプロンプトを指定しない場合、デフォルトの「Summarize the following content concisely.」が使用されます。
+          </p>
+          <textarea
+            id="customSummaryPrompt"
+            value={aiSettings.customSummaryPrompt || ''}
+            onChange={(event) => handleAiSettingChange('customSummaryPrompt', event.target.value)}
+            placeholder="Summarize the following content concisely."
+            rows={3}
+            className="prompt-textarea"
+            aria-label="要約プロンプト"
+          />
+        </div>
+        <div className="setting-item">
+          <label htmlFor="customTranslationPrompt">
+            翻訳プロンプト（オプション）
+          </label>
+          <p className="setting-description">
+            カスタムプロンプトを指定しない場合、デフォルトの「Translate the following content to Japanese. Maintain the original meaning and tone.」が使用されます。
+          </p>
+          <textarea
+            id="customTranslationPrompt"
+            value={aiSettings.customTranslationPrompt || ''}
+            onChange={(event) => handleAiSettingChange('customTranslationPrompt', event.target.value)}
+            placeholder="Translate the following content to Japanese. Maintain the original meaning and tone."
+            rows={3}
+            className="prompt-textarea"
+            aria-label="翻訳プロンプト"
           />
         </div>
         <div className="setting-item">

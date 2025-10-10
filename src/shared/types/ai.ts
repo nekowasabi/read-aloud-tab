@@ -10,6 +10,10 @@ export interface AiSettings {
   enableAiSummary: boolean;
   /** AI翻訳機能の有効化フラグ */
   enableAiTranslation: boolean;
+  /** カスタム要約プロンプト（未設定時はデフォルトプロンプトを使用） */
+  customSummaryPrompt?: string;
+  /** カスタム翻訳プロンプト（未設定時はデフォルトプロンプトを使用） */
+  customTranslationPrompt?: string;
 }
 
 /**

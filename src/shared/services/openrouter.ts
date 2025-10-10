@@ -147,8 +147,9 @@ export class OpenRouterClient extends BaseApiClient {
    * @returns 要約されたテキスト
    * @throws エラーが発生した場合
    */
-  async summarize(content: string, maxTokens: number): Promise<string> {
-    return this.processText('Summarize the following content concisely.', content, maxTokens);
+  async summarize(content: string, maxTokens: number, customPrompt?: string): Promise<string> {
+    const prompt = customPrompt || 'Summarize the following content concisely.';
+    return this.processText(prompt, content, maxTokens);
   }
 
   /**
@@ -158,7 +159,8 @@ export class OpenRouterClient extends BaseApiClient {
    * @returns 翻訳されたテキスト
    * @throws エラーが発生した場合
    */
-  async translate(content: string, maxTokens: number): Promise<string> {
-    return this.processText('Translate the following content to Japanese. Maintain the original meaning and tone.', content, maxTokens);
+  async translate(content: string, maxTokens: number, customPrompt?: string): Promise<string> {
+    const prompt = customPrompt || 'Translate the following content to Japanese. Maintain the original meaning and tone.';
+    return this.processText(prompt, content, maxTokens);
   }
 }
