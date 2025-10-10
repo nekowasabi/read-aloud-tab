@@ -92,23 +92,25 @@ export class AiProcessor {
       // 長文コンテンツの事前トリミング（5000文字制限）
       let processedContent = this.trimContent(tab.content);
 
-      // 要約処理（タイムアウト付き）
+      // 要約処理（タイムアウト付き、カスタムプロンプト対応）
       if (settings.enableAiSummary) {
         processedContent = await this.withTimeout(
           this.client.summarize(
             processedContent,
-            this.options.maxSummaryTokens
+            this.options.maxSummaryTokens,
+            settings.customSummaryPrompt
           ),
           this.options.timeoutMs
         );
       }
 
-      // 翻訳処理（タイムアウト付き）
+      // 翻訳処理（タイムアウト付き、カスタムプロンプト対応）
       if (settings.enableAiTranslation) {
         processedContent = await this.withTimeout(
           this.client.translate(
             processedContent,
-            this.options.maxTranslationTokens
+            this.options.maxTranslationTokens,
+            settings.customTranslationPrompt
           ),
           this.options.timeoutMs
         );

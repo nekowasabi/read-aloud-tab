@@ -163,7 +163,7 @@ describe('AiProcessor', () => {
       const result = await processor.processContent(mockTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500);
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
       expect(mockClient.translate).not.toHaveBeenCalled();
       expect(result).toBe(summarizedContent);
     });
@@ -186,7 +186,7 @@ describe('AiProcessor', () => {
 
       // Assert
       expect(mockClient.summarize).not.toHaveBeenCalled();
-      expect(mockClient.translate).toHaveBeenCalledWith('Original content', 2000);
+      expect(mockClient.translate).toHaveBeenCalledWith('Original content', 2000, undefined);
       expect(result).toBe(translatedContent);
     });
 
@@ -209,8 +209,8 @@ describe('AiProcessor', () => {
       const result = await processor.processContent(mockTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500);
-      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 2000);
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
+      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 2000, undefined);
       expect(result).toBe(translatedContent);
     });
 
@@ -369,7 +369,85 @@ describe('AiProcessor', () => {
       await processor.processContent(shortTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith(shortContent, 500);
+      expect(mockClient.summarize).toHaveBeenCalledWith(shortContent, 500, undefined);
+    });
+
+    test('カスタム要約プロンプトが使用される', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: true,
+        enableAiTranslation: false,
+        customSummaryPrompt: 'Custom summary prompt for testing',
+      };
+      processor.updateSettings(settings);
+
+      const summarizedContent = 'Summarized with custom prompt';
+      mockClient.summarize.mockResolvedValue(summarizedContent);
+
+      // Act
+      const result = await processor.processContent(mockTab, settings);
+
+      // Assert
+      expect(mockClient.summarize).toHaveBeenCalledWith(
+        'Original content',
+        500,
+        'Custom summary prompt for testing'
+      );
+      expect(result).toBe(summarizedContent);
+    });
+
+    test('カスタム翻訳プロンプトが使用される', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: true,
+        customTranslationPrompt: 'Custom translation prompt for testing',
+      };
+      processor.updateSettings(settings);
+
+      const translatedContent = '翻訳されたコンテンツ（カスタムプロンプト）';
+      mockClient.translate.mockResolvedValue(translatedContent);
+
+      // Act
+      const result = await processor.processContent(mockTab, settings);
+
+      // Assert
+      expect(mockClient.translate).toHaveBeenCalledWith(
+        'Original content',
+        2000,
+        'Custom translation prompt for testing'
+      );
+      expect(result).toBe(translatedContent);
+    });
+
+    test('カスタムプロンプトが未設定の場合、デフォルトプロンプトが使用される', async () => {
+      // Arrange
+      const settings: AiSettings = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: true,
+        enableAiTranslation: true,
+        customSummaryPrompt: undefined,
+        customTranslationPrompt: undefined,
+      };
+      processor.updateSettings(settings);
+
+      const summarizedContent = 'Summarized with default prompt';
+      const translatedContent = '翻訳されたコンテンツ（デフォルト）';
+      mockClient.summarize.mockResolvedValue(summarizedContent);
+      mockClient.translate.mockResolvedValue(translatedContent);
+
+      // Act
+      const result = await processor.processContent(mockTab, settings);
+
+      // Assert
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
+      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 2000, undefined);
+      expect(result).toBe(translatedContent);
     });
   });
 });
