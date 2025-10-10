@@ -78,20 +78,36 @@ const mockSpeechSynthesis = {
   onboundary: null,
 }));
 
-// Setup console error handling for tests
-const originalError = console.error;
+// Console output suppression for tests
+// Use VERBOSE_TESTS=1 environment variable to enable console output for debugging
+const originalConsole = {
+  log: console.log,
+  info: console.info,
+  warn: console.warn,
+  error: console.error,
+  debug: console.debug,
+};
+
+const shouldSuppressConsole = process.env.VERBOSE_TESTS !== '1';
+
 beforeAll(() => {
-  console.error = (...args: any[]) => {
-    if (
-      typeof args[0] === 'string' &&
-      args[0].includes('Warning: ReactDOM.render is no longer supported')
-    ) {
-      return;
-    }
-    originalError.call(console, ...args);
-  };
+  if (shouldSuppressConsole) {
+    // Suppress all console output to keep test output clean
+    console.log = jest.fn();
+    console.info = jest.fn();
+    console.warn = jest.fn();
+    console.error = jest.fn();
+    console.debug = jest.fn();
+  }
 });
 
 afterAll(() => {
-  console.error = originalError;
+  if (shouldSuppressConsole) {
+    // Restore original console methods
+    console.log = originalConsole.log;
+    console.info = originalConsole.info;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+    console.debug = originalConsole.debug;
+  }
 });
