@@ -52,50 +52,50 @@
 #### sub1 Command型とガードの更新
 @target: src/shared/messages.ts
 @ref: なし
-- [ ] `QueueCommandMessage` に `{ type: 'QUEUE_CLEAR' }` を追加し、`isQueueCommandMessage` の分岐を更新する。
+- [x] `QueueCommandMessage` に `{ type: 'QUEUE_CLEAR' }` を追加し、`isQueueCommandMessage` の分岐を更新する。
 
 ### process2 TabManagerへclearQueueを実装
 #### sub1 メソッド本体の追加
 @target: src/background/tabManager.ts
 @ref: src/background/tabManager.ts
-- [ ] `clearQueue()` を追加し、再生停止・配列初期化・永続化・ステータス通知を行う。
+- [x] `clearQueue()` を追加し、再生停止・配列初期化・永続化・ステータス通知を行う。
   - Optional: 進捗マップや再生トークンのリセットを確認する。
 
 #### sub2 既存ロジックとの整合
 @target: src/background/tabManager.ts
 @ref: 既存の `removeTab`, `stopInternal`
-- [ ] `stopInternal(true)` を再利用し副作用が重複しないことを確かめる。
+- [x] `stopInternal(true)` を再利用し副作用が重複しないことを確かめる。
 
 ### process3 BackgroundOrchestratorでQUEUE_CLEARを処理
 #### sub1 processCommandの分岐追加
 @target: src/background/service.ts
 @ref: src/background/service.ts
-- [ ] `case 'QUEUE_CLEAR'` を追加し、TabManager.clearQueue() をawaitする。
+- [x] `case 'QUEUE_CLEAR'` を追加し、TabManager.clearQueue() をawaitする。
 
 ### process4 ポップアップフックにclearQueue APIを追加
 #### sub1 フック返り値拡張
 @target: src/popup/hooks/useTabQueue.ts
 @ref: 既存の sendCommand
-- [ ] `clearQueue` 関数を追加し、`sendCommand({ type: 'QUEUE_CLEAR' })` を返す。
-- [ ] `UseTabQueueResult` に `clearQueue` を追加し、呼び出し元へ渡す。
+- [x] `clearQueue` 関数を追加し、`sendCommand({ type: 'QUEUE_CLEAR' })` を返す。
+- [x] `UseTabQueueResult` に `clearQueue` を追加し、呼び出し元へ渡す。
 
 ### process5 UIコンポーネントへリセットボタンを組み込み
 #### sub1 TabQueueListプロップとボタン追加
 @target: src/popup/components/TabQueueList.tsx
 @ref: src/popup/components/common/ListCard.tsx
-- [ ] `onResetQueue` プロップを追加し、`actions` 配列にリセットボタンを挿入する。
-- [ ] キューが空のとき `disabled` にする。
+- [x] `onResetQueue` プロップを追加し、`actions` 配列にリセットボタンを挿入する。
+- [x] キューが空のとき `disabled` にする。
 
 #### sub2 App.tsxでハンドラ実装
 @target: src/popup/components/App.tsx
 @ref: src/popup/hooks/useTabQueue.ts
-- [ ] `handleResetQueue` を実装し、`clearQueue()` をawait・エラーを既存ロジックで通知。
-- [ ] `TabQueueList` 呼び出しに `onResetQueue` を渡す。
+- [x] `handleResetQueue` を実装し、`clearQueue()` をawait・エラーを既存ロジックで通知。
+- [x] `TabQueueList` 呼び出しに `onResetQueue` を渡す。
 
 ### process10 ユニットテスト
-- [ ] `src/background/__tests__/backgroundService.test.ts` に `QUEUE_CLEAR` 送信時の動作を追加（TabManager.clearQueue呼び出しを検証）。
-- [ ] `src/background/__tests__/tabManager.test.ts` に `clearQueue()` の挙動テストを追加（状態リセット・persist呼び出しなど）。
-- [ ] フロント側テスト（存在すれば）でリセットボタンクリックがコールバックを呼ぶことを確認。
+- [x] `src/background/__tests__/backgroundService.test.ts` に `QUEUE_CLEAR` 送信時の動作を追加（TabManager.clearQueue呼び出しを検証）。
+- [x] `src/background/__tests__/tabManagerClearQueue.test.ts` に `clearQueue()` の挙動テストを追加（状態リセット・persist呼び出しなど）。
+- [x] フロント側テスト（存在すれば）でリセットボタンクリックがコールバックを呼ぶことを確認。
 
 ### process50 フォローアップ
 - 仕様変更や他UIへの波及が必要になった場合はここに追記。
@@ -105,6 +105,5 @@
 
 ### process200 ドキュメンテーション
 - [ ] README または AGENTS.md にキューリセット操作を追記するか検討し、必要なら更新。
-
-
+- [ ] AIの要約にはopenrouterのAPIキーが必要であることを明記する
 

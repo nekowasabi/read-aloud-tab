@@ -251,6 +251,17 @@ export default function App() {
     [reorderTabs],
   );
 
+  const handleResetQueue = useCallback(async () => {
+    try {
+      await clearQueue();
+      setError('キューをリセットしました');
+      setTimeout(() => setError(null), 3000);
+    } catch (commandError) {
+      const message = commandError instanceof Error ? commandError.message : 'キューのリセットに失敗しました';
+      setError(message);
+    }
+  }, [clearQueue]);
+
   const handleControl = useCallback(
     async (action: 'start' | 'pause' | 'resume' | 'stop') => {
       try {
@@ -412,6 +423,7 @@ export default function App() {
         status={queueStatus}
         onRemoveTab={handleRemoveTab}
         onReorder={handleReorder}
+        onResetQueue={handleResetQueue}
         onSkipNext={() => {
           skipNext().catch((commandError) => {
             const message = commandError instanceof Error ? commandError.message : '次のタブへの移動に失敗しました';

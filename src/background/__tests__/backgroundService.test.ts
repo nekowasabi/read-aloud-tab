@@ -36,6 +36,7 @@ describe('BackgroundOrchestrator', () => {
       }),
       addTab: jest.fn().mockResolvedValue(undefined),
       removeTab: jest.fn().mockResolvedValue(undefined),
+      clearQueue: jest.fn().mockResolvedValue(undefined),
       reorderTabs: jest.fn().mockResolvedValue(undefined),
       skipTab: jest.fn().mockResolvedValue(undefined),
       clearQueue: jest.fn().mockResolvedValue(undefined),

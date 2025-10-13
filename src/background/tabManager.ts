@@ -302,6 +302,21 @@ export class TabManager {
     }
   }
 
+  async clearQueue(): Promise<void> {
+    await this.ensureInitialized();
+
+    if (this.queue.tabs.length === 0 && this.queue.status === 'idle') {
+      return;
+    }
+
+    await this.stopInternal(true);
+    this.queue.tabs = [];
+    this.queue.currentIndex = 0;
+
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
   async reorderTabs(fromIndex: number, toIndex: number): Promise<void> {
     await this.ensureInitialized();
 

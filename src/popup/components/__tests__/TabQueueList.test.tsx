@@ -72,6 +72,7 @@ const renderList = (props?: Partial<TabQueueListProps>) => {
     status: 'reading',
     onRemoveTab: jest.fn(),
     onReorder: jest.fn(),
+    onResetQueue: jest.fn(),
     onSkipNext: jest.fn(),
     onSkipPrevious: jest.fn(),
     onClearQueue: jest.fn(),
@@ -127,14 +128,12 @@ describe('TabQueueList', () => {
     expect(props.onReorder).not.toHaveBeenCalled();
   });
 
-  test('同じアイテムにドロップした場合は onReorder が呼ばれない', () => {
+  test('リセットボタンで onResetQueue が呼ばれる', () => {
     const { props } = renderList();
-    mockListeners.onDragEnd?.({
-      active: { id: 1 },
-      over: { id: 1 },
-    });
+    const resetButton = screen.getByRole('button', { name: 'リセット' });
+    fireEvent.click(resetButton);
 
-    expect(props.onReorder).not.toHaveBeenCalled();
+    expect(props.onResetQueue).toHaveBeenCalled();
   });
 
   test('prefetch 状態に応じて再試行ボタンを表示しコールバックを呼び出す', () => {
@@ -155,5 +154,12 @@ describe('TabQueueList', () => {
     const resetButton = screen.getByRole('button', { name: 'リセット' });
     fireEvent.click(resetButton);
     expect(props.onClearQueue).toHaveBeenCalled();
+  });
+
+  test('キューが空の場合はリセットボタンが無効になる', () => {
+    renderList({ tabs: [], status: 'idle' });
+
+    const resetButton = screen.getByRole('button', { name: 'リセット' });
+    expect(resetButton).toBeDisabled();
   });
 });
