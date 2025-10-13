@@ -1,109 +1,91 @@
-# title: ポップアップ読み上げキューのリセットボタン追加
+# title: ブラウザショートカット整理（再生/一時停止 + 全タブ追加）
 
 ## 概要
-- ポップアップUIから読み上げキュー全体を一括クリアできる操作を追加し、現在再生中の状態も安全に停止させます。
+- 読み上げショートカットを再生/一時停止トグルと全タブ追加の2系統に集約し、不要なコマンドを削除して背景処理とUI表記を揃える
 
 ### goal
-- ユーザーがキューに溜まったタブをワンクリックでリセットし、すぐに新しい読み上げセッションを開始できるようにする。
+- ユーザーがショートカットで読み上げの開始・一時停止操作と全タブ追加→再生を直感的に行える
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- ポップアップに「リセット」ボタンを配置し、押下で全タブを削除・再生を停止するキュークリア処理を呼び出せるようにする。
-- キュークリア時にバックグラウンド側で状態を永続化し、ステータス更新がポップアップへ即時反映されること。
-- 操作失敗時は既存のエラーハンドリングに沿ってユーザーへ通知する。
+- マニフェスト・バックグラウンド処理・設定UI・テストを更新し、残るショートカットの挙動と説明を一致させる
 
 ## 実装仕様
-- shared メッセージ定義に `QUEUE_CLEAR` コマンドを追加し、型ガードへ反映する。
-- TabManager に `clearQueue()` を実装し、現在の読み上げを停止しつつタブ配列・インデックスを初期化、永続化とステータス通知を行う。
-- BackgroundOrchestrator (`service.ts`) の `processCommand` で `QUEUE_CLEAR` をハンドリングし、TabManager の新メソッドを呼び出す。
-- ポップアップの `useTabQueue` フックで `clearQueue()` を公開し、ポート経由で新コマンドを送信する。
-- `TabQueueList` にリセットボタンを追加し、キューが空の場合は非アクティブにする。
-- `App.tsx` でリセットハンドラを定義し、エラー表示ロジックに統合する。
 
 ## 生成AIの学習用コンテキスト
-### shared messages
-- `src/shared/messages.ts`
-  - `QueueCommandMessage` 型と `isQueueCommandMessage` ガードを拡張する。
+### manifest
+- src/manifest/manifest.chrome.json
+  - commandsから不要なショートカットを削除し、新規キーバインドを定義
+- src/manifest/manifest.firefox.json
+  - 上記と同様にFirefox用コマンドを整理
 
-### background logic
-- `src/background/tabManager.ts`
-  - キュー状態管理ロジックへ全消去処理を追加する。
-- `src/background/service.ts`
-  - `processCommand` の分岐を調整して新コマンドを処理する。
-
-### popup ui
-- `src/popup/hooks/useTabQueue.ts`
-  - ポート送信メソッド群にクリア機能を追加する。
-- `src/popup/components/TabQueueList.tsx`
-  - ボタンUIとプロップ追加を行う。
-- `src/popup/components/App.tsx`
-  - リセットボタンのハンドラとエラー処理の統合。
+### background
+- src/background/service.ts
+  - `handleShortcutCommand`で新しいコマンド分岐を実装し、不要なcaseを削除
+  - `ChromeTabsLike`に`query`を追加し、全タブ追加処理をヘルパー化
+- src/shared/utils/storage.ts
+  - `getIgnoredDomains`を参照してフィルタリング
 
 ### tests
-- `src/background/__tests__/backgroundService.test.ts`
-  - コマンド処理の回帰テストを追加する。
-- `src/popup/components/__tests__/TabQueueList.test.tsx`
-  - クリックで `onResetQueue` が発火するか確認する（存在すれば）。
+- src/background/__tests__/backgroundService.test.ts
+  - 新しいショートカットのテストケースを追加・更新
+
+### ui
+- src/options/OptionsApp.tsx
+  - 表示中のショートカット一覧を最新構成に更新
 
 ## Process
-### process1 sharedメッセージ定義にQUEUE_CLEARを追加
-#### sub1 Command型とガードの更新
-@target: src/shared/messages.ts
-@ref: なし
-- [x] `QueueCommandMessage` に `{ type: 'QUEUE_CLEAR' }` を追加し、`isQueueCommandMessage` の分岐を更新する。
+### process1 マニフェストのショートカット整理
+#### sub1 Chrome/Firefoxマニフェスト更新
+@target: src/manifest/manifest.chrome.json
+@ref: src/manifest/manifest.firefox.json
+- [ ] `read-aloud-toggle`のみ残し、`read-aloud-queue-all`を追加
+- [ ] 旧ショートカット定義（start/stop/next/prev/pause/resume）を削除
+- [ ] 型チェック
+- [ ] npm run testでテスト確認
+- [ ] npm run build:chrome/firefoxでビルド確認
 
-### process2 TabManagerへclearQueueを実装
-#### sub1 メソッド本体の追加
-@target: src/background/tabManager.ts
-@ref: src/background/tabManager.ts
-- [x] `clearQueue()` を追加し、再生停止・配列初期化・永続化・ステータス通知を行う。
-  - Optional: 進捗マップや再生トークンのリセットを確認する。
-
-#### sub2 既存ロジックとの整合
-@target: src/background/tabManager.ts
-@ref: 既存の `removeTab`, `stopInternal`
-- [x] `stopInternal(true)` を再利用し副作用が重複しないことを確かめる。
-
-### process3 BackgroundOrchestratorでQUEUE_CLEARを処理
-#### sub1 processCommandの分岐追加
+### process2 バックグラウンドのショートカット処理実装
+#### sub1 コマンドハンドラ更新
 @target: src/background/service.ts
+@ref: src/shared/utils/storage.ts
+- [ ] `handleShortcutCommand`から旧caseを削除し、新コマンド分岐を実装
+- [ ] 全タブ追加ヘルパーで`BrowserAdapter.tabs.query`と無効URL/除外ドメインのフィルタリングを行う
+- [ ] キュー追加後に必要な場合のみ`processNext`を起動
+- [ ] 型チェック
+- [ ] npm run testでテスト確認
+- [ ] npm run build:chrome/firefoxでビルド確認
+
+### process3 UI表記の更新
+#### sub1 設定画面ショートカット一覧修正
+@target: src/options/OptionsApp.tsx
+@ref: src/manifest/manifest.chrome.json
+- [ ] 表示リストを`read-aloud-toggle`と`read-aloud-queue-all`に合わせて更新
+- [ ] 型チェック
+- [ ] npm run testでテスト確認
+- [ ] npm run build:chrome/firefoxでビルド確認
+
+### process4 テスト更新
+#### sub1 バックグラウンドショートカットテスト
+@target: src/background/__tests__/backgroundService.test.ts
 @ref: src/background/service.ts
-- [x] `case 'QUEUE_CLEAR'` を追加し、TabManager.clearQueue() をawaitする。
-
-### process4 ポップアップフックにclearQueue APIを追加
-#### sub1 フック返り値拡張
-@target: src/popup/hooks/useTabQueue.ts
-@ref: 既存の sendCommand
-- [x] `clearQueue` 関数を追加し、`sendCommand({ type: 'QUEUE_CLEAR' })` を返す。
-- [x] `UseTabQueueResult` に `clearQueue` を追加し、呼び出し元へ渡す。
-
-### process5 UIコンポーネントへリセットボタンを組み込み
-#### sub1 TabQueueListプロップとボタン追加
-@target: src/popup/components/TabQueueList.tsx
-@ref: src/popup/components/common/ListCard.tsx
-- [x] `onResetQueue` プロップを追加し、`actions` 配列にリセットボタンを挿入する。
-- [x] キューが空のとき `disabled` にする。
-
-#### sub2 App.tsxでハンドラ実装
-@target: src/popup/components/App.tsx
-@ref: src/popup/hooks/useTabQueue.ts
-- [x] `handleResetQueue` を実装し、`clearQueue()` をawait・エラーを既存ロジックで通知。
-- [x] `TabQueueList` 呼び出しに `onResetQueue` を渡す。
+- [ ] `read-aloud-toggle`の挙動を検証
+- [ ] `read-aloud-queue-all`がタブ取得・フィルタ・キュー追加・再生開始を行うことを検証
+- [ ] 型チェック
+- [ ] npm run testでテスト確認
+- [ ] npm run build:chrome/firefoxでビルド確認
 
 ### process10 ユニットテスト
-- [x] `src/background/__tests__/backgroundService.test.ts` に `QUEUE_CLEAR` 送信時の動作を追加（TabManager.clearQueue呼び出しを検証）。
-- [x] `src/background/__tests__/tabManagerClearQueue.test.ts` に `clearQueue()` の挙動テストを追加（状態リセット・persist呼び出しなど）。
-- [x] フロント側テスト（存在すれば）でリセットボタンクリックがコールバックを呼ぶことを確認。
 
 ### process50 フォローアップ
-- 仕様変更や他UIへの波及が必要になった場合はここに追記。
+{{実装後に仕様変更などが発生した場合は、ここにProcessを追加する}}
 
 ### process100 リファクタリング
-- 必要に応じて TabQueueList のアクション生成を共通化する余地を検討。
 
 ### process200 ドキュメンテーション
-- [ ] README または AGENTS.md にキューリセット操作を追記するか検討し、必要なら更新。
-- [ ] AIの要約にはopenrouterのAPIキーが必要であることを明記する
+- [ ] 必要に応じてREADMEやINSTALLATION_GUIDEのショートカット記述を更新
+
+
 
