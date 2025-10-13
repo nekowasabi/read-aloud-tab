@@ -1,4 +1,5 @@
 import { QueueCommandMessage, QueueStatusPayload } from '../../shared/messages';
+import { getIgnoredDomains } from '../../shared/utils/storage';
 
 // Mock BrowserAdapter to disable Offscreen API
 jest.mock('../../shared/utils/browser', () => ({
@@ -7,6 +8,10 @@ jest.mock('../../shared/utils/browser', () => ({
     getBrowserType: jest.fn().mockReturnValue('chrome'),
     isFeatureSupported: jest.fn().mockReturnValue(false), // Disable offscreen API
   },
+}));
+
+jest.mock('../../shared/utils/storage', () => ({
+  getIgnoredDomains: jest.fn().mockResolvedValue([]),
 }));
 
 describe('BackgroundOrchestrator', () => {
@@ -98,7 +103,7 @@ describe('BackgroundOrchestrator', () => {
     };
 
     function triggerCommand(command: string) {
-      commandListener?.(command);
+      return commandListener?.(command);
     }
     return { chromeLike, connectPort, emitRuntimeMessage, triggerCommand, ports };
   };
@@ -228,33 +233,106 @@ describe('BackgroundOrchestrator', () => {
     });
   });
 
-  test('キーボードショートカットコマンドを処理する', async () => {
+  test('read-aloud-toggle ショートカットでキュー制御を行う', async () => {
     const { stub } = createTabManagerStub();
-    stub.getSnapshot.mockReturnValue({
-      status: 'idle',
+    const snapshot: QueueStatusPayload = {
+      status: 'reading',
       currentIndex: 0,
       totalCount: 1,
-      activeTabId: null,
-      tabs: [{ tabId: 1, url: 'https://example.com', title: 'Test', content: 'test content', isIgnored: false }],
+      activeTabId: 1,
+      tabs: [{
+        tabId: 1,
+        url: 'https://example.com',
+        title: 'Test',
+        isIgnored: false,
+        extractedAt: new Date(),
+      } as any],
       settings: { rate: 1, pitch: 1, volume: 1, voice: null },
       updatedAt: Date.now(),
-    });
+    } as QueueStatusPayload;
+    stub.getSnapshot.mockImplementation(() => snapshot);
+
     const { chromeLike, triggerCommand } = createChromeLike();
+    chromeLike.tabs.query
+      .mockResolvedValueOnce([{ id: 11, url: 'https://example.com/article', title: 'Article' }]) // ensureActiveTabInQueue
+      .mockResolvedValue([]);
+
     const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike });
     await orchestrator.initialize();
 
-    triggerCommand('read-aloud-start');
-    await new Promise(resolve => setTimeout(resolve, 10)); // Wait for async command
+    await triggerCommand('read-aloud-toggle');
+    expect(stub.pause).toHaveBeenCalled();
+
+    snapshot.status = 'paused';
+    await triggerCommand('read-aloud-toggle');
+    expect(stub.resume).toHaveBeenCalled();
+
+    snapshot.status = 'idle';
+    snapshot.tabs = [];
+    snapshot.totalCount = 0;
+
+    await triggerCommand('read-aloud-toggle');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeLike.tabs.query).toHaveBeenCalledWith({ active: true, currentWindow: true });
+    expect(stub.addTab).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 11 }),
+      expect.objectContaining({ position: 'end', autoStart: false }),
+    );
+    expect(stub.processNext).toHaveBeenCalled();
+  });
+
+  test('read-aloud-queue-all ショートカットでタブを一括追加して再生する', async () => {
+    const { stub } = createTabManagerStub();
+    const snapshot: QueueStatusPayload = {
+      status: 'idle',
+      currentIndex: 0,
+      totalCount: 0,
+      activeTabId: null,
+      tabs: [],
+      settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      updatedAt: Date.now(),
+    } as QueueStatusPayload;
+    stub.getSnapshot.mockImplementation(() => snapshot);
+
+    (getIgnoredDomains as jest.Mock).mockResolvedValue(['ignored.example']);
+
+    const { chromeLike, triggerCommand } = createChromeLike();
+    chromeLike.tabs.query
+      .mockResolvedValueOnce([
+        { id: 1, url: 'https://valid.example/article', title: 'Valid' },
+        { id: 2, url: 'chrome://extensions' },
+        { id: 3, url: 'https://ignored.example/page', title: 'Ignored' },
+      ])
+      .mockResolvedValueOnce([{ id: 4, url: 'https://second.example/post', title: 'Second' }])
+      .mockResolvedValue([]);
+
+    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike });
+    await orchestrator.initialize();
+
+    await triggerCommand('read-aloud-queue-all');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stub.addTab).toHaveBeenCalledTimes(1);
+    expect(stub.addTab).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 1, url: 'https://valid.example/article' }),
+      expect.objectContaining({ position: 'end', autoStart: false }),
+    );
     expect(stub.processNext).toHaveBeenCalled();
 
-    triggerCommand('read-aloud-stop');
-    expect(stub.stop).toHaveBeenCalled();
-
-    triggerCommand('read-aloud-next');
-    expect(stub.skipTab).toHaveBeenCalledWith('next');
-
-    triggerCommand('read-aloud-prev');
-    expect(stub.skipTab).toHaveBeenCalledWith('previous');
+    snapshot.status = 'paused';
+    snapshot.tabs = [{
+      tabId: 4,
+      url: 'https://second.example/post',
+      title: 'Second',
+      isIgnored: false,
+      extractedAt: new Date().toISOString(),
+    } as any];
+    snapshot.totalCount = 1;
+    snapshot.activeTabId = 4;
+    await triggerCommand('read-aloud-queue-all');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stub.resume).toHaveBeenCalled();
   });
 
   test('KeepAlive diagnostics message updates prefetcher and notifies ports', async () => {

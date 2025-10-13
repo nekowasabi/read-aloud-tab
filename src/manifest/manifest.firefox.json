@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Read Aloud Tab",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read web page content aloud using text-to-speech",
   "browser_specific_settings": {
     "gecko": {
@@ -45,35 +45,11 @@
       },
       "description": "読み上げを再生/一時停止"
     },
-    "read-aloud-stop": {
+    "read-aloud-queue-all": {
       "suggested_key": {
-        "default": "Ctrl+Shift+X"
+        "default": "Ctrl+Shift+Q"
       },
-      "description": "読み上げを停止"
-    },
-    "read-aloud-next": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Right"
-      },
-      "description": "次のタブを読み上げ"
-    },
-    "read-aloud-prev": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Left"
-      },
-      "description": "前のタブを読み上げ"
-    },
-    "read-aloud-pause": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Z"
-      },
-      "description": "読み上げを一時停止"
-    },
-    "read-aloud-resume": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+R"
-      },
-      "description": "読み上げを再開"
+      "description": "すべてのタブをキューに追加して再生"
     }
   },
   "options_ui": {

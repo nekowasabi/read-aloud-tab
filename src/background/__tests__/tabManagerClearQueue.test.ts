@@ -102,7 +102,8 @@ describe('TabManager.clearQueue', () => {
     expect(snapshot.currentIndex).toBe(0);
 
     expect(statusListener).toHaveBeenCalled();
-    const payload = statusListener.mock.calls.at(-1)?.[0];
+    const lastCall = statusListener.mock.calls[statusListener.mock.calls.length - 1];
+    const payload = lastCall?.[0];
     expect(payload.totalCount).toBe(0);
   });
 

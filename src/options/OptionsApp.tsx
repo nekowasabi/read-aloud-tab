@@ -379,12 +379,8 @@ export default function OptionsApp() {
         <h2>キーボードショートカット</h2>
         <p>以下のショートカットはブラウザ側の設定画面で変更できます（Chrome: <code>chrome://extensions/shortcuts</code>）。</p>
         <ul className="shortcut-list">
-          <li><code>Ctrl+Shift+S</code> / <code>Command+Shift+S</code>: 読み上げを開始</li>
-          <li><code>Ctrl+Shift+X</code> / <code>Command+Shift+X</code>: 読み上げを停止</li>
-          <li><code>Ctrl+Shift+.</code> / <code>Command+Shift+.</code>: 次のタブへ移動</li>
-          <li><code>Ctrl+Shift+,</code> / <code>Command+Shift+,</code>: 前のタブへ移動</li>
-          <li><code>Ctrl+Shift+Z</code> / <code>Command+Shift+Z</code>: 一時停止</li>
-          <li><code>Ctrl+Shift+R</code> / <code>Command+Shift+R</code>: 再開</li>
+          <li><code>Alt+R</code> / <code>Option+R</code>: 読み上げを再生/一時停止</li>
+          <li><code>Ctrl+Shift+Q</code> / <code>Command+Shift+Q</code>: すべてのタブをキューに追加して再生</li>
         </ul>
       </section>
       </>

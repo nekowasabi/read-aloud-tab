@@ -20,6 +20,7 @@ import {
 import { AiPrefetcher } from './aiPrefetcher';
 import { TabManager, LoggerLike } from './tabManager';
 import { BrowserAdapter } from '../shared/utils/browser';
+import { getIgnoredDomains } from '../shared/utils/storage';
 
 interface ChromeRuntimePort {
   name: string;
@@ -37,6 +38,10 @@ interface ChromeRuntimeLike {
 
 interface ChromeTabsLike {
   sendMessage: (tabId: number, message: any) => Promise<unknown> | void;
+  query?: {
+    (queryInfo: any): Promise<any[]> | any[];
+    (queryInfo: any, callback: (tabs: any[]) => void): void;
+  };
 }
 
 interface ChromeLike {
@@ -405,19 +410,22 @@ export class BackgroundOrchestrator {
     });
   }
 
-  private async ensureActiveTabInQueue(): Promise<boolean> {
-    // キューに読み上げ可能なタブがあるかチェック
-    const snapshot = this.tabManager.getSnapshot();
+  private async ensureActiveTabInQueue(snapshot?: QueueStatusPayload): Promise<boolean> {
+    const queueSnapshot = snapshot ?? this.tabManager.getSnapshot();
 
-    // 読み上げ可能なタブが存在する場合は何もしない
-    const hasReadableTabs = snapshot.tabs.some((tab) => !tab.isIgnored);
+    // 既に読み上げ対象のタブが存在する場合は何もしない
+    const hasReadableTabs = queueSnapshot.tabs.some((tab) => !tab.isIgnored);
     if (hasReadableTabs) {
+      return false;
+    }
+
+    if (queueSnapshot.totalCount > 0) {
       return false;
     }
 
     try {
       // アクティブタブを取得
-      const tabs = await (this.chrome.tabs as any).query({ active: true, currentWindow: true });
+      const tabs = await this.queryTabs({ active: true, currentWindow: true });
       const activeTab = tabs[0];
 
       if (!activeTab || !activeTab.id || !activeTab.url) {
@@ -610,48 +618,150 @@ export class BackgroundOrchestrator {
 
     switch (command) {
       case 'read-aloud-toggle': {
-        const status = this.tabManager.getSnapshot().status;
-        if (status === 'reading') {
+        const snapshot = this.tabManager.getSnapshot();
+        if (snapshot.status === 'reading') {
           this.logger.info('Toggling: Pausing read aloud...');
           this.tabManager.pause();
-        } else if (status === 'paused') {
+        } else if (snapshot.status === 'paused') {
           this.logger.info('Toggling: Resuming read aloud...');
           this.tabManager.resume();
         } else {
           this.logger.info('Toggling: Starting read aloud...');
-          await this.ensureActiveTabInQueue();
+          const hasReadableTabs = snapshot.tabs.some((tab) => !tab.isIgnored);
+          if (!hasReadableTabs && snapshot.totalCount === 0) {
+            await this.ensureActiveTabInQueue(snapshot);
+          }
           await this.tabManager.processNext();
         }
         break;
       }
-      case 'read-aloud-start':
-        this.logger.info('Starting read aloud...');
-        await this.ensureActiveTabInQueue();
-        await this.tabManager.processNext();
-        break;
-      case 'read-aloud-stop':
-        this.logger.info('Stopping read aloud...');
-        await this.tabManager.stop();
-        break;
-      case 'read-aloud-next':
-        this.logger.info('Skipping to next tab...');
-        await this.tabManager.skipTab('next');
-        break;
-      case 'read-aloud-prev':
-        this.logger.info('Skipping to previous tab...');
-        await this.tabManager.skipTab('previous');
-        break;
-      case 'read-aloud-pause':
-        this.logger.info('Pausing read aloud...');
-        this.tabManager.pause();
-        break;
-      case 'read-aloud-resume':
-        this.logger.info('Resuming read aloud...');
-        this.tabManager.resume();
+      case 'read-aloud-queue-all':
+        this.logger.info('Queueing all tabs from shortcut...');
+        await this.queueAllTabsAndPlay();
         break;
       default:
         this.logger.debug('BackgroundOrchestrator: unknown command', command);
     }
+  }
+
+  private async queryTabs(queryInfo: any): Promise<any[]> {
+    const tabsApi = this.chrome.tabs;
+    const queryFn = tabsApi?.query;
+    if (!queryFn) {
+      this.logger.warn('BackgroundOrchestrator: tabs.query API is unavailable');
+      return [];
+    }
+
+    // Support callback-based and promise-based variants
+    if (queryFn.length >= 2) {
+      return new Promise<any[]>((resolve) => {
+        try {
+          (queryFn as (queryInfo: any, callback: (tabs: any[]) => void) => void)(queryInfo, (tabs: any[]) =>
+            resolve(Array.isArray(tabs) ? tabs : []),
+          );
+        } catch (error) {
+          this.logger.error('BackgroundOrchestrator: tabs.query callback variant failed', error);
+          resolve([]);
+        }
+      });
+    }
+
+    try {
+      const result = (queryFn as (queryInfo: any) => Promise<any[]> | any[])(queryInfo);
+      if (Array.isArray(result)) {
+        return result;
+      }
+      if (result && typeof (result as Promise<any[]>).then === 'function') {
+        return await result;
+      }
+
+      return [];
+    } catch (error) {
+      this.logger.error('BackgroundOrchestrator: tabs.query failed', error);
+      return [];
+    }
+  }
+
+  private isTabQueueCandidate(tab: any, ignoredDomains: Set<string>): boolean {
+    if (!tab || typeof tab.id !== 'number' || !tab.url) {
+      return false;
+    }
+
+    const invalidPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'moz-extension://'];
+    if (invalidPrefixes.some((prefix) => tab.url.startsWith(prefix))) {
+      return false;
+    }
+
+    try {
+      const url = new URL(tab.url);
+      if (ignoredDomains.has(url.hostname.toLowerCase())) {
+        return false;
+      }
+    } catch (error) {
+      this.logger.debug('BackgroundOrchestrator: skipping tab due to invalid URL', { url: tab.url, error });
+      return false;
+    }
+
+    return true;
+  }
+
+  private async queueAllTabsAndPlay(): Promise<void> {
+    const tabs = await this.queryTabs({ currentWindow: true });
+    if (!tabs.length) {
+      this.logger.info('BackgroundOrchestrator: no tabs found when queueing all');
+      return;
+    }
+
+    let ignoredDomains: string[] = [];
+    try {
+      ignoredDomains = await getIgnoredDomains();
+    } catch (error) {
+      this.logger.warn('BackgroundOrchestrator: failed to load ignored domains', error);
+    }
+    const ignoredSet = new Set(ignoredDomains.map((domain) => domain.toLowerCase()));
+
+    let addedCount = 0;
+    for (const tab of tabs) {
+      if (!this.isTabQueueCandidate(tab, ignoredSet)) {
+        continue;
+      }
+
+      const tabInfo: TabInfo = {
+        tabId: tab.id,
+        url: tab.url,
+        title: tab.title || tab.url,
+        isIgnored: false,
+        extractedAt: new Date(),
+      };
+
+      try {
+        await this.tabManager.addTab(tabInfo, { position: 'end', autoStart: false });
+        addedCount += 1;
+      } catch (error) {
+        this.logger.error('BackgroundOrchestrator: failed to add tab from queue-all shortcut', {
+          tabId: tab.id,
+          url: tab.url,
+          error,
+        });
+      }
+    }
+
+    if (addedCount === 0) {
+      this.logger.info('BackgroundOrchestrator: no valid tabs to queue from shortcut');
+      return;
+    }
+
+    const status = this.tabManager.getSnapshot().status;
+    if (status === 'reading') {
+      return;
+    }
+
+    if (status === 'paused') {
+      this.tabManager.resume();
+      return;
+    }
+
+    await this.tabManager.processNext();
   }
 
   private broadcastStatus(payload: QueueStatusPayload): void {
