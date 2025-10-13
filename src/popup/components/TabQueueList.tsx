@@ -27,6 +27,7 @@ export interface TabQueueListProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
+  onResetQueue: () => void;
 }
 
 interface SortableItemProps {
@@ -88,6 +89,7 @@ export default function TabQueueList({
   onReorder,
   onSkipNext,
   onSkipPrevious,
+  onResetQueue,
 }: TabQueueListProps) {
   const isQueueEmpty = tabs.length === 0;
 
@@ -142,6 +144,7 @@ export default function TabQueueList({
       title="読み上げキュー"
       description={`${tabs.length} 件 / 状態: ${statusLabel}`}
       actions={[
+        { label: 'リセット', onClick: onResetQueue, disabled: isQueueEmpty },
         { label: '◀ 前へ', onClick: onSkipPrevious, disabled: isQueueEmpty },
         { label: '次へ ▶', onClick: onSkipNext, disabled: isQueueEmpty },
       ]}

@@ -230,6 +230,9 @@ export class BackgroundOrchestrator {
       case 'QUEUE_UPDATE_SETTINGS':
         await this.handleUpdateSettings(message.payload.settings);
         return { success: true };
+      case 'QUEUE_CLEAR':
+        await this.tabManager.clearQueue();
+        return { success: true };
       case 'REQUEST_QUEUE_STATE':
         return { success: true, payload: this.tabManager.getSnapshot() };
       default:
