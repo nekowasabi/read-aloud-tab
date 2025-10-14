@@ -95,7 +95,7 @@ export default function App() {
     };
   }, []);
 
-  // Listen for settings changes from options page
+  // Listen for settings/developer mode changes
   useEffect(() => {
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
       if (areaName === 'sync') {
@@ -106,7 +106,6 @@ export default function App() {
           setDeveloperMode(Boolean(changes[STORAGE_KEYS.DEVELOPER_MODE].newValue));
         }
       }
-
     };
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
@@ -122,12 +121,6 @@ export default function App() {
     }
     return undefined;
   }, []);
-
-  useEffect(() => {
-    if (queueError) {
-      setError(queueError);
-    }
-  }, [queueError]);
 
   const activeQueueTab: SerializedTabInfo | null = useMemo(() => {
     if (!queueState) return null;
@@ -363,19 +356,19 @@ export default function App() {
         </button>
       </header>
 
-      {error && (
-        <div className="error-message" role="alert">
-          <span>{error}</span>
-          <button onClick={clearError} className="error-close">×</button>
-        </div>
-      )}
-
       {developerMode && (
         <DiagnosticsBanner
           connectionState={connectionState}
           lastError={queueError}
           keepAlive={prefetchDiagnostics ?? null}
         />
+      )}
+
+      {error && (
+        <div className="error-message" role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} className="error-close">×</button>
+        </div>
       )}
 
       <div className="actions-row">

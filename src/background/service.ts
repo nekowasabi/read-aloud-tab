@@ -1,4 +1,4 @@
-import { TabInfo, KeepAliveDiagnostics } from '../shared/types';
+import { TabInfo, STORAGE_KEYS, KeepAliveDiagnostics } from '../shared/types';
 import {
   QueueCommandMessage,
   QueueBroadcastMessage,
@@ -19,6 +19,8 @@ import {
 } from '../shared/messages';
 import { AiPrefetcher } from './aiPrefetcher';
 import { TabManager, LoggerLike } from './tabManager';
+import { KeepAliveController, KeepAliveConfig, KeepAliveEvent, RuntimePort } from './keepAliveController';
+import { StorageManager } from '../shared/utils/storage';
 import { BrowserAdapter } from '../shared/utils/browser';
 import { getIgnoredDomains } from '../shared/utils/storage';
 
@@ -34,6 +36,7 @@ interface ChromeRuntimeLike {
   onConnect: { addListener: (listener: (port: ChromeRuntimePort) => void) => void };
   sendMessage: (message: QueueBroadcastMessage | OffscreenCommandMessage) => Promise<unknown> | void;
   lastError?: chrome.runtime.LastError | null;
+  connect?: (options: { name: string }) => ChromeRuntimePort;
 }
 
 interface ChromeTabsLike {
@@ -41,6 +44,15 @@ interface ChromeTabsLike {
   query?: {
     (queryInfo: any): Promise<any[]> | any[];
     (queryInfo: any, callback: (tabs: any[]) => void): void;
+  };
+}
+
+interface ChromeAlarmsLike {
+  create: (name: string, alarmInfo: { delayInMinutes?: number; periodInMinutes?: number }) => void;
+  clear: (name: string, callback?: (wasCleared: boolean) => void) => void | Promise<boolean> | boolean;
+  onAlarm: {
+    addListener: (listener: (alarm: { name: string }) => void) => void;
+    removeListener?: (listener: (alarm: { name: string }) => void) => void;
   };
 }
 
@@ -52,6 +64,7 @@ interface ChromeLike {
       addListener: (listener: (command: string) => void) => void;
     };
   };
+  alarms?: ChromeAlarmsLike;
 }
 
 type RuntimeMessageListener = (
@@ -65,6 +78,8 @@ interface BackgroundOrchestratorOptions {
   chrome?: ChromeLike;
   logger?: LoggerLike;
   prefetcher?: AiPrefetcher | null;
+  keepAliveController?: KeepAliveController;
+  keepAliveConfig?: Partial<KeepAliveConfig>;
 }
 
 export class BackgroundOrchestrator {
@@ -76,6 +91,15 @@ export class BackgroundOrchestrator {
 
   private readonly ports = new Set<ChromeRuntimePort>();
   private unsubscribeFns: Array<() => void> = [];
+  private readonly keepAliveController: KeepAliveController | null;
+  private developerMode = false;
+  private keepAliveDiagnostics: KeepAliveDiagnostics = {
+    state: 'stopped',
+    lastHeartbeatAt: null,
+    lastAlarmAt: null,
+    lastFallbackAt: null,
+    fallbackCount: 0,
+  };
 
   constructor(options: BackgroundOrchestratorOptions) {
     this.tabManager = options.tabManager;
@@ -83,6 +107,7 @@ export class BackgroundOrchestrator {
     this.chrome = options.chrome || (browserAPI as unknown as ChromeLike);
     this.logger = options.logger || console;
     this.prefetcher = options.prefetcher ?? null;
+    this.keepAliveController = options.keepAliveController || this.createKeepAliveController(options.keepAliveConfig);
 
     if (!this.chrome?.runtime) {
       throw new Error('Chrome runtime APIs are not available');
@@ -163,11 +188,17 @@ export class BackgroundOrchestrator {
       return;
     }
 
+    await this.refreshDeveloperMode();
     await this.tabManager.initialize();
     await this.setupOffscreenDocument();
     this.registerTabManagerListeners();
     this.registerRuntimeListeners();
     this.registerCommandListeners();
+    this.registerKeepAliveListeners();
+    this.registerDeveloperModeListener();
+    this.tabManager.resumePlaybackIfNeeded().catch((error) => {
+      this.logger.warn('BackgroundOrchestrator: failed to resume playback', error);
+    });
 
     this.initialized = true;
   }
@@ -203,7 +234,24 @@ export class BackgroundOrchestrator {
   }
 
   private registerTabManagerListeners(): void {
-    this.unsubscribeFns.push(this.tabManager.addStatusListener((payload) => this.broadcastStatus(payload)));
+    const statusHandler = (payload: QueueStatusPayload) => {
+      this.broadcastStatus(payload);
+      if (!this.keepAliveController) {
+        return;
+      }
+
+      if (payload.status === 'reading') {
+        void this.keepAliveController.startHeartbeat('queue').catch((error) => {
+          this.logger.warn('BackgroundOrchestrator: failed to start keep-alive heartbeat', error);
+        });
+      } else {
+        void this.keepAliveController.stopHeartbeat('queue').catch((error) => {
+          this.logger.warn('BackgroundOrchestrator: failed to stop keep-alive heartbeat', error);
+        });
+      }
+    };
+
+    this.unsubscribeFns.push(this.tabManager.addStatusListener(statusHandler));
     this.unsubscribeFns.push(this.tabManager.addProgressListener((payload) => this.broadcastProgress(payload)));
     this.unsubscribeFns.push(this.tabManager.addErrorListener((payload) => this.broadcastError(payload)));
     this.unsubscribeFns.push(this.tabManager.addCommandListener((event) => this.handleCommandEvent(event)));
@@ -223,6 +271,142 @@ export class BackgroundOrchestrator {
       this.handleShortcutCommand(command).catch((error) => {
         this.logger.error('BackgroundOrchestrator: shortcut command failed', error);
       });
+    });
+  }
+
+  private registerKeepAliveListeners(): void {
+    if (!this.keepAliveController || !this.chrome.alarms?.onAlarm?.addListener) {
+      return;
+    }
+
+    const handler = (alarm: { name: string }) => {
+      void this.keepAliveController?.handleAlarm(alarm.name).catch((error) => {
+        this.logger.warn('BackgroundOrchestrator: keep-alive alarm handling failed', error);
+      });
+    };
+
+    this.chrome.alarms.onAlarm.addListener(handler);
+    this.unsubscribeFns.push(() => this.chrome.alarms?.onAlarm?.removeListener?.(handler));
+  }
+
+  private registerDeveloperModeListener(): void {
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== 'sync' || !changes[STORAGE_KEYS.DEVELOPER_MODE]) {
+        return;
+      }
+      this.refreshDeveloperMode().catch((error) => {
+        this.logger.warn('BackgroundOrchestrator: failed to refresh developer mode', error);
+      });
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged?.addListener) {
+      chrome.storage.onChanged.addListener(listener);
+      this.unsubscribeFns.push(() => chrome.storage.onChanged.removeListener(listener));
+    }
+  }
+
+  private async refreshDeveloperMode(): Promise<void> {
+    try {
+      this.developerMode = await StorageManager.getDeveloperMode();
+      if (this.developerMode) {
+        this.persistDiagnostics();
+      } else {
+        chrome.storage?.local?.remove?.('readAloudDiagnostics');
+      }
+    } catch (error) {
+      this.developerMode = false;
+      this.logger.warn('BackgroundOrchestrator: failed to load developer mode flag', error);
+    }
+  }
+
+  private handleKeepAliveEvent(event: KeepAliveEvent): void {
+    switch (event.type) {
+      case 'heartbeat-started':
+        this.updateDiagnostics({ state: 'running', lastHeartbeatAt: event.timestamp });
+        break;
+      case 'heartbeat-stopped':
+        this.updateDiagnostics({ state: 'stopped' });
+        break;
+      case 'alarm-fired':
+        this.updateDiagnostics({ lastAlarmAt: event.timestamp });
+        break;
+      case 'fallback-triggered':
+        this.updateDiagnostics({
+          lastFallbackAt: event.timestamp,
+          fallbackCount: this.keepAliveDiagnostics.fallbackCount + 1,
+        });
+        break;
+      default:
+        break;
+    }
+  }
+
+  private updateDiagnostics(patch: Partial<KeepAliveDiagnostics>): void {
+    this.keepAliveDiagnostics = {
+      ...this.keepAliveDiagnostics,
+      ...patch,
+    };
+    this.persistDiagnostics();
+  }
+
+  private persistDiagnostics(): void {
+    if (!this.developerMode) {
+      return;
+    }
+    try {
+      chrome.storage?.local?.set?.({ readAloudDiagnostics: this.keepAliveDiagnostics });
+    } catch (error) {
+      this.logger.warn('BackgroundOrchestrator: failed to persist diagnostics', error);
+    }
+  }
+
+  private createKeepAliveController(config?: Partial<KeepAliveConfig>): KeepAliveController | null {
+    if (!this.chrome.alarms) {
+      return null;
+    }
+
+    const resolvedConfig: KeepAliveConfig = {
+      alarmName: 'read-aloud-tab-heartbeat',
+      periodInMinutes: 1,
+      fallbackPingIntervalMs: 15000,
+      maxMissCount: 3,
+      ...config,
+    };
+
+    return new KeepAliveController({
+      alarms: {
+        create: (name, info) => {
+          this.chrome.alarms?.create(name, info);
+        },
+        clear: (name) => {
+          if (!this.chrome.alarms?.clear) {
+            return false;
+          }
+
+          const result = this.chrome.alarms.clear(name, () => undefined);
+          if (typeof result === 'boolean') {
+            return result;
+          }
+          if (result instanceof Promise) {
+            return result;
+          }
+          return true;
+        },
+      },
+      runtime: {
+        sendMessage: (message) => {
+          const maybePromise = this.chrome.runtime.sendMessage?.(message as any);
+          return maybePromise instanceof Promise ? maybePromise : Promise.resolve(maybePromise);
+        },
+        connect: (options) => (this.chrome.runtime.connect?.(options) as unknown as RuntimePort | undefined),
+      },
+      logger: this.logger,
+      onKeepAlive: async () => {
+        const snapshot = this.tabManager.getSnapshot();
+        this.broadcastStatus(snapshot);
+      },
+      config: resolvedConfig,
+      onEvent: (event) => this.handleKeepAliveEvent(event),
     });
   }
 

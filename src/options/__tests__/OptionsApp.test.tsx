@@ -17,6 +17,8 @@ jest.mock('../../shared/utils/storage', () => ({
       summaryPrompt: settings?.summaryPrompt?.trim() || 'default summary prompt',
       translationPrompt: settings?.translationPrompt?.trim() || 'default translation prompt',
     })),
+    getDeveloperMode: jest.fn(),
+    setDeveloperMode: jest.fn(),
   },
   getIgnoredDomains: jest.fn(),
 }));
@@ -45,6 +47,8 @@ describe('OptionsApp', () => {
     (chrome.storage.sync.get as jest.Mock).mockResolvedValue({});
     (chrome.storage.sync.set as jest.Mock).mockResolvedValue(undefined);
     storage.StorageManager.getAiSettings.mockResolvedValue(baseAiSettings);
+    storage.StorageManager.getDeveloperMode.mockResolvedValue(false);
+    storage.StorageManager.setDeveloperMode.mockResolvedValue(undefined);
   });
 
   test('初期表示で設定値と無視リストをロードしてフォームに反映する', async () => {
@@ -145,6 +149,20 @@ describe('OptionsApp', () => {
       expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith(
         expect.objectContaining({ summaryPrompt: '新しい要約プロンプト' })
       );
+    });
+  });
+
+  test('開発者モードを切り替えると保存される', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+
+    render(<OptionsApp />);
+
+    const developerCheckbox = await screen.findByLabelText('開発者モードを有効にする');
+    fireEvent.click(developerCheckbox);
+
+    await waitFor(() => {
+      expect(storage.StorageManager.setDeveloperMode).toHaveBeenCalledWith(true);
     });
   });
 

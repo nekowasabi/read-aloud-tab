@@ -55,6 +55,16 @@ jest.mock('../../hooks/useTabQueue', () => ({
 const mockBrowserQuery = jest.fn();
 const mockBrowserGetStorage = jest.fn();
 
+jest.mock('../../../shared/utils/storage', () => ({
+  StorageManager: {
+    getSettings: jest.fn().mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null }),
+    saveSettings: jest.fn().mockResolvedValue(undefined),
+    validateSettings: jest.fn((settings) => settings),
+    getDeveloperMode: jest.fn().mockResolvedValue(false),
+  },
+  getIgnoredDomains: jest.fn().mockResolvedValue([]),
+}));
+
 jest.mock('../../../shared/utils/browser', () => ({
   BrowserAdapter: {
     getInstance: jest.fn(() => ({
@@ -73,9 +83,14 @@ jest.mock('../../../shared/utils/browser', () => ({
   },
 }));
 
+const storage = require('../../../shared/utils/storage');
+
 describe('App integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    storage.StorageManager.getDeveloperMode.mockResolvedValue(false);
+    storage.getIgnoredDomains.mockResolvedValue([]);
 
     // Mock BrowserAdapter methods
     mockBrowserQuery.mockResolvedValue([{ id: 99, url: 'https://active.com', title: 'Active Tab' }]);
@@ -179,6 +194,7 @@ describe('App integration', () => {
       ignoredDomains: ['docs.google.com', 'example2.com'],
       tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
     });
+    storage.getIgnoredDomains.mockResolvedValue(['docs.google.com', 'example2.com']);
 
     // Mock multiple tabs including ignored domains
     mockBrowserQuery.mockResolvedValue([

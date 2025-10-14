@@ -161,9 +161,11 @@ describe('Storage Utilities - Queue Management', () => {
           volume: 1.0,
           voice: null,
         },
-      };
+        progressByTab: {},
+        persistedAt: expect.any(Number),
+      } as ReadingQueue;
 
-      expect(result).toEqual(expectedDefault);
+      expect(result).toMatchObject(expectedDefault);
     });
 
     it('should trigger migration for v1 data', async () => {
@@ -203,6 +205,25 @@ describe('Storage Utilities - Queue Management', () => {
 
       expect(mockLocalStorage.remove).toHaveBeenCalledWith(['readingQueue']);
     });
+  });
+});
+
+describe('Storage Utilities - Developer Mode', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should load developer mode flag from storage', async () => {
+    getMockBrowserStorage().sync.get.mockResolvedValue({ developerMode: true });
+
+    const enabled = await StorageManager.getDeveloperMode();
+    expect(enabled).toBe(true);
+    expect(getMockBrowserStorage().sync.get).toHaveBeenCalledWith(['developerMode']);
+  });
+
+  it('should save developer mode flag to storage', async () => {
+    await StorageManager.setDeveloperMode(true);
+    expect(getMockBrowserStorage().sync.set).toHaveBeenCalledWith({ developerMode: true });
   });
 });
 

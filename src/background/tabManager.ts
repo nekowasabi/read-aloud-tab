@@ -105,6 +105,7 @@ export class TabManager {
   private initialized = false;
   private activePlaybackToken: number | null = null;
   private playbackTokenSeq = 0;
+  private progressByTab: Record<number, number> = {};
 
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPersistPromise: Promise<void> | null = null;
@@ -158,6 +159,9 @@ export class TabManager {
     if (!['idle', 'reading', 'paused', 'error'].includes(this.queue.status)) {
       this.queue.status = 'idle';
     }
+    this.progressByTab = { ...(this.queue.progressByTab ?? {}) };
+    this.pruneProgressByTabs();
+    this.queue.persistedAt = this.queue.persistedAt ?? this.now();
 
     if (this.fetchIgnoredDomains) {
       try {
@@ -178,12 +182,6 @@ export class TabManager {
 
     this.refreshIgnoredFlags();
     this.enforceContentBudget();
-
-    // Resume in idle state on startup
-    if (this.queue.status === 'reading') {
-      this.queue.status = 'idle';
-      this.activePlaybackToken = null;
-    }
 
     await this.persistQueue(true);
     this.emitStatus();
@@ -465,6 +463,32 @@ export class TabManager {
     this.emitStatus();
   }
 
+  async resumePlaybackIfNeeded(): Promise<void> {
+    await this.ensureInitialized();
+
+    if (this.queue.status !== 'reading') {
+      return;
+    }
+
+    const currentTab = this.queue.tabs[this.queue.currentIndex];
+    if (!currentTab) {
+      this.queue.status = 'idle';
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    try {
+      await this.processNext(this.queue.currentIndex);
+    } catch (error) {
+      this.logger.warn('TabManager: failed to resume playback after restart', error);
+      this.queue.status = 'idle';
+      await this.persistQueue();
+      this.emitStatus();
+      this.pushQueueError('QUEUE_RESUME_FAILED', '読み上げ再開に失敗しました', error, currentTab.tabId);
+    }
+  }
+
   async stop(): Promise<void> {
     await this.stopInternal(true);
     await this.persistQueue();
@@ -673,6 +697,8 @@ export class TabManager {
       }
 
       try {
+        this.pruneProgressByTabs();
+        this.queue.persistedAt = this.now();
         await this.storage.save(this.queue);
         if (this.pendingPersistPromise && this.persistResolve) {
           this.persistResolve();
@@ -706,6 +732,7 @@ export class TabManager {
         this.logError('QUEUE_PERSIST_FAILED', 'TabManager: scheduled persistence error', error);
       });
     }, this.persistDelayMs);
+    this.pruneProgressByTabs();
   }
 
   async flushPersistence(): Promise<void> {
@@ -783,6 +810,19 @@ export class TabManager {
     };
   }
 
+  private pruneProgressByTabs(): void {
+    const validTabIds = new Set(this.queue.tabs.map((tab) => tab.tabId));
+    const filtered: Record<number, number> = {};
+    for (const [tabId, progress] of Object.entries(this.progressByTab)) {
+      const numericId = Number(tabId);
+      if (validTabIds.has(numericId)) {
+        filtered[numericId] = progress;
+      }
+    }
+    this.progressByTab = filtered;
+    this.queue.progressByTab = { ...filtered };
+  }
+
   private async stopInternal(stopPlayback: boolean): Promise<void> {
     if (stopPlayback) {
       try {
@@ -843,10 +883,15 @@ export class TabManager {
       return;
     }
     const clamped = Math.max(0, Math.min(100, progress));
+    this.progressByTab[tabId] = clamped;
+    this.queue.progressByTab = { ...this.progressByTab };
     this.emitProgress({
       tabId,
       progress: clamped,
       timestamp: this.now(),
+    });
+    this.persistQueue().catch((error) => {
+      this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after progress update', error);
     });
   }
 

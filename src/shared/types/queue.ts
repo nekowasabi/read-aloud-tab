@@ -8,6 +8,8 @@ export interface ReadingQueue {
   currentIndex: number;
   status: QueueStatus;
   settings: TTSSettings;
+  progressByTab?: Record<number, number>;
+  persistedAt?: number;
 }
 
 export interface QueueSnapshot extends ReadingQueue {

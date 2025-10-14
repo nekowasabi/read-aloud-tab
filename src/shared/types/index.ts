@@ -3,6 +3,7 @@ export * from './tts';
 export * from './queue';
 export * from './helpers';
 export * from './ai';
+export * from './diagnostics';
 
 export interface BrowserAPI {
   tabs: {

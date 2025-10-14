@@ -5,6 +5,12 @@ import { BackgroundOrchestrator } from '../service';
 import { TabManager } from '../tabManager';
 import { BrowserAdapter } from '../../shared/utils/browser';
 
+jest.mock('../../shared/utils/storage', () => ({
+  StorageManager: {
+    getDeveloperMode: jest.fn().mockResolvedValue(false),
+  },
+}));
+
 describe('BackgroundOrchestrator Offscreen Integration', () => {
   let mockChrome: any;
   let mockOffscreen: any;
@@ -47,6 +53,7 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
       addProgressListener: jest.fn().mockReturnValue(() => {}),
       addErrorListener: jest.fn().mockReturnValue(() => {}),
       addCommandListener: jest.fn().mockReturnValue(() => {}),
+      resumePlaybackIfNeeded: jest.fn().mockResolvedValue(undefined),
     } as any;
   });
 

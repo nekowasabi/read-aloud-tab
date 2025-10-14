@@ -31,6 +31,7 @@ export default function OptionsApp() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [developerMode, setDeveloperMode] = useState(false);
 
   useEffect(() => {
     loadInitialData();
@@ -38,14 +39,16 @@ export default function OptionsApp() {
 
   const loadInitialData = async () => {
     try {
-      const [loadedSettings, domains, loadedAiSettings] = await Promise.all([
+      const [loadedSettings, domains, loadedAiSettings, devModeFlag] = await Promise.all([
         StorageManager.getSettings(),
         getIgnoredDomains(),
         StorageManager.getAiSettings(),
+        StorageManager.getDeveloperMode(),
       ]);
       setSettings(loadedSettings);
       setIgnoredDomains(domains);
       setAiSettings(loadedAiSettings);
+      setDeveloperMode(devModeFlag);
     } catch (error) {
       console.error('OptionsApp: failed to load data', error);
       setMessage('設定の読み込みに失敗しました');
@@ -138,6 +141,18 @@ export default function OptionsApp() {
     setIgnoredDomains(domains);
   };
 
+  const handleDeveloperModeChange = async (enabled: boolean) => {
+    setDeveloperMode(enabled);
+    try {
+      await StorageManager.setDeveloperMode(enabled);
+      setMessage(enabled ? '開発者モードを有効にしました' : '開発者モードを無効にしました');
+    } catch (error) {
+      console.error('OptionsApp: failed to update developer mode', error);
+      setMessage('開発者モードの更新に失敗しました');
+      setDeveloperMode(!enabled);
+    }
+  };
+
   const handleConnectionTest = async () => {
     if (!aiSettings.openRouterApiKey) {
       setConnectionTestResult({
@@ -224,6 +239,24 @@ export default function OptionsApp() {
             value={settings.volume}
             onChange={(event) => handleSettingChange('volume', parseFloat(event.target.value))}
           />
+        </div>
+      </section>
+
+      <section className="options-section">
+        <h2>開発者向け</h2>
+        <div className="setting-item">
+          <label htmlFor="developer-mode">
+            <input
+              id="developer-mode"
+              type="checkbox"
+              checked={developerMode}
+              onChange={(event) => handleDeveloperModeChange(event.target.checked)}
+            />
+            開発者モードを有効にする
+          </label>
+          <p className="setting-help">
+            再接続ログや heartbeat メトリクスなどの診断情報をポップアップで表示します。
+          </p>
         </div>
       </section>
 

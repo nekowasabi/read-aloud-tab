@@ -35,6 +35,8 @@ export interface UseTabQueueResult {
 }
 
 const QUEUE_PORT_NAME = 'read-aloud-tab-queue';
+const BASE_RETRY_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 5000;
 
 export default function useTabQueue(): UseTabQueueResult {
   const [state, setState] = useState<QueueStatusPayload | null>(null);

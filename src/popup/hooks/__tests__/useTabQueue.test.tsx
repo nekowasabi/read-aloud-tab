@@ -88,4 +88,37 @@ describe('useTabQueue', () => {
       type: 'QUEUE_CLEAR',
     });
   });
+
+  test('ポート切断時に再接続を試行し connectionState を更新する', () => {
+    jest.useFakeTimers();
+    const first = createPort();
+    const second = createPort();
+    (chrome.runtime.connect as jest.Mock)
+      .mockReturnValueOnce(first.port)
+      .mockReturnValueOnce(second.port);
+
+    const TestComponent = () => {
+      const { connectionState } = useTabQueue();
+      return <div data-testid="state">{connectionState}</div>;
+    };
+
+    render(<TestComponent />);
+
+    expect(screen.getByTestId('state').textContent).toBe('connected');
+
+    const disconnectHandler = first.port.onDisconnect.addListener.mock.calls[0][0];
+    act(() => {
+      disconnectHandler();
+    });
+
+    expect(screen.getByTestId('state').textContent).toBe('connecting');
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('state').textContent).toBe('connected');
+    jest.useRealTimers();
+  });
 });
