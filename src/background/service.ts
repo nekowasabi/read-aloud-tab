@@ -1,4 +1,4 @@
-import { TabInfo } from '../shared/types';
+import { TabInfo, KeepAliveDiagnostics } from '../shared/types';
 import {
   QueueCommandMessage,
   QueueBroadcastMessage,
@@ -10,13 +10,20 @@ import {
   OffscreenCommandMessage,
   OffscreenBroadcastMessage,
   isOffscreenBroadcastMessage,
+  PrefetchCommandMessage,
+  PrefetchBroadcastMessage,
+  PrefetchStatusSnapshot,
+  isPrefetchCommandMessage,
+  KeepAliveDiagnosticsMessage,
+  isKeepAliveDiagnosticsMessage,
 } from '../shared/messages';
+import { AiPrefetcher } from './aiPrefetcher';
 import { TabManager, LoggerLike } from './tabManager';
 import { BrowserAdapter } from '../shared/utils/browser';
 
 interface ChromeRuntimePort {
   name: string;
-  postMessage: (message: QueueBroadcastMessage | Record<string, unknown>) => void;
+  postMessage: (message: QueueBroadcastMessage | PrefetchBroadcastMessage | Record<string, unknown>) => void;
   onMessage: { addListener: (listener: (message: QueueCommandMessage | unknown) => void) => void };
   onDisconnect: { addListener: (listener: () => void) => void };
 }
@@ -52,12 +59,14 @@ interface BackgroundOrchestratorOptions {
   tabManager: TabManager;
   chrome?: ChromeLike;
   logger?: LoggerLike;
+  prefetcher?: AiPrefetcher | null;
 }
 
 export class BackgroundOrchestrator {
   private readonly tabManager: TabManager;
   private readonly chrome: ChromeLike;
   private readonly logger: LoggerLike;
+  private readonly prefetcher: AiPrefetcher | null;
   private initialized = false;
 
   private readonly ports = new Set<ChromeRuntimePort>();
@@ -68,6 +77,7 @@ export class BackgroundOrchestrator {
     const browserAPI = BrowserAdapter.getInstance();
     this.chrome = options.chrome || (browserAPI as unknown as ChromeLike);
     this.logger = options.logger || console;
+    this.prefetcher = options.prefetcher ?? null;
 
     if (!this.chrome?.runtime) {
       throw new Error('Chrome runtime APIs are not available');
@@ -167,6 +177,18 @@ export class BackgroundOrchestrator {
       return true as unknown as void;
     }
 
+    if (isKeepAliveDiagnosticsMessage(message)) {
+      const { payload } = message as KeepAliveDiagnosticsMessage;
+      this.handleKeepAliveDiagnostics(payload);
+      sendResponse({ success: true });
+      return true as unknown as void;
+    }
+
+    if (isPrefetchCommandMessage(message)) {
+      this.handlePrefetchCommand(message, sendResponse);
+      return true as unknown as void;
+    }
+
     if (!isQueueCommandMessage(message)) {
       return;
     }
@@ -184,7 +206,12 @@ export class BackgroundOrchestrator {
   private handleRuntimePort(port: ChromeRuntimePort): void {
     this.ports.add(port);
 
-    const handlePortMessage = async (message: QueueCommandMessage | unknown) => {
+    const handlePortMessage = async (message: QueueCommandMessage | PrefetchCommandMessage | unknown) => {
+      if (isPrefetchCommandMessage(message)) {
+        this.handlePrefetchCommand(message, () => undefined);
+        return;
+      }
+
       if (!isQueueCommandMessage(message)) {
         return;
       }
@@ -208,6 +235,8 @@ export class BackgroundOrchestrator {
     // Send initial snapshot immediately
     const snapshot = this.tabManager.getSnapshot();
     port.postMessage({ type: 'QUEUE_STATUS_UPDATE', payload: snapshot });
+
+    this.sendPrefetchSnapshotToPort(port);
   }
 
   private async processCommand(message: QueueCommandMessage): Promise<{ success: boolean; payload?: unknown }> {
@@ -235,6 +264,55 @@ export class BackgroundOrchestrator {
       default:
         return { success: false, error: 'Unknown command' } as any;
     }
+  }
+
+  private handlePrefetchCommand(message: PrefetchCommandMessage, sendResponse: (response: unknown) => void): void {
+    if (!this.prefetcher) {
+      sendResponse({ success: false, error: 'Prefetch not available' });
+      return;
+    }
+
+    switch (message.type) {
+      case 'PREFETCH_RETRY':
+        this.prefetcher.retry(message.payload.tabId);
+        this.broadcastPrefetchSnapshot();
+        sendResponse({ success: true });
+        return;
+      case 'PREFETCH_STATUS_SNAPSHOT_REQUEST':
+        sendResponse({ success: true, snapshot: this.prefetcher.getStatusSnapshot() });
+        return;
+      default:
+        sendResponse({ success: false, error: 'Unknown prefetch command' });
+    }
+  }
+
+  private handleKeepAliveDiagnostics(diagnostics: KeepAliveDiagnostics): void {
+    if (!this.prefetcher) {
+      return;
+    }
+    this.prefetcher.updateKeepAliveDiagnostics(diagnostics);
+    this.broadcastPrefetchSnapshot();
+  }
+
+  private sendPrefetchSnapshotToPort(port: ChromeRuntimePort): void {
+    if (!this.prefetcher) {
+      return;
+    }
+    try {
+      port.postMessage({
+        type: 'PREFETCH_STATUS_SYNC',
+        payload: this.prefetcher.getStatusSnapshot(),
+      } satisfies PrefetchBroadcastMessage);
+    } catch (error) {
+      this.logger.warn('[BackgroundOrchestrator] Failed to send prefetch snapshot to port', error);
+    }
+  }
+
+  private broadcastPrefetchSnapshot(): void {
+    if (!this.prefetcher) {
+      return;
+    }
+    this.ports.forEach((port) => this.sendPrefetchSnapshotToPort(port));
   }
 
   private async handleAddCommand(payload: QueueAddPayload): Promise<void> {

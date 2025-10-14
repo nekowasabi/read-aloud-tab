@@ -1,8 +1,11 @@
 import { OpenRouterClient } from '../shared/services/openrouter';
-import { AiSettings, TabInfo } from '../shared/types';
+import { AiSettings, TabInfo, KeepAliveDiagnostics } from '../shared/types';
 import { StorageManager } from '../shared/utils/storage';
-import { QueueStatusPayload, SerializedTabInfo } from '../shared/messages';
+import { QueueStatusPayload, PrefetchStatusSnapshot } from '../shared/messages';
 import { LoggerLike, TabManager } from './tabManager';
+import { PrefetchScheduler } from './prefetch/scheduler';
+import { PrefetchWorker, PrefetchStatusUpdate } from './prefetch/worker';
+import { PrefetchResultStoreImpl } from './prefetch/resultStore';
 
 interface AiPrefetcherOptions {
   tabManager: TabManager;
@@ -12,25 +15,20 @@ interface AiPrefetcherOptions {
   translationMaxTokens?: number;
   translationTarget?: string;
   settingsTtlMs?: number;
-  contentRequestThrottleMs?: number;
-  createClient?: (apiKey: string, model: string) => OpenRouterClient;
-  loadSettings?: () => Promise<AiSettings>;
+  broadcast?: (message: PrefetchStatusBroadcast) => void;
+  storage?: Pick<typeof chrome.storage, 'local'>;
 }
 
 const DEFAULT_SUMMARY_MAX_TOKENS = 480;
 const DEFAULT_TRANSLATION_MAX_TOKENS = 1200;
-const DEFAULT_PREFETCH_AHEAD = 1;
 const DEFAULT_SETTINGS_TTL = 60_000;
-const DEFAULT_CONTENT_REQUEST_THROTTLE = 5_000;
+const STATUS_STORAGE_KEY = 'prefetch_status';
 
-type TabManagerStatusListener = (payload: QueueStatusPayload) => void;
+export interface PrefetchStatusBroadcast {
+  type: 'PREFETCH_STATUS_SYNC';
+  payload: PrefetchStatusSnapshot;
+}
 
-/**
- * AI Prefetcher
- * - Listens to queue status updates
- * - Prefetches AI summaries/translations for current and upcoming tabs
- * - Ensures content is requested ahead of playback to reduce waiting time
- */
 export class AiPrefetcher {
   private readonly tabManager: TabManager;
   private readonly logger: LoggerLike;
@@ -39,222 +37,190 @@ export class AiPrefetcher {
   private readonly translationMaxTokens: number;
   private readonly translationTarget: string;
   private readonly settingsTtlMs: number;
-  private readonly contentRequestThrottleMs: number;
-  private readonly createClient: (apiKey: string, model: string) => OpenRouterClient;
-  private readonly loadSettings: () => Promise<AiSettings>;
+  private readonly broadcast: (message: PrefetchStatusBroadcast) => void;
+  private readonly storage: Pick<typeof chrome.storage, 'local'>;
 
+  private scheduler: PrefetchScheduler | null = null;
+  private worker: PrefetchWorker | null = null;
   private unsubscribeStatus?: () => void;
-  private inFlight = new Map<number, Promise<void>>();
-  private contentRequestTimestamps = new Map<number, number>();
+  private statusMap = new Map<number, PrefetchStatusUpdate & { updatedAt: number }>();
+  private keepAliveDiagnostics: KeepAliveDiagnostics | null = null;
 
   private cachedSettings: AiSettings | null = null;
   private cachedSettingsTimestamp = 0;
   private clientCacheKey: string | null = null;
   private clientInstance: OpenRouterClient | null = null;
 
-  private statusListener: TabManagerStatusListener = (payload) => {
-    this.handleStatusUpdate(payload).catch((error) => {
-      this.logger.error('AiPrefetcher: failed to handle status update', error);
-    });
-  };
-
   constructor(options: AiPrefetcherOptions) {
     this.tabManager = options.tabManager;
     this.logger = options.logger || console;
-    this.maxPrefetchAhead = options.maxPrefetchAhead ?? DEFAULT_PREFETCH_AHEAD;
+    this.maxPrefetchAhead = options.maxPrefetchAhead ?? 1;
     this.summaryMaxTokens = options.summaryMaxTokens ?? DEFAULT_SUMMARY_MAX_TOKENS;
     this.translationMaxTokens = options.translationMaxTokens ?? DEFAULT_TRANSLATION_MAX_TOKENS;
     this.translationTarget = options.translationTarget ?? 'ja';
     this.settingsTtlMs = options.settingsTtlMs ?? DEFAULT_SETTINGS_TTL;
-    this.contentRequestThrottleMs = options.contentRequestThrottleMs ?? DEFAULT_CONTENT_REQUEST_THROTTLE;
-    this.createClient = options.createClient ?? ((apiKey, model) => new OpenRouterClient(apiKey, model));
-    this.loadSettings = options.loadSettings ?? (() => StorageManager.getAiSettings());
+    this.broadcast = options.broadcast ?? ((message) => {
+      try {
+        chrome.runtime?.sendMessage?.(message);
+      } catch (error) {
+        this.logger.warn('AiPrefetcher: failed to broadcast status', error);
+      }
+    });
+    this.storage = options.storage ?? chrome.storage;
   }
 
   initialize(): void {
-    if (this.unsubscribeStatus) {
+    if (this.scheduler || this.worker) {
       return;
     }
-    this.unsubscribeStatus = this.tabManager.addStatusListener(this.statusListener);
+
+    const resultStore = new PrefetchResultStoreImpl({
+      storage: this.storage.local,
+    });
+
+    const worker = new PrefetchWorker({
+      fetchTab: async (tabId) => this.tabManager.getTabById(tabId),
+      requestContent: (tabId) => this.tabManager.requestContentForPrefetch(tabId),
+      getSettings: () => this.ensureSettings(),
+      summarize: (content) => this.summarize(content),
+      translate: (text, target) => this.translate(text, target),
+      resultStore,
+      emitStatus: (update) => this.handleStatusUpdate(update),
+      applyUpdates: (tabId, updates) => this.applyUpdates(tabId, updates),
+      logger: this.logger,
+      translationTarget: this.translationTarget,
+    });
+
+    const scheduler = new PrefetchScheduler({
+      enqueue: (job) => worker.enqueue(job),
+      cancel: (tabId) => worker.cancel(tabId),
+      maxPrefetchAhead: this.maxPrefetchAhead,
+    });
+
+    this.worker = worker;
+    this.scheduler = scheduler;
+
+    this.unsubscribeStatus = this.tabManager.addStatusListener((payload: QueueStatusPayload) => {
+      this.scheduler?.handleStatusUpdate(payload);
+      this.pruneStatusMap(payload);
+    });
+
+    this.storage.local.get?.('prefetch_status', (items) => {
+      const snapshot = items?.prefetch_status as PrefetchStatusSnapshot | undefined;
+      if (!snapshot) {
+        return;
+      }
+      this.statusMap = new Map(snapshot.statuses.map((status) => [status.tabId, status]));
+      this.keepAliveDiagnostics = snapshot.diagnostics ?? null;
+    });
   }
 
   dispose(): void {
-    if (this.unsubscribeStatus) {
-      this.unsubscribeStatus();
-      this.unsubscribeStatus = undefined;
-    }
-    this.inFlight.clear();
+    this.unsubscribeStatus?.();
+    this.unsubscribeStatus = undefined;
+    this.scheduler = null;
+    this.worker = null;
+    this.statusMap.clear();
   }
 
-  private async handleStatusUpdate(payload: QueueStatusPayload): Promise<void> {
-    if (!payload.tabs || payload.tabs.length === 0) {
-      return;
-    }
-
-    if (!['reading', 'paused'].includes(payload.status)) {
-      return;
-    }
-
-    const targets = this.collectPrefetchTargets(payload);
-    if (targets.length === 0) {
-      return;
-    }
-
-    const settings = await this.ensureSettings();
-    if (!settings) {
-      return;
-    }
-
-    for (const tab of targets) {
-      this.enqueuePrefetch(tab.tabId, settings);
-    }
+  retry(tabId: number): void {
+    this.scheduler?.retry(tabId);
+    const entry = { tabId, state: 'pending' as const, updatedAt: Date.now() };
+    this.statusMap.set(tabId, entry);
+    this.persistStatus();
+    this.broadcast({
+      type: 'PREFETCH_STATUS_SYNC',
+      payload: this.getStatusSnapshot(),
+    });
   }
 
-  private collectPrefetchTargets(payload: QueueStatusPayload): SerializedTabInfo[] {
-    const targets: SerializedTabInfo[] = [];
-
-    const current = payload.tabs[payload.currentIndex] ?? null;
-    if (current && !current.isIgnored) {
-      targets.push(current);
-    }
-
-    if (this.maxPrefetchAhead <= 0) {
-      return targets;
-    }
-
-    let collected = 0;
-    for (let index = payload.currentIndex + 1; index < payload.tabs.length; index += 1) {
-      const candidate = payload.tabs[index];
-      if (!candidate || candidate.isIgnored) {
-        continue;
-      }
-      targets.push(candidate);
-      collected += 1;
-      if (collected >= this.maxPrefetchAhead) {
-        break;
-      }
-    }
-
-    return targets;
+  getStatusSnapshot(): PrefetchStatusSnapshot {
+    const statuses = Array.from(this.statusMap.values()).sort((a, b) => a.updatedAt - b.updatedAt);
+    const updatedAt = statuses.length > 0 ? statuses[statuses.length - 1].updatedAt : Date.now();
+    return { statuses, updatedAt, diagnostics: this.keepAliveDiagnostics ?? undefined };
   }
 
-  private enqueuePrefetch(tabId: number, settings: AiSettings): void {
-    if (this.inFlight.has(tabId)) {
-      return;
-    }
-
-    const task = this.runPrefetch(tabId, settings)
-      .catch((error) => {
-        this.logger.warn('AiPrefetcher: prefetch task failed', error);
-      })
-      .finally(() => {
-        this.inFlight.delete(tabId);
-      });
-
-    this.inFlight.set(tabId, task);
+  updateKeepAliveDiagnostics(diagnostics: KeepAliveDiagnostics): void {
+    this.keepAliveDiagnostics = diagnostics;
+    this.persistStatus();
+    this.broadcast({
+      type: 'PREFETCH_STATUS_SYNC',
+      payload: this.getStatusSnapshot(),
+    });
   }
 
-  private async runPrefetch(tabId: number, settings: AiSettings): Promise<void> {
-    const tab = this.tabManager.getTabById(tabId);
-    if (!tab || tab.isIgnored) {
-      return;
-    }
-
-    const needsSummary = settings.enableAiSummary && (!tab.summary || tab.summary.trim().length === 0);
-    const needsTranslation =
-      settings.enableAiTranslation && (!tab.translation || tab.translation.trim().length === 0);
-
-    if (!needsSummary && !needsTranslation) {
-      return;
-    }
-
-    if (!settings.openRouterApiKey || settings.openRouterApiKey.trim().length === 0) {
-      this.logger.warn('AiPrefetcher: OpenRouter API key is not configured; skipping prefetch');
-      return;
-    }
-
+  private async ensureSettings(): Promise<AiSettings> {
     const now = Date.now();
-    if (!tab.content || tab.content.trim().length === 0) {
-      const lastRequestAt = this.contentRequestTimestamps.get(tabId) ?? 0;
-      if (now - lastRequestAt >= this.contentRequestThrottleMs) {
-        try {
-          await this.tabManager.requestContentForPrefetch(tabId);
-        } catch (error) {
-          this.logger.warn('AiPrefetcher: failed to request content for tab', tabId, error);
-        }
-        this.contentRequestTimestamps.set(tabId, now);
-      }
-      return;
-    }
-
-    const client = this.getClient(settings);
-    const updates: Partial<TabInfo> = {};
-
-    if (needsSummary) {
-      try {
-        const summary = await client.summarize(tab.content, this.summaryMaxTokens);
-        updates.summary = summary.trim();
-      } catch (error) {
-        this.logger.warn('AiPrefetcher: summary generation failed', error);
-      }
-    }
-
-    if (needsTranslation) {
-      try {
-        const translation = await client.translate(tab.content, this.translationTarget, this.translationMaxTokens);
-        updates.translation = translation.trim();
-      } catch (error) {
-        this.logger.warn('AiPrefetcher: translation generation failed', error);
-      }
-    }
-
-    if (Object.keys(updates).length === 0) {
-      return;
-    }
-
-    try {
-      await this.tabManager.onTabUpdated(tabId, updates);
-    } catch (error) {
-      this.logger.error('AiPrefetcher: failed to apply AI updates to tab', error);
-    }
-  }
-
-  private async ensureSettings(): Promise<AiSettings | null> {
-    const now = Date.now();
-    if (this.cachedSettings && now - this.cachedSettingsTimestamp < this.settingsTtlMs) {
-      if (this.isAiEnabled(this.cachedSettings)) {
-        return this.cachedSettings;
-      }
-      return null;
-    }
-
-    try {
-      const settings = await this.loadSettings();
-      this.cachedSettings = settings;
+    if (!this.cachedSettings || now - this.cachedSettingsTimestamp > this.settingsTtlMs) {
+      this.cachedSettings = await StorageManager.getAiSettings();
       this.cachedSettingsTimestamp = now;
-      if (!this.isAiEnabled(settings)) {
-        return null;
-      }
-      return settings;
-    } catch (error) {
-      this.logger.warn('AiPrefetcher: failed to load AI settings', error);
-      return null;
     }
+    return this.cachedSettings;
   }
 
-  private isAiEnabled(settings: AiSettings): boolean {
-    if (!settings.openRouterApiKey || settings.openRouterApiKey.trim().length === 0) {
-      return false;
-    }
-    return settings.enableAiSummary || settings.enableAiTranslation;
-  }
-
-  private getClient(settings: AiSettings): OpenRouterClient {
+  private async getClient(settings: AiSettings): Promise<OpenRouterClient> {
     const cacheKey = `${settings.openRouterApiKey}|${settings.openRouterModel}`;
-    if (!this.clientInstance || this.clientCacheKey !== cacheKey) {
-      this.clientInstance = this.createClient(settings.openRouterApiKey, settings.openRouterModel);
-      this.clientCacheKey = cacheKey;
+    if (this.clientInstance && this.clientCacheKey === cacheKey) {
+      return this.clientInstance;
     }
-    return this.clientInstance;
+    const client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel);
+    this.clientInstance = client;
+    this.clientCacheKey = cacheKey;
+    return client;
+  }
+
+  private async summarize(content: string): Promise<string> {
+    const settings = await this.ensureSettings();
+    if (!settings.enableAiSummary) {
+      return content;
+    }
+    const client = await this.getClient(settings);
+    const result = await client.summarize(content, this.summaryMaxTokens);
+    return result.trim();
+  }
+
+  private async translate(text: string, target: string): Promise<string> {
+    const settings = await this.ensureSettings();
+    if (!settings.enableAiTranslation) {
+      return text;
+    }
+    const client = await this.getClient(settings);
+    const result = await client.translate(text, target, this.translationMaxTokens);
+    return result.trim();
+  }
+
+  private async applyUpdates(tabId: number, updates: Partial<TabInfo>): Promise<void> {
+    await this.tabManager.onTabUpdated(tabId, updates);
+  }
+
+  private handleStatusUpdate(update: PrefetchStatusUpdate): void {
+    const entry = { ...update, updatedAt: Date.now() };
+    this.statusMap.set(update.tabId, entry);
+    this.persistStatus();
+    this.broadcast({
+      type: 'PREFETCH_STATUS_SYNC',
+      payload: this.getStatusSnapshot(),
+    });
+  }
+
+  private persistStatus(): void {
+    try {
+      const snapshot = this.getStatusSnapshot();
+      this.storage.local.set?.({
+        [STATUS_STORAGE_KEY]: snapshot,
+      });
+    } catch (error) {
+      this.logger.warn('AiPrefetcher: failed to persist status snapshot', error);
+    }
+  }
+
+  private pruneStatusMap(payload: QueueStatusPayload): void {
+    const validIds = new Set(payload.tabs.map((tab) => tab.tabId));
+    for (const tabId of Array.from(this.statusMap.keys())) {
+      if (!validIds.has(tabId)) {
+        this.statusMap.delete(tabId);
+      }
+    }
+    this.persistStatus();
   }
 }

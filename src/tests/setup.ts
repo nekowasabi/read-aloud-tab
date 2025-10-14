@@ -6,6 +6,27 @@ const mockChrome = {
     sync: {
       get: jest.fn().mockResolvedValue({}),
       set: jest.fn().mockResolvedValue(undefined),
+      remove: jest.fn().mockResolvedValue(undefined),
+    },
+    local: {
+      get: jest.fn((keys: any, callback?: (items: any) => void) => {
+        const result = {};
+        if (typeof callback === 'function') {
+          callback(result);
+        }
+        return Promise.resolve(result);
+      }),
+      set: jest.fn((items: any, callback?: () => void) => {
+        if (typeof callback === 'function') {
+          callback();
+        }
+        return Promise.resolve();
+      }),
+      remove: jest.fn().mockResolvedValue(undefined),
+    },
+    onChanged: {
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
     },
   },
   tabs: {
@@ -13,7 +34,13 @@ const mockChrome = {
     sendMessage: jest.fn().mockResolvedValue({}),
   },
   runtime: {
-    sendMessage: jest.fn().mockResolvedValue({}),
+    sendMessage: jest.fn((message: any, callback?: (response: any) => void) => {
+      const response = {};
+      if (typeof callback === 'function') {
+        callback(response);
+      }
+      return Promise.resolve(response);
+    }),
     connect: jest.fn(() => ({
       name: 'test-port',
       postMessage: jest.fn(),

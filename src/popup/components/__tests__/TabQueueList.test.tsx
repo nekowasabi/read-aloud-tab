@@ -74,6 +74,8 @@ const renderList = (props?: Partial<TabQueueListProps>) => {
     onReorder: jest.fn(),
     onSkipNext: jest.fn(),
     onSkipPrevious: jest.fn(),
+    prefetchStatuses: [],
+    onRetryPrefetch: jest.fn(),
   };
 
   const merged = { ...defaultProps, ...props };
@@ -132,5 +134,18 @@ describe('TabQueueList', () => {
     });
 
     expect(props.onReorder).not.toHaveBeenCalled();
+  });
+
+  test('prefetch 状態に応じて再試行ボタンを表示しコールバックを呼び出す', () => {
+    const onRetryPrefetch = jest.fn();
+    renderList({
+      prefetchStatuses: [{ tabId: 1, state: 'failed', updatedAt: Date.now(), error: 'API error' }],
+      onRetryPrefetch,
+    });
+
+    const retryButton = screen.getByRole('button', { name: '再試行' });
+    fireEvent.click(retryButton);
+
+    expect(onRetryPrefetch).toHaveBeenCalledWith(1);
   });
 });

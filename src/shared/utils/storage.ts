@@ -28,6 +28,8 @@ export class StorageManager {
     enableAiTranslation: false,
   };
 
+  private static readonly DEFAULT_DEVELOPER_MODE = false;
+
   private static readonly CURRENT_SCHEMA_VERSION = 2;
 
   static async getSettings(): Promise<TTSSettings> {
@@ -104,6 +106,37 @@ export class StorageManager {
       enableAiSummary: settings.enableAiSummary ?? this.DEFAULT_AI_SETTINGS.enableAiSummary,
       enableAiTranslation: settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
     };
+  }
+
+  static async getDeveloperMode(): Promise<boolean> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      const result = await browserAPI.storage.sync.get([STORAGE_KEYS.DEVELOPER_MODE]);
+      const stored = result?.[STORAGE_KEYS.DEVELOPER_MODE];
+      if (typeof stored === 'boolean') {
+        return stored;
+      }
+      if (stored === undefined || stored === null) {
+        return this.DEFAULT_DEVELOPER_MODE;
+      }
+      if (typeof stored === 'string') {
+        return stored === 'true';
+      }
+      return Boolean(stored);
+    } catch (error) {
+      console.error('Failed to load developer mode flag:', error);
+      return this.DEFAULT_DEVELOPER_MODE;
+    }
+  }
+
+  static async setDeveloperMode(enabled: boolean): Promise<void> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      await browserAPI.storage.sync.set({ [STORAGE_KEYS.DEVELOPER_MODE]: enabled });
+    } catch (error) {
+      console.error('Failed to update developer mode flag:', error);
+      throw error;
+    }
   }
 }
 

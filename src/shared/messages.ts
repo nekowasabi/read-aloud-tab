@@ -1,4 +1,11 @@
-import { QueueStatus, TabInfo, TTSSettings, SerializedTabInfo, createSerializedTab } from './types';
+import {
+  QueueStatus,
+  TabInfo,
+  TTSSettings,
+  SerializedTabInfo,
+  createSerializedTab,
+  KeepAliveDiagnostics,
+} from './types';
 
 export type { SerializedTabInfo } from './types';
 
@@ -82,6 +89,33 @@ export type QueueBroadcastMessage =
   | { type: 'QUEUE_ERROR'; payload: QueueErrorPayload }
   | { type: 'QUEUE_CONTENT_REQUEST'; payload: { tabId: number; reason: 'missing' | 'stale' } };
 
+export interface PrefetchStatusPayload {
+  tabId: number;
+  state: 'pending' | 'processing' | 'completed' | 'failed';
+  updatedAt: number;
+  error?: string;
+}
+
+export interface PrefetchStatusSnapshot {
+  statuses: PrefetchStatusPayload[];
+  updatedAt: number;
+  diagnostics?: KeepAliveDiagnostics;
+}
+
+export type PrefetchBroadcastMessage = {
+  type: 'PREFETCH_STATUS_SYNC';
+  payload: PrefetchStatusSnapshot;
+};
+
+export type PrefetchCommandMessage =
+  | { type: 'PREFETCH_RETRY'; payload: { tabId: number } }
+  | { type: 'PREFETCH_STATUS_SNAPSHOT_REQUEST' };
+
+export interface KeepAliveDiagnosticsMessage {
+  type: 'KEEP_ALIVE_DIAGNOSTICS';
+  payload: KeepAliveDiagnostics;
+}
+
 export type QueueStatusListener = (payload: QueueStatusPayload) => void;
 export type QueueProgressListener = (payload: QueueProgressPayload) => void;
 export type QueueErrorListener = (payload: QueueErrorPayload) => void;
@@ -132,6 +166,36 @@ export function isQueueBroadcastMessage(message: unknown): message is QueueBroad
     default:
       return false;
   }
+}
+
+export function isPrefetchCommandMessage(message: unknown): message is PrefetchCommandMessage {
+  if (typeof message !== 'object' || message === null) {
+    return false;
+  }
+  const candidate = message as { type?: unknown };
+  if (typeof candidate.type !== 'string') {
+    return false;
+  }
+  return candidate.type === 'PREFETCH_RETRY' || candidate.type === 'PREFETCH_STATUS_SNAPSHOT_REQUEST';
+}
+
+export function isPrefetchBroadcastMessage(message: unknown): message is PrefetchBroadcastMessage {
+  if (typeof message !== 'object' || message === null) {
+    return false;
+  }
+  const candidate = message as { type?: unknown };
+  return candidate.type === 'PREFETCH_STATUS_SYNC';
+}
+
+export function isKeepAliveDiagnosticsMessage(message: unknown): message is KeepAliveDiagnosticsMessage {
+  if (typeof message !== 'object' || message === null) {
+    return false;
+  }
+  const candidate = message as { type?: unknown; payload?: unknown };
+  if (candidate.type !== 'KEEP_ALIVE_DIAGNOSTICS') {
+    return false;
+  }
+  return typeof candidate.payload === 'object' && candidate.payload !== null;
 }
 
 export function toSerializedTabInfo(tab: TabInfo): SerializedTabInfo {

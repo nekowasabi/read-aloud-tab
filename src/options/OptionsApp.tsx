@@ -35,6 +35,7 @@ export default function OptionsApp() {
   const [message, setMessage] = useState<string | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadInitialData();
@@ -53,6 +54,8 @@ export default function OptionsApp() {
     } catch (error) {
       console.error('OptionsApp: failed to load data', error);
       setMessage('設定の読み込みに失敗しました');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -171,12 +174,20 @@ export default function OptionsApp() {
         <p>読み上げ体験をカスタマイズします。</p>
       </header>
 
+      {isLoading && (
+        <div className="options-loading" role="status">
+          設定を読み込み中…
+        </div>
+      )}
+
       {message && (
         <div className="options-message" role="status">
           {message}
         </div>
       )}
 
+      {isLoading ? null : (
+      <>
       <section className="options-section">
         <h2>音声設定</h2>
         <div className="setting-item">
@@ -219,7 +230,7 @@ export default function OptionsApp() {
 
       <section className="options-section">
         <h2>無視リスト</h2>
-        <IgnoreListManager onChange={handleIgnoreListChange} />
+        <IgnoreListManager initialDomains={ignoredDomains} onChange={handleIgnoreListChange} />
       </section>
 
       <section className="options-section">
@@ -342,6 +353,8 @@ export default function OptionsApp() {
           <li><code>Ctrl+Shift+R</code> / <code>Command+Shift+R</code>: 再開</li>
         </ul>
       </section>
+      </>
+      )}
     </div>
   );
 }

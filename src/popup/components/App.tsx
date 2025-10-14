@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { TTSSettings, QueueStatus } from '../../shared/types';
+import { TTSSettings, QueueStatus, STORAGE_KEYS } from '../../shared/types';
 import { StorageManager, getIgnoredDomains } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
@@ -7,6 +7,8 @@ import QuickControls from './QuickControls';
 import StatusDisplay from './StatusDisplay';
 import TabQueueList from './TabQueueList';
 import useTabQueue from '../hooks/useTabQueue';
+import DiagnosticsBanner from './DiagnosticsBanner';
+import usePrefetchStatus from '../hooks/usePrefetchStatus';
 import { SerializedTabInfo } from '../../shared/messages';
 
 const DEFAULT_SETTINGS: TTSSettings = {
@@ -22,8 +24,8 @@ const SETTINGS_DEBOUNCE_MS = 300;
 export default function App() {
   const {
     state: queueState,
-    isConnected,
-    error: queueError,
+    connectionState,
+    lastError: queueError,
     progressByTab,
     addTab,
     removeTab,
@@ -38,9 +40,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [developerMode, setDeveloperMode] = useState(false);
 
   // Debounce timer for settings changes (insurance layer)
   const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { statuses: prefetchStatuses, diagnostics: prefetchDiagnostics } = usePrefetchStatus();
+  const isConnected = connectionState === 'connected';
 
   useEffect(() => {
     let mounted = true;
@@ -62,11 +67,15 @@ export default function App() {
         }
 
         console.log('[Popup Init] Loading settings...');
-        const savedSettings = await StorageManager.getSettings();
+        const [savedSettings, devMode] = await Promise.all([
+          StorageManager.getSettings(),
+          StorageManager.getDeveloperMode(),
+        ]);
         console.log('[Popup Init] Settings loaded:', savedSettings);
 
         if (mounted) {
           setSettings(savedSettings);
+          setDeveloperMode(devMode);
         }
 
         console.log('[Popup Init] Initialization successful');
@@ -96,14 +105,17 @@ export default function App() {
 
   // Listen for settings changes from options page
   useEffect(() => {
-    const handleStorageChange = (changes: any, areaName: string) => {
-      if (areaName === 'sync' && changes.tts_settings) {
-        const newSettings = changes.tts_settings.newValue;
-        if (newSettings) {
-          console.log('[Popup] Settings changed externally:', newSettings);
-          setSettings(newSettings);
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === 'sync') {
+        if (changes.tts_settings?.newValue) {
+          console.log('[Popup] Settings changed externally:', changes.tts_settings.newValue);
+          setSettings(changes.tts_settings.newValue);
+        }
+        if (changes[STORAGE_KEYS.DEVELOPER_MODE]) {
+          setDeveloperMode(Boolean(changes[STORAGE_KEYS.DEVELOPER_MODE].newValue));
         }
       }
+
     };
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
@@ -294,6 +306,10 @@ export default function App() {
 
   const clearError = useCallback(() => setError(null), []);
 
+  const handlePrefetchRetry = useCallback((tabId: number) => {
+    chrome.runtime?.sendMessage?.({ type: 'PREFETCH_RETRY', payload: { tabId } });
+  }, []);
+
   const queueStatus: QueueStatus = queueState?.status ?? 'idle';
   const queueTabs = queueState?.tabs ?? [];
   const queueIndex = queueState?.currentIndex ?? 0;
@@ -352,6 +368,14 @@ export default function App() {
         </div>
       )}
 
+      {developerMode && (
+        <DiagnosticsBanner
+          connectionState={connectionState}
+          lastError={queueError}
+          keepAlive={prefetchDiagnostics ?? null}
+        />
+      )}
+
       <div className="actions-row">
         <button
           type="button"
@@ -375,7 +399,7 @@ export default function App() {
         fallbackTab={activeTab}
         status={queueStatus}
         progress={activeProgress}
-        isConnected={isConnected}
+        connectionState={connectionState}
       />
 
       <QuickControls
@@ -409,6 +433,8 @@ export default function App() {
             setError(message);
           });
         }}
+        prefetchStatuses={prefetchStatuses}
+        onRetryPrefetch={handlePrefetchRetry}
       />
 
       <footer className="footer">

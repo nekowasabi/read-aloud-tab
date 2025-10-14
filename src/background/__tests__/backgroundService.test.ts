@@ -89,7 +89,7 @@ describe('BackgroundOrchestrator', () => {
       return port;
     };
 
-    const emitRuntimeMessage = async (message: QueueCommandMessage, sender: any = {}, sendResponse: any = jest.fn()) => {
+    const emitRuntimeMessage = async (message: any, sender: any = {}, sendResponse: any = jest.fn()) => {
       const promises = runtimeMessageListeners.map((listener) => listener(message, sender, sendResponse));
       await Promise.all(promises);
       return sendResponse;
@@ -236,5 +236,42 @@ describe('BackgroundOrchestrator', () => {
 
     triggerCommand('read-aloud-prev');
     expect(stub.skipTab).toHaveBeenCalledWith('previous');
+  });
+
+  test('KeepAlive diagnostics message updates prefetcher and notifies ports', async () => {
+    const { stub } = createTabManagerStub();
+    const prefetcher = {
+      retry: jest.fn(),
+      getStatusSnapshot: jest.fn().mockReturnValue({ statuses: [], updatedAt: 42 }),
+      updateKeepAliveDiagnostics: jest.fn(),
+    } as any;
+
+    const { chromeLike, connectPort, emitRuntimeMessage } = createChromeLike();
+    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, prefetcher });
+    await orchestrator.initialize();
+
+    const port = connectPort();
+    port.postMessage.mockClear();
+
+    const diagnosticsMessage = {
+      type: 'KEEP_ALIVE_DIAGNOSTICS',
+      payload: {
+        state: 'running',
+        lastHeartbeatAt: 100,
+        lastAlarmAt: null,
+        lastFallbackAt: null,
+        fallbackCount: 1,
+      },
+    };
+
+    const sendResponse = jest.fn();
+    await emitRuntimeMessage(diagnosticsMessage, {}, sendResponse);
+
+    expect(prefetcher.updateKeepAliveDiagnostics).toHaveBeenCalledWith(diagnosticsMessage.payload);
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: 'PREFETCH_STATUS_SYNC',
+      payload: { statuses: [], updatedAt: 42 },
+    });
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
   });
 });

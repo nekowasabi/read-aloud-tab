@@ -13,6 +13,7 @@ export interface BrowserAPI {
     sync: {
       get: (keys?: string | string[] | null) => Promise<any>;
       set: (items: any) => Promise<void>;
+      remove: (keys: string | string[]) => Promise<void>;
     };
   };
   runtime: {
@@ -31,7 +32,16 @@ export const STORAGE_KEYS = {
   IGNORED_DOMAINS: 'ignoredDomains',
   SCHEMA_VERSION: 'schemaVersion',
   AI_SETTINGS: 'ai_settings',
+  DEVELOPER_MODE: 'developerMode',
 } as const;
+
+export interface KeepAliveDiagnostics {
+  state: 'running' | 'stopped';
+  lastHeartbeatAt: number | null;
+  lastAlarmAt: number | null;
+  lastFallbackAt: number | null;
+  fallbackCount: number;
+}
 
 import type { TabContent } from './tab';
 import type { TTSSettings, TTSState } from './tts';

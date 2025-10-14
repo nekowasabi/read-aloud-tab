@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 「Read Aloud Tab」は、ブラウザのタブコンテンツを音声で読み上げる多機能なブラウザ拡張機能です。Chrome/Firefox対応のクロスブラウザ拡張として開発します。
 
+## アクティブ仕様
+
+- `queue-keepalive-plan`: ブラウザ非アクティブ時の読み上げ継続を支える keep-alive 戦略とポート再接続/状態復元の実装計画。
+- `queue-prefetch-summary`: 読み上げ中に次キューの翻訳・要約を先行実行して切り替え待機時間を解消する事前処理機能。
+
 ## 開発環境セットアップ
 
 ```bash

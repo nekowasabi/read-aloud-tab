@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { QueueStatus } from '../../shared/types';
-import { SerializedTabInfo } from '../../shared/messages';
+import { SerializedTabInfo, PrefetchStatusPayload } from '../../shared/messages';
 import { ListCard } from './common/ListCard';
 
 export interface TabQueueListProps {
@@ -27,6 +27,8 @@ export interface TabQueueListProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
+  prefetchStatuses?: PrefetchStatusPayload[];
+  onRetryPrefetch?: (tabId: number) => void;
 }
 
 interface SortableItemProps {
@@ -35,9 +37,11 @@ interface SortableItemProps {
   currentIndex: number;
   onRemoveTab: (tabId: number) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLLIElement>, index: number) => void;
+  prefetchState?: PrefetchStatusPayload;
+  onRetryPrefetch?: (tabId: number) => void;
 }
 
-function SortableItem({ tab, index, currentIndex, onRemoveTab, onKeyDown }: SortableItemProps) {
+function SortableItem({ tab, index, currentIndex, onRemoveTab, onKeyDown, prefetchState, onRetryPrefetch }: SortableItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: tab.tabId,
   });
@@ -67,6 +71,9 @@ function SortableItem({ tab, index, currentIndex, onRemoveTab, onKeyDown }: Sort
       </div>
       <div className="queue-item-actions">
         {tab.isIgnored && <span className="queue-item-badge">無視</span>}
+        {prefetchState && (
+          <PrefetchBadge state={prefetchState} onRetry={onRetryPrefetch} tabId={tab.tabId} />
+        )}
         <button
           type="button"
           className="queue-item-button"
@@ -88,6 +95,8 @@ export default function TabQueueList({
   onReorder,
   onSkipNext,
   onSkipPrevious,
+  prefetchStatuses,
+  onRetryPrefetch,
 }: TabQueueListProps) {
   const isQueueEmpty = tabs.length === 0;
 
@@ -110,6 +119,14 @@ export default function TabQueueList({
         return '待機中';
     }
   }, [status]);
+
+  const statusMap = useMemo(() => {
+    const map = new Map<number, PrefetchStatusPayload>();
+    (prefetchStatuses ?? []).forEach((item) => {
+      map.set(item.tabId, item);
+    });
+    return map;
+  }, [prefetchStatuses]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -165,6 +182,8 @@ export default function TabQueueList({
                   currentIndex={currentIndex}
                   onRemoveTab={onRemoveTab}
                   onKeyDown={handleKeyDown}
+                  prefetchState={statusMap.get(tab.tabId)}
+                  onRetryPrefetch={onRetryPrefetch}
                 />
               ))}
             </ul>
@@ -181,4 +200,40 @@ function safeHostname(url: string): string {
   } catch (error) {
     return url;
   }
+}
+
+function PrefetchBadge({
+  state,
+  onRetry,
+  tabId,
+}: {
+  state: PrefetchStatusPayload;
+  onRetry?: (tabId: number) => void;
+  tabId: number;
+}) {
+  let label: string;
+  switch (state.state) {
+    case 'processing':
+      label = '先行処理中';
+      break;
+    case 'completed':
+      label = '先行完了';
+      break;
+    case 'failed':
+      label = '先行失敗';
+      break;
+    default:
+      label = '未処理';
+  }
+
+  return (
+    <span className={`prefetch-badge prefetch-${state.state}`} title={state.error ?? label}>
+      {label}
+      {state.state === 'failed' && onRetry && (
+        <button type="button" className="queue-item-button" onClick={() => onRetry(tabId)}>
+          再試行
+        </button>
+      )}
+    </span>
+  );
 }

@@ -18,6 +18,7 @@ const aiPrefetcher = new AiPrefetcher({
 
 const orchestrator = new BackgroundOrchestrator({
   tabManager,
+  prefetcher: aiPrefetcher,
 });
 
 aiPrefetcher.initialize();

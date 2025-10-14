@@ -17,10 +17,12 @@ interface CommandOptions {
   autoStart?: boolean;
 }
 
+export type TabQueueConnectionState = 'connecting' | 'connected' | 'disconnected';
+
 export interface UseTabQueueResult {
   state: QueueStatusPayload | null;
-  isConnected: boolean;
-  error: string | null;
+  connectionState: TabQueueConnectionState;
+  lastError: string | null;
   progressByTab: Record<number, number>;
   addTab: (tab: QueueTabInput, options?: CommandOptions) => Promise<void>;
   removeTab: (tabId: number) => Promise<void>;
@@ -35,126 +37,132 @@ const QUEUE_PORT_NAME = 'read-aloud-tab-queue';
 
 export default function useTabQueue(): UseTabQueueResult {
   const [state, setState] = useState<QueueStatusPayload | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<TabQueueConnectionState>('connecting');
+  const [lastError, setLastError] = useState<string | null>(null);
   const [progressByTab, setProgressByTab] = useState<Record<number, number>>({});
 
   const portRef = useRef<chrome.runtime.Port | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAttemptRef = useRef(0);
+  const isUnmountedRef = useRef(false);
 
   useEffect(() => {
-    let isMounted = true;
+    isUnmountedRef.current = false;
 
-    try {
-      console.log('[useTabQueue] Attempting to connect to background...');
-      console.log('[useTabQueue] Port name:', QUEUE_PORT_NAME);
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
 
-      const port = chrome.runtime.connect({ name: QUEUE_PORT_NAME });
-      console.log('[useTabQueue] Port created successfully:', port);
-
-      portRef.current = port;
-      setIsConnected(true);
-      console.log('[useTabQueue] Connection established');
-
-      const handleMessage = (rawMessage: QueueBroadcastMessage | any) => {
-        if (!isMounted) return;
-        if (!rawMessage || typeof rawMessage.type !== 'string') {
-          console.warn('[useTabQueue] Received invalid message:', rawMessage);
-          return;
-        }
-
-        console.log('[useTabQueue] Received message:', rawMessage.type);
-
-        switch (rawMessage.type) {
-          case 'QUEUE_STATUS_UPDATE': {
-            const payload = rawMessage.payload as QueueStatusPayload;
-            console.log('[useTabQueue] Status update:', payload);
-            setState(payload);
-            setIsConnected(true);
-            setProgressByTab((prev) => filterProgressByTabs(prev, payload));
-            break;
-          }
-          case 'QUEUE_PROGRESS_UPDATE': {
-            const payload = rawMessage.payload as QueueProgressPayload;
-            console.log('[useTabQueue] Progress update:', payload);
-            setProgressByTab((prev) => ({
-              ...prev,
-              [payload.tabId]: payload.progress,
-            }));
-            break;
-          }
-          case 'QUEUE_ERROR': {
-            const payload = rawMessage.payload as { message?: string };
-            console.error('[useTabQueue] Queue error:', payload);
-            setError(payload?.message ?? 'キューでエラーが発生しました');
-            break;
-          }
-          case 'QUEUE_COMMAND_RESULT': {
-            const payload = rawMessage.payload as { error?: string };
-            if (payload?.error) {
-              console.error('[useTabQueue] Command error:', payload.error);
-              setError(payload.error);
-            }
-            break;
-          }
-          default:
-            console.warn('[useTabQueue] Unknown message type:', rawMessage.type);
-            break;
-        }
-      };
-
-      const handleDisconnect = () => {
-        if (!isMounted) return;
-        console.warn('[useTabQueue] Port disconnected');
-        console.warn('[useTabQueue] Disconnect reason:', chrome.runtime.lastError);
-        setIsConnected(false);
-        setError('キューとの接続が切断されました');
-      };
-
-      port.onMessage.addListener(handleMessage);
-      port.onDisconnect.addListener(handleDisconnect);
-
-      try {
-        console.log('[useTabQueue] Requesting initial queue state...');
-        port.postMessage({ type: 'REQUEST_QUEUE_STATE' });
-      } catch (postError) {
-        console.error('[useTabQueue] Failed to request initial state:', postError);
-        console.error('[useTabQueue] Post error details:', {
-          name: (postError as Error)?.name,
-          message: (postError as Error)?.message,
-        });
+    const handleMessage = (rawMessage: QueueBroadcastMessage | any) => {
+      if (isUnmountedRef.current) return;
+      if (!rawMessage || typeof rawMessage.type !== 'string') {
+        console.warn('[useTabQueue] Received invalid message:', rawMessage);
+        return;
       }
 
-      return () => {
-        isMounted = false;
-        console.log('[useTabQueue] Cleaning up port connection...');
+      switch (rawMessage.type) {
+        case 'QUEUE_STATUS_UPDATE': {
+          const payload = rawMessage.payload as QueueStatusPayload;
+          setState(payload);
+          setConnectionState('connected');
+          setProgressByTab((prev) => filterProgressByTabs(prev, payload));
+          break;
+        }
+        case 'QUEUE_PROGRESS_UPDATE': {
+          const payload = rawMessage.payload as QueueProgressPayload;
+          setProgressByTab((prev) => ({
+            ...prev,
+            [payload.tabId]: payload.progress,
+          }));
+          break;
+        }
+        case 'QUEUE_ERROR': {
+          const payload = rawMessage.payload as { message?: string };
+          setLastError(payload?.message ?? 'キューでエラーが発生しました');
+          break;
+        }
+        case 'QUEUE_COMMAND_RESULT': {
+          const payload = rawMessage.payload as { error?: string };
+          if (payload?.error) {
+            setLastError(payload.error);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (isUnmountedRef.current) {
+        return;
+      }
+      setConnectionState('connecting');
+      clearRetryTimer();
+      const delay = Math.min(500 * 2 ** retryAttemptRef.current, 5000);
+      retryAttemptRef.current += 1;
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        connect();
+      }, delay);
+    };
+
+    const connect = () => {
+      if (isUnmountedRef.current) {
+        return;
+      }
+
+      try {
+        const port = chrome.runtime.connect({ name: QUEUE_PORT_NAME });
+        portRef.current = port;
+        retryAttemptRef.current = 0;
+        setConnectionState('connected');
+        setLastError(null);
+        clearRetryTimer();
+
+        const handleDisconnect = () => {
+          if (isUnmountedRef.current) return;
+          portRef.current = null;
+          setLastError(chrome.runtime.lastError?.message ?? 'キューとの接続が切断されました');
+          scheduleReconnect();
+        };
+
+        port.onMessage.addListener(handleMessage);
+        port.onDisconnect.addListener(handleDisconnect);
+
         try {
-          port.onMessage.removeListener?.(handleMessage);
-          port.onDisconnect.removeListener?.(handleDisconnect);
+          port.postMessage({ type: 'REQUEST_QUEUE_STATE' });
+        } catch (postError) {
+          setLastError((postError as Error)?.message ?? '初期状態の取得に失敗しました');
+        }
+      } catch (connectError) {
+        const errorMsg = connectError instanceof Error
+          ? `キューとの接続に失敗しました: ${connectError.message}`
+          : 'キューとの接続に失敗しました';
+        setLastError(errorMsg);
+        setConnectionState('disconnected');
+        scheduleReconnect();
+      }
+    };
+
+    connect();
+
+    return () => {
+      isUnmountedRef.current = true;
+      clearRetryTimer();
+      const port = portRef.current;
+      if (port) {
+        try {
+          port.onMessage.removeListener(handleMessage);
           port.disconnect?.();
-          console.log('[useTabQueue] Port cleanup complete');
         } catch (disconnectError) {
           console.warn('[useTabQueue] Failed to cleanup port:', disconnectError);
         }
-        portRef.current = null;
-      };
-    } catch (connectError) {
-      console.error('[useTabQueue] Connection failed:', connectError);
-      console.error('[useTabQueue] Error details:', {
-        name: (connectError as Error)?.name,
-        message: (connectError as Error)?.message,
-        stack: (connectError as Error)?.stack,
-      });
-
-      const errorMsg = connectError instanceof Error
-        ? `キューとの接続に失敗しました: ${connectError.message}`
-        : 'キューとの接続に失敗しました';
-
-      setError(errorMsg);
-      setIsConnected(false);
-    }
-
-    return () => {
-      isMounted = false;
+      }
+      portRef.current = null;
     };
   }, []);
 
@@ -164,17 +172,19 @@ export default function useTabQueue(): UseTabQueueResult {
 
       if (!port) {
         const err = new Error('キューとの接続が確立されていません');
-        setError(err.message);
+        setLastError(err.message);
+        setConnectionState('disconnected');
         return Promise.reject(err);
       }
 
       try {
-        setError(null);
+        setLastError(null);
         port.postMessage(command);
         return Promise.resolve();
       } catch (postError) {
         const err = postError instanceof Error ? postError : new Error('キューへの送信に失敗しました');
-        setError(err.message);
+        setLastError(err.message);
+        setConnectionState('disconnected');
         return Promise.reject(err);
       }
     },
@@ -215,27 +225,28 @@ export default function useTabQueue(): UseTabQueueResult {
   );
 
   const control = useCallback(
-    (action: ControlAction): Promise<void> => {
-      return sendCommand({ type: 'QUEUE_CONTROL', payload: { action } });
-    },
+    (action: ControlAction): Promise<void> =>
+      sendCommand({ type: 'QUEUE_CONTROL', payload: { action } }),
     [sendCommand],
   );
 
   const updateSettings = useCallback(
     (settings: Partial<TTSSettings>): Promise<void> => {
-      const payload: QueueSettingsUpdatePayload = { settings };
+      const payload: QueueSettingsUpdatePayload = {
+        settings,
+      };
       return sendCommand({ type: 'QUEUE_UPDATE_SETTINGS', payload });
     },
     [sendCommand],
   );
 
-  const memoizedProgress = useMemo(() => progressByTab, [progressByTab]);
+  const progress = useMemo(() => progressByTab, [progressByTab]);
 
   return {
     state,
-    isConnected,
-    error,
-    progressByTab: memoizedProgress,
+    connectionState,
+    lastError,
+    progressByTab: progress,
     addTab,
     removeTab,
     reorderTabs,
@@ -246,17 +257,13 @@ export default function useTabQueue(): UseTabQueueResult {
   };
 }
 
-function filterProgressByTabs(
-  progress: Record<number, number>,
-  payload: QueueStatusPayload,
-): Record<number, number> {
-  const allowedIds = new Set(payload.tabs.map((tab) => tab.tabId));
-  const next: Record<number, number> = {};
-  for (const [tabIdStr, value] of Object.entries(progress)) {
-    const tabId = Number(tabIdStr);
-    if (allowedIds.has(tabId)) {
-      next[tabId] = value;
-    }
+function filterProgressByTabs(prev: Record<number, number>, payload: QueueStatusPayload): Record<number, number> {
+  if (!payload?.tabs?.length) {
+    return {};
   }
-  return next;
+
+  const allowed = new Set(payload.tabs.map((tab) => tab.tabId));
+  return Object.fromEntries(
+    Object.entries(prev).filter(([tabId]) => allowed.has(Number(tabId))),
+  );
 }

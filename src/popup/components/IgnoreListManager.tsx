@@ -11,12 +11,19 @@ type RequestState = 'idle' | 'loading' | 'error';
 
 interface Props {
   onChange?: (domains: string[]) => void;
+  initialDomains?: string[];
 }
 
-export default function IgnoreListManager({ onChange }: Props = {}) {
-  const [domains, setDomains] = useState<string[]>([]);
+export default function IgnoreListManager({ onChange, initialDomains }: Props = {}) {
+  const [domains, setDomains] = useState<string[]>(initialDomains ?? []);
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<RequestState>('idle');
+
+  useEffect(() => {
+    if (initialDomains !== undefined) {
+      setDomains(initialDomains);
+    }
+  }, [initialDomains]);
 
   useEffect(() => {
     refreshDomains();

@@ -1,13 +1,14 @@
 import React from 'react';
 import { SerializedTabInfo } from '../../shared/messages';
 import { QueueStatus } from '../../shared/types';
+import { TabQueueConnectionState } from '../hooks/useTabQueue';
 
 interface Props {
   activeTab: SerializedTabInfo | null;
   fallbackTab?: chrome.tabs.Tab | null;
   status: QueueStatus;
   progress: number;
-  isConnected: boolean;
+  connectionState: TabQueueConnectionState;
 }
 
 export default function StatusDisplay({
@@ -15,13 +16,14 @@ export default function StatusDisplay({
   fallbackTab = null,
   status,
   progress,
-  isConnected,
+  connectionState,
 }: Props) {
   const displayTitle = activeTab?.title || fallbackTab?.title || 'タブが選択されていません';
   const displayUrl = activeTab?.url || fallbackTab?.url || '';
+  const isConnected = connectionState === 'connected';
 
-  const statusText = getStatusText(status, isConnected);
-  const statusIcon = getStatusIcon(status, isConnected);
+  const statusText = getStatusText(status, connectionState);
+  const statusIcon = getStatusIcon(status, connectionState);
 
   return (
     <div className="status-section">
@@ -51,7 +53,7 @@ export default function StatusDisplay({
           <span className="status-text">{statusText}</span>
         </div>
 
-        {status === 'reading' && (
+        {status === 'reading' && isConnected && (
           <div className="progress-section">
             <div className="progress-bar">
               <div
@@ -67,9 +69,14 @@ export default function StatusDisplay({
   );
 }
 
-function getStatusText(status: QueueStatus, isConnected: boolean): string {
-  if (!isConnected) {
-    return '未接続';
+function getStatusText(status: QueueStatus, connectionState: TabQueueConnectionState): string {
+  switch (connectionState) {
+    case 'connecting':
+      return '再接続中';
+    case 'disconnected':
+      return '未接続';
+    default:
+      break;
   }
   switch (status) {
     case 'reading':
@@ -83,9 +90,9 @@ function getStatusText(status: QueueStatus, isConnected: boolean): string {
   }
 }
 
-function getStatusIcon(status: QueueStatus, isConnected: boolean): string {
-  if (!isConnected) {
-    return '⚠️';
+function getStatusIcon(status: QueueStatus, connectionState: TabQueueConnectionState): string {
+  if (connectionState !== 'connected') {
+    return connectionState === 'connecting' ? '🔄' : '⚠️';
   }
   switch (status) {
     case 'reading':
