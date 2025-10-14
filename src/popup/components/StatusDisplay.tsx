@@ -7,7 +7,7 @@ interface Props {
   fallbackTab?: chrome.tabs.Tab | null;
   status: QueueStatus;
   progress: number;
-  isConnected: boolean;
+  connectionState: 'connecting' | 'connected' | 'disconnected';
 }
 
 export default function StatusDisplay({
@@ -15,13 +15,13 @@ export default function StatusDisplay({
   fallbackTab = null,
   status,
   progress,
-  isConnected,
+  connectionState,
 }: Props) {
   const displayTitle = activeTab?.title || fallbackTab?.title || 'タブが選択されていません';
   const displayUrl = activeTab?.url || fallbackTab?.url || '';
 
-  const statusText = getStatusText(status, isConnected);
-  const statusIcon = getStatusIcon(status, isConnected);
+  const statusText = getStatusText(status, connectionState);
+  const statusIcon = getStatusIcon(status, connectionState);
 
   return (
     <div className="status-section">
@@ -67,8 +67,11 @@ export default function StatusDisplay({
   );
 }
 
-function getStatusText(status: QueueStatus, isConnected: boolean): string {
-  if (!isConnected) {
+function getStatusText(status: QueueStatus, connectionState: 'connecting' | 'connected' | 'disconnected'): string {
+  if (connectionState === 'connecting') {
+    return '再接続中';
+  }
+  if (connectionState === 'disconnected') {
     return '未接続';
   }
   switch (status) {
@@ -83,8 +86,11 @@ function getStatusText(status: QueueStatus, isConnected: boolean): string {
   }
 }
 
-function getStatusIcon(status: QueueStatus, isConnected: boolean): string {
-  if (!isConnected) {
+function getStatusIcon(status: QueueStatus, connectionState: 'connecting' | 'connected' | 'disconnected'): string {
+  if (connectionState === 'connecting') {
+    return '🕒';
+  }
+  if (connectionState === 'disconnected') {
     return '⚠️';
   }
   switch (status) {

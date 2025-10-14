@@ -19,6 +19,8 @@ export class StorageManager {
       volume: 1.0,
       voice: null,
     },
+    progressByTab: {},
+    persistedAt: 0,
   };
 
   private static readonly DEFAULT_AI_SETTINGS: AiSettings = {
@@ -105,6 +107,27 @@ export class StorageManager {
       enableAiTranslation: settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
     };
   }
+
+  static async getDeveloperMode(): Promise<boolean> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      const result = await browserAPI.storage.sync.get([STORAGE_KEYS.DEVELOPER_MODE]);
+      return Boolean(result[STORAGE_KEYS.DEVELOPER_MODE]);
+    } catch (error) {
+      console.warn('Failed to load developer mode flag:', error);
+      return false;
+    }
+  }
+
+  static async setDeveloperMode(enabled: boolean): Promise<void> {
+    try {
+      const browserAPI = BrowserAdapter.getInstance();
+      await browserAPI.storage.sync.set({ [STORAGE_KEYS.DEVELOPER_MODE]: enabled });
+    } catch (error) {
+      console.error('Failed to save developer mode flag:', error);
+      throw error;
+    }
+  }
 }
 
 // Queue management functions for Phase 2
@@ -143,20 +166,28 @@ export async function loadQueue(): Promise<ReadingQueue> {
       return await migrateStorageSchema(result);
     }
 
-    if (result && result[STORAGE_KEYS.READING_QUEUE]) {
+  if (result && result[STORAGE_KEYS.READING_QUEUE]) {
       // Convert Date strings back to Date objects
       const queue = result[STORAGE_KEYS.READING_QUEUE] as ReadingQueue;
       queue.tabs = queue.tabs.map(tab => ({
         ...tab,
         extractedAt: new Date(tab.extractedAt),
       }));
+      queue.progressByTab = queue.progressByTab ?? {};
+      queue.persistedAt = queue.persistedAt ?? Date.now();
       return queue;
     }
 
-    return { ...StorageManager['DEFAULT_QUEUE'] };
+    const fallback = { ...StorageManager['DEFAULT_QUEUE'] };
+    fallback.progressByTab = { ...StorageManager['DEFAULT_QUEUE'].progressByTab };
+    fallback.persistedAt = Date.now();
+    return fallback;
   } catch (error) {
     console.error('Failed to load reading queue:', error);
-    return { ...StorageManager['DEFAULT_QUEUE'] };
+    const fallback = { ...StorageManager['DEFAULT_QUEUE'] };
+    fallback.progressByTab = { ...StorageManager['DEFAULT_QUEUE'].progressByTab };
+    fallback.persistedAt = Date.now();
+    return fallback;
   }
 }
 

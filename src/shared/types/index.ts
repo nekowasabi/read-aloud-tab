@@ -3,6 +3,7 @@ export * from './tts';
 export * from './queue';
 export * from './helpers';
 export * from './ai';
+export * from './diagnostics';
 
 export interface BrowserAPI {
   tabs: {
@@ -31,6 +32,7 @@ export const STORAGE_KEYS = {
   IGNORED_DOMAINS: 'ignoredDomains',
   SCHEMA_VERSION: 'schemaVersion',
   AI_SETTINGS: 'ai_settings',
+  DEVELOPER_MODE: 'developerMode',
 } as const;
 
 import type { TabContent } from './tab';

@@ -1,0 +1,29 @@
+{
+  "feature_name": "queue-keepalive-plan",
+  "created_at": "2025-10-14T01:09:51Z",
+  "updated_at": "2025-10-14T01:52:42Z",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": false
+    },
+    "tasks": {
+      "generated": true,
+      "approved": false
+    }
+  },
+  "ready_for_implementation": false,
+  "feedback": {
+    "last_report_path": "feedback/20251014-011815-queue-keepalive-plan-feedback.json",
+    "last_applied_at": "2025-10-14T01:22:08Z",
+    "applied_item_ids": [
+      "FB-001"
+    ]
+  }
+}

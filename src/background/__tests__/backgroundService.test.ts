@@ -12,6 +12,9 @@ jest.mock('../../shared/utils/browser', () => ({
 
 jest.mock('../../shared/utils/storage', () => ({
   getIgnoredDomains: jest.fn().mockResolvedValue([]),
+  StorageManager: {
+    getDeveloperMode: jest.fn().mockResolvedValue(false),
+  },
 }));
 
 describe('BackgroundOrchestrator', () => {
@@ -49,9 +52,18 @@ describe('BackgroundOrchestrator', () => {
       resume: jest.fn(),
       stop: jest.fn().mockResolvedValue(undefined),
       refreshIgnoredDomains: jest.fn().mockResolvedValue(undefined),
+      resumePlaybackIfNeeded: jest.fn().mockResolvedValue(undefined),
     } as any;
 
     return { stub, listeners };
+  };
+
+  const createKeepAliveStub = () => {
+    return {
+      startHeartbeat: jest.fn(async () => undefined),
+      stopHeartbeat: jest.fn(async () => undefined),
+      handleAlarm: jest.fn(async () => undefined),
+    };
   };
 
   const createChromeLike = () => {
@@ -59,6 +71,7 @@ describe('BackgroundOrchestrator', () => {
     const runtimeMessageListeners: Function[] = [];
     const ports: any[] = [];
     let commandListener: ((command: string) => void) | null = null;
+    const alarmListeners: Array<(alarm: { name: string }) => void> = [];
 
     const chromeLike = {
       runtime: {
@@ -69,6 +82,12 @@ describe('BackgroundOrchestrator', () => {
           addListener: jest.fn((listener: Function) => runtimeMessageListeners.push(listener)),
         },
         sendMessage: jest.fn().mockResolvedValue(undefined),
+        connect: jest.fn(() => ({
+          name: 'keep-alive-fallback',
+          postMessage: jest.fn(),
+          disconnect: jest.fn(),
+          onDisconnect: { addListener: jest.fn() },
+        })),
       },
       tabs: {
         sendMessage: jest.fn().mockResolvedValue(undefined),
@@ -78,6 +97,19 @@ describe('BackgroundOrchestrator', () => {
         onCommand: {
           addListener: jest.fn((listener: (command: string) => void) => {
             commandListener = listener;
+          }),
+        },
+      },
+      alarms: {
+        create: jest.fn(),
+        clear: jest.fn().mockResolvedValue(true),
+        onAlarm: {
+          addListener: jest.fn((listener: (alarm: { name: string }) => void) => alarmListeners.push(listener)),
+          removeListener: jest.fn((listener: (alarm: { name: string }) => void) => {
+            const index = alarmListeners.indexOf(listener);
+            if (index >= 0) {
+              alarmListeners.splice(index, 1);
+            }
           }),
         },
       },
@@ -104,7 +136,10 @@ describe('BackgroundOrchestrator', () => {
     function triggerCommand(command: string) {
       return commandListener?.(command);
     }
-    return { chromeLike, connectPort, emitRuntimeMessage, triggerCommand, ports };
+    const emitAlarm = (name: string) => {
+      alarmListeners.forEach((listener) => listener({ name }));
+    };
+    return { chromeLike, connectPort, emitRuntimeMessage, triggerCommand, ports, emitAlarm };
   };
 
   let BackgroundOrchestrator: any;
@@ -147,6 +182,40 @@ describe('BackgroundOrchestrator', () => {
       type: 'QUEUE_STATUS_UPDATE',
       payload: expect.objectContaining({ status: 'reading' }),
     });
+  });
+
+  test('reading 状態で keepAlive を開始し idle/paused で停止する', async () => {
+    const { stub, listeners } = createTabManagerStub();
+    const keepAlive = createKeepAliveStub();
+    const { chromeLike } = createChromeLike();
+
+    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, keepAliveController: keepAlive });
+    await orchestrator.initialize();
+
+    const statusListener = listeners.status;
+    statusListener({
+      status: 'reading',
+      currentIndex: 0,
+      totalCount: 1,
+      activeTabId: 99,
+      tabs: [],
+      settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      updatedAt: Date.now(),
+    });
+
+    expect(keepAlive.startHeartbeat).toHaveBeenCalled();
+
+    statusListener({
+      status: 'paused',
+      currentIndex: 0,
+      totalCount: 1,
+      activeTabId: 99,
+      tabs: [],
+      settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      updatedAt: Date.now(),
+    });
+
+    expect(keepAlive.stopHeartbeat).toHaveBeenCalled();
   });
 
   test('QUEUE_ADD メッセージをTabManagerに転送する', async () => {

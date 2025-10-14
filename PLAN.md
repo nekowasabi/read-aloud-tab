@@ -59,13 +59,21 @@
 - [ ] 改善実装後に追加するテストケースを検討（現時点では調査のみ）。
 
 ### process50 フォローアップ
-- [ ] keep-alive 戦略（alarms/ハートビート）の設計とタスク化。
-- [ ] `useTabQueue` 再接続および `portRef` リセットロジックの実装検討。
-- [ ] `TabManager` 再起動後の状態復元機構の設計評価。
+- [x] keep-alive 戦略（alarms/ハートビート）の設計とタスク化。
+  - Chrome Manifest V3 では service worker をイベント駆動で起こす必要があるため、読み上げが続く間だけ `chrome.alarms` を利用したハートビートを維持する。`BackgroundOrchestrator` のステータスリスナーで `reading` → heartbeat start、`idle`/`paused` → heartbeat stop をトリガし、`chrome.alarms.onAlarm` では no-op メッセージを `tabManager` に送ってイベントループをキープする。
+  - Offscreen Document が存在する場合は補助的に `chrome.runtime.connect` を用いた長寿命ポートを確立し、heartbeat が途切れた際に `chrome.runtime.Port` 経由で `PING` を送る fallback を設計する（Firefox では alarm のみ動作）。
+  - 実装タスク: 1) `src/background/keepAlive.ts` に heartbeat 管理モジュールを新設、2) `BackgroundOrchestrator.initialize` でキュー状態イベントに紐づけ、3) `src/background/index.ts` で `chrome.alarms.onAlarm` を購読し `BrowserAdapter` 経由の no-op メッセージを発火、4) e2e 的に queue resume/stop で alarm が正しく作成・破棄されることを Jest モックで検証。
+- [x] `useTabQueue` 再接続および `portRef` リセットロジックの実装検討。
+  - `port.onDisconnect` で `portRef.current` を null へ戻し、即時 UI 状態更新と再接続バックオフ（例: 500ms, 1s, 2s）を走らせる。バックオフは unmount 時にクリアできるように `retryTimerRef` を追加。
+  - `isConnected`/`error` ステートを `CONNECTING` フラグで拡張し、UI 側でスピナー表示と「再接続中」を出す余地を確保。`REQUEST_QUEUE_STATE` の初期送信は接続確立後に `port.postMessage` できるよう effect を分離。
+  - 実装タスク: 1) `useTabQueue` に再接続 effect を導入、2) `chrome.runtime.lastError` の内容を `error` に反映、3) 切断後に `QUEUE_STATUS_UPDATE` を受けた際の冪等性テストを `useTabQueue.test.tsx` に追加。
+- [x] `TabManager` 再起動後の状態復元機構の設計評価。
+  - 現状 `initialize` で `reading` を `idle` に戻しているため、`queue.statusPersisted` のようなフラグを `StorageManager` に保存し、service worker 再起動時に「前回 `reading` 中だったか」「現在のタブと progress」があれば自動 `resume` を試行する。復元が失敗した場合のみ `idle` へフォールバックしてエラーを通知。
+  - `activePlaybackToken` を永続化する代わりに `PlaybackController` へ `resumeFrom(tabId, progress)` API を追加する検討。progress が無いブラウザでも `SpeechSynthesisUtterance` を先頭から読み直す fallback を設ける。
+  - 実装タスク: 1) `TabManager.persistQueue` で `status`/`currentIndex`/`progressByTab` を保存、2) `initialize` 時に復元フローを追加し `BackgroundOrchestrator` から `resumePlaybackIfNeeded` を呼び出す、3) 復元テストを `src/background/__tests__/tabManager.test.ts` に追加して `reading` → restart → resume をカバー。
 
 ### process100 リファクタリング
 - [ ] 改善実装時にポート管理・状態管理を共通化する余地を検討。
 
 ### process200 ドキュメンテーション
 - [x] 調査結果を PLAN.md に反映した。
-

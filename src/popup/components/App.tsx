@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { TTSSettings, QueueStatus } from '../../shared/types';
+import { TTSSettings, QueueStatus, KeepAliveDiagnostics, STORAGE_KEYS } from '../../shared/types';
 import { StorageManager, getIgnoredDomains } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
 import ControlButtons from './ControlButtons';
@@ -8,6 +8,7 @@ import StatusDisplay from './StatusDisplay';
 import TabQueueList from './TabQueueList';
 import useTabQueue from '../hooks/useTabQueue';
 import { SerializedTabInfo } from '../../shared/messages';
+import DiagnosticsBanner from './DiagnosticsBanner';
 
 const DEFAULT_SETTINGS: TTSSettings = {
   rate: 1.0,
@@ -22,8 +23,8 @@ const SETTINGS_DEBOUNCE_MS = 300;
 export default function App() {
   const {
     state: queueState,
-    isConnected,
-    error: queueError,
+    connectionState,
+    lastError: queueLastError,
     progressByTab,
     addTab,
     removeTab,
@@ -39,9 +40,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [developerMode, setDeveloperMode] = useState(false);
+  const [keepAliveDiagnostics, setKeepAliveDiagnostics] = useState<KeepAliveDiagnostics | null>(null);
 
   // Debounce timer for settings changes (insurance layer)
   const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const loadDiagnosticsSnapshot = useCallback(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) {
+      return;
+    }
+    chrome.storage.local.get('readAloudDiagnostics', (result) => {
+      setKeepAliveDiagnostics(result.readAloudDiagnostics ?? null);
+    });
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -63,11 +75,19 @@ export default function App() {
         }
 
         console.log('[Popup Init] Loading settings...');
-        const savedSettings = await StorageManager.getSettings();
+        const [savedSettings, devMode] = await Promise.all([
+          StorageManager.getSettings(),
+          StorageManager.getDeveloperMode(),
+        ]);
         console.log('[Popup Init] Settings loaded:', savedSettings);
 
         if (mounted) {
           setSettings(savedSettings);
+          setDeveloperMode(devMode);
+        }
+
+        if (mounted && devMode) {
+          loadDiagnosticsSnapshot();
         }
 
         console.log('[Popup Init] Initialization successful');
@@ -95,15 +115,27 @@ export default function App() {
     };
   }, []);
 
-  // Listen for settings changes from options page
+  // Listen for settings/developer mode/diagnostics changes
   useEffect(() => {
-    const handleStorageChange = (changes: any, areaName: string) => {
-      if (areaName === 'sync' && changes.tts_settings) {
-        const newSettings = changes.tts_settings.newValue;
-        if (newSettings) {
-          console.log('[Popup] Settings changed externally:', newSettings);
-          setSettings(newSettings);
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === 'sync') {
+        if (changes.tts_settings?.newValue) {
+          console.log('[Popup] Settings changed externally:', changes.tts_settings.newValue);
+          setSettings(changes.tts_settings.newValue);
         }
+        if (changes[STORAGE_KEYS.DEVELOPER_MODE]) {
+          const enabled = Boolean(changes[STORAGE_KEYS.DEVELOPER_MODE].newValue);
+          setDeveloperMode(enabled);
+          if (enabled) {
+            loadDiagnosticsSnapshot();
+          } else {
+            setKeepAliveDiagnostics(null);
+          }
+        }
+      }
+
+      if (areaName === 'local' && changes.readAloudDiagnostics) {
+        setKeepAliveDiagnostics(changes.readAloudDiagnostics.newValue ?? null);
       }
     };
 
@@ -119,13 +151,13 @@ export default function App() {
       };
     }
     return undefined;
-  }, []);
+  }, [loadDiagnosticsSnapshot]);
 
   useEffect(() => {
-    if (queueError) {
-      setError(queueError);
+    if (queueLastError) {
+      setError(queueLastError);
     }
-  }, [queueError]);
+  }, [queueLastError]);
 
   const activeQueueTab: SerializedTabInfo | null = useMemo(() => {
     if (!queueState) return null;
@@ -136,6 +168,8 @@ export default function App() {
     if (!activeQueueTab) return 0;
     return progressByTab[activeQueueTab.tabId] ?? (queueState?.status === 'reading' ? 0 : 0);
   }, [activeQueueTab, progressByTab, queueState?.status]);
+
+  const isConnected = connectionState === 'connected';
 
   const handleAddCurrentTab = useCallback(async () => {
     if (!activeTab || typeof activeTab.id !== 'number' || !activeTab.url) {
@@ -357,6 +391,14 @@ export default function App() {
         </button>
       </header>
 
+      {developerMode && (
+        <DiagnosticsBanner
+          connectionState={connectionState}
+          lastError={queueLastError}
+          keepAlive={keepAliveDiagnostics}
+        />
+      )}
+
       {error && (
         <div className="error-message" role="alert">
           <span>{error}</span>
@@ -387,7 +429,7 @@ export default function App() {
         fallbackTab={activeTab}
         status={queueStatus}
         progress={activeProgress}
-        isConnected={isConnected}
+        connectionState={connectionState}
       />
 
       <QuickControls
