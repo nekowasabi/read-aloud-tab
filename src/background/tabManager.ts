@@ -1,4 +1,4 @@
-import { ReadingQueue, TabInfo, TTSSettings } from '../shared/types';
+import { ReadingQueue, TabInfo, TTSSettings, cloneTabInfo } from '../shared/types';
 import {
   loadQueue as defaultLoadQueue,
   saveQueue as defaultSaveQueue,
@@ -41,6 +41,7 @@ export interface PlaybackController {
 export interface ContentResolverResult {
   content?: string;
   summary?: string;
+  translation?: string;
   extractedAt?: number | string | Date;
 }
 
@@ -201,6 +202,26 @@ export class TabManager {
 
   getSnapshot(): QueueStatusPayload {
     return this.createStatusPayload();
+  }
+
+  getTabById(tabId: number): TabInfo | null {
+    const found = this.queue.tabs.find((tab) => tab.tabId === tabId);
+    if (!found) {
+      return null;
+    }
+    return cloneTabInfo(found);
+  }
+
+  async requestContentForPrefetch(tabId: number): Promise<void> {
+    await this.ensureInitialized();
+    const tab = this.queue.tabs.find((candidate) => candidate.tabId === tabId);
+    if (!tab || tab.isIgnored) {
+      return;
+    }
+    if (tab.content && tab.content.length > 0) {
+      return;
+    }
+    this.emitContentRequest(tabId, 'missing');
   }
 
   async addTab(tab: TabInfo, options: AddTabOptions = {}): Promise<void> {
@@ -424,6 +445,7 @@ export class TabManager {
     if (tab) {
       tab.content = undefined;
       tab.summary = undefined;
+      tab.translation = undefined;
     }
 
     await this.persistQueue();
@@ -449,6 +471,9 @@ export class TabManager {
     }
     if (update.summary !== undefined) {
       tab.summary = update.summary;
+    }
+    if (update.translation !== undefined) {
+      tab.translation = update.translation;
     }
     if (update.extractedAt) {
       tab.extractedAt = new Date(update.extractedAt);
@@ -829,6 +854,9 @@ export class TabManager {
           if (result.summary !== undefined) {
             tab.summary = result.summary;
           }
+          if (result.translation !== undefined) {
+            tab.translation = result.translation;
+          }
           if (result.extractedAt) {
             tab.extractedAt = new Date(result.extractedAt);
           } else {
@@ -867,6 +895,7 @@ export class TabManager {
       if (totalChars > QUEUE_CONTENT_CHAR_BUDGET) {
         tab.content = undefined;
         tab.summary = undefined;
+        tab.translation = undefined;
       }
     }
   }

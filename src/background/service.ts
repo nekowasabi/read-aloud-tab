@@ -244,6 +244,7 @@ export class BackgroundOrchestrator {
       title: payload.tab.title,
       content: payload.tab.content,
       summary: payload.tab.summary,
+      translation: payload.tab.translation,
       isIgnored: false,
       extractedAt: payload.tab.extractedAt ? new Date(payload.tab.extractedAt) : new Date(),
     };

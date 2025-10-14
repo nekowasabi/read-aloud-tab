@@ -1,6 +1,7 @@
 import { TTSEngine } from './ttsEngine';
 import { TabManager } from './tabManager';
 import { BackgroundOrchestrator } from './service';
+import { AiPrefetcher } from './aiPrefetcher';
 import { TabInfo } from '../shared/types';
 
 const ttsEngine = new TTSEngine();
@@ -9,9 +10,17 @@ const tabManager = new TabManager({
   playback: ttsEngine,
 });
 
+const aiPrefetcher = new AiPrefetcher({
+  tabManager,
+  logger: console,
+  maxPrefetchAhead: 1,
+});
+
 const orchestrator = new BackgroundOrchestrator({
   tabManager,
 });
+
+aiPrefetcher.initialize();
 
 orchestrator.initialize().catch((error) => {
   console.error('Failed to initialize Read Aloud Tab background service', error);

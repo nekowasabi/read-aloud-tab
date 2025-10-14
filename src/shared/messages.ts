@@ -10,6 +10,7 @@ export interface QueueTabInput {
   title: string;
   content?: string;
   summary?: string;
+  translation?: string;
   extractedAt?: number | string | Date;
 }
 

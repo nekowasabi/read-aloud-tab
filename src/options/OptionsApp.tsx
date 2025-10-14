@@ -3,6 +3,8 @@ import IgnoreListManager from '../popup/components/IgnoreListManager';
 import { StorageManager } from '../shared/utils/storage';
 import { getIgnoredDomains } from '../shared/utils/storage';
 import { STORAGE_KEYS, TTSSettings, AiSettings } from '../shared/types';
+import { OpenRouterClient } from '../shared/services/openrouter';
+import type { ConnectionTestResult } from '../shared/types/ai';
 
 interface ExportPayload {
   version: number;
@@ -31,6 +33,8 @@ export default function OptionsApp() {
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [exportData, setExportData] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -131,6 +135,33 @@ export default function OptionsApp() {
 
   const handleIgnoreListChange = (domains: string[]) => {
     setIgnoredDomains(domains);
+  };
+
+  const handleConnectionTest = async () => {
+    if (!aiSettings.openRouterApiKey) {
+      setConnectionTestResult({
+        success: false,
+        error: 'APIキーを入力してください',
+      });
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const client = new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel);
+      const result = await client.testConnection();
+      setConnectionTestResult(result);
+    } catch (error) {
+      console.error('OptionsApp: connection test failed', error);
+      setConnectionTestResult({
+        success: false,
+        error: error instanceof Error ? error.message : '接続テストに失敗しました',
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
   };
 
   return (
@@ -239,6 +270,40 @@ export default function OptionsApp() {
             aria-label="OpenRouterモデル名"
           />
         </div>
+        <div className="setting-item">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleConnectionTest}
+            disabled={isTestingConnection || !aiSettings.openRouterApiKey}
+          >
+            接続テスト
+          </button>
+          {isTestingConnection && (
+            <span className="connection-test-loading" style={{ marginLeft: '10px' }}>
+              接続テスト中...
+            </span>
+          )}
+        </div>
+        {connectionTestResult && (
+          <div
+            className={`connection-test-result ${connectionTestResult.success ? 'success' : 'error'}`}
+            style={{
+              padding: '10px',
+              marginTop: '10px',
+              borderRadius: '4px',
+              backgroundColor: connectionTestResult.success ? '#d4edda' : '#f8d7da',
+              color: connectionTestResult.success ? '#155724' : '#721c24',
+              border: `1px solid ${connectionTestResult.success ? '#c3e6cb' : '#f5c6cb'}`,
+            }}
+          >
+            {connectionTestResult.success ? (
+              <span>✓ 接続に成功しました</span>
+            ) : (
+              <span>✗ 接続に失敗しました: {connectionTestResult.error}</span>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="options-section">

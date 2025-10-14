@@ -71,20 +71,55 @@ const mockSpeechSynthesis = {
   onboundary: null,
 }));
 
-// Setup console error handling for tests
-const originalError = console.error;
-beforeAll(() => {
-  console.error = (...args: any[]) => {
-    if (
-      typeof args[0] === 'string' &&
-      args[0].includes('Warning: ReactDOM.render is no longer supported')
-    ) {
-      return;
-    }
-    originalError.call(console, ...args);
-  };
-});
+// Console noise control (silence by default, allow opt-in via env variable)
+const allowConsoleOutput = process.env.JEST_ALLOW_CONSOLE === 'true';
 
-afterAll(() => {
-  console.error = originalError;
-});
+if (!allowConsoleOutput) {
+  const silencedMethods = ['log', 'info', 'warn', 'debug', 'error'] as const;
+  const originalConsole: Partial<Record<(typeof silencedMethods)[number], (...args: any[]) => void>> = {};
+
+  beforeAll(() => {
+    silencedMethods.forEach(method => {
+      const original = console[method].bind(console);
+      originalConsole[method] = original;
+
+      (console as any)[method] = (...args: any[]) => {
+        if (
+          method === 'error' &&
+          typeof args[0] === 'string' &&
+          args[0].includes('Warning: ReactDOM.render is no longer supported')
+        ) {
+          return;
+        }
+        // Suppress all console output during tests to keep results clean.
+      };
+    });
+  });
+
+  afterAll(() => {
+    silencedMethods.forEach(method => {
+      const original = originalConsole[method];
+      if (original) {
+        (console as any)[method] = original;
+      }
+    });
+  });
+} else {
+  // Preserve previous behaviour when console output is explicitly allowed.
+  const originalError = console.error;
+  beforeAll(() => {
+    console.error = (...args: any[]) => {
+      if (
+        typeof args[0] === 'string' &&
+        args[0].includes('Warning: ReactDOM.render is no longer supported')
+      ) {
+        return;
+      }
+      originalError.call(console, ...args);
+    };
+  });
+
+  afterAll(() => {
+    console.error = originalError;
+  });
+}

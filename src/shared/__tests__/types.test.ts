@@ -61,6 +61,7 @@ describe('Type Definitions', () => {
         title: 'Example Page',
         content: 'This is example content',
         summary: 'Example summary',
+        translation: 'これは翻訳された内容です',
         isIgnored: false,
         extractedAt: new Date(),
       };
@@ -70,6 +71,7 @@ describe('Type Definitions', () => {
       expect(mockTab.title).toBe('Example Page');
       expect(mockTab.content).toBe('This is example content');
       expect(mockTab.summary).toBe('Example summary');
+      expect(mockTab.translation).toBe('これは翻訳された内容です');
       expect(mockTab.isIgnored).toBe(false);
       expect(mockTab.extractedAt).toBeInstanceOf(Date);
     });
@@ -85,6 +87,7 @@ describe('Type Definitions', () => {
 
       expect(minimalTab.content).toBeUndefined();
       expect(minimalTab.summary).toBeUndefined();
+      expect(minimalTab.translation).toBeUndefined();
     });
   });
 

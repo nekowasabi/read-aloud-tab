@@ -13,7 +13,14 @@ jest.mock('../../shared/utils/storage', () => ({
   getIgnoredDomains: jest.fn(),
 }));
 
+jest.mock('../../shared/services/openrouter', () => ({
+  OpenRouterClient: jest.fn().mockImplementation(() => ({
+    testConnection: jest.fn(),
+  })),
+}));
+
 const storage = require('../../shared/utils/storage');
+const { OpenRouterClient } = require('../../shared/services/openrouter');
 
 describe('OptionsApp', () => {
   beforeEach(() => {
@@ -167,6 +174,167 @@ describe('OptionsApp', () => {
         openRouterApiKey: '',
         openRouterModel: 'imported-model',
         enableAiSummary: true,
+      });
+    });
+  });
+
+  describe('接続テスト機能', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+    });
+
+    test('接続テストボタンが表示される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      expect(button).toBeInTheDocument();
+    });
+
+    test('APIキー未入力時は接続テストボタンが無効化される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: '',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      expect(button).toBeDisabled();
+    });
+
+    test('接続テスト成功時に成功メッセージが表示される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'valid-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      const mockTestConnection = jest.fn().mockResolvedValue({
+        success: true,
+      });
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(screen.getByText(/接続に成功しました/)).toBeInTheDocument();
+      });
+      expect(mockTestConnection).toHaveBeenCalled();
+    });
+
+    test('接続テスト失敗時にエラーメッセージが表示される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'invalid-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      const mockTestConnection = jest.fn().mockResolvedValue({
+        success: false,
+        error: 'APIキーが無効です',
+      });
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(screen.getByText(/接続に失敗しました/)).toBeInTheDocument();
+        expect(screen.getByText(/APIキーが無効です/)).toBeInTheDocument();
+      });
+    });
+
+    test('接続テスト中はボタンが無効化される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      let resolveTestConnection: (value: any) => void;
+      const testConnectionPromise = new Promise((resolve) => {
+        resolveTestConnection = resolve;
+      });
+      const mockTestConnection = jest.fn().mockReturnValue(testConnectionPromise);
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(button);
+
+      // テスト実行中はボタンが無効化される
+      await waitFor(() => {
+        expect(button).toBeDisabled();
+      });
+
+      // テスト完了
+      resolveTestConnection!({ success: true });
+
+      // ボタンが再度有効化される
+      await waitFor(() => {
+        expect(button).not.toBeDisabled();
+      });
+    });
+
+    test('接続テスト中はローディングメッセージが表示される', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        openRouterApiKey: 'test-key',
+        openRouterModel: 'test-model',
+        enableAiSummary: false,
+        enableAiTranslation: false,
+      });
+
+      let resolveTestConnection: (value: any) => void;
+      const testConnectionPromise = new Promise((resolve) => {
+        resolveTestConnection = resolve;
+      });
+      const mockTestConnection = jest.fn().mockReturnValue(testConnectionPromise);
+      OpenRouterClient.mockImplementation(() => ({
+        testConnection: mockTestConnection,
+      }));
+
+      render(<OptionsApp />);
+
+      const button = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(button);
+
+      // ローディング中のメッセージを確認
+      await waitFor(() => {
+        expect(screen.getByText(/接続テスト中/)).toBeInTheDocument();
+      });
+
+      // テスト完了
+      resolveTestConnection!({ success: true });
+
+      // ローディングメッセージが消える
+      await waitFor(() => {
+        expect(screen.queryByText(/接続テスト中/)).not.toBeInTheDocument();
       });
     });
   });
