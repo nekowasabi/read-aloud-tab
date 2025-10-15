@@ -41,13 +41,17 @@ describe('TTSEngine (PlaybackController)', () => {
     const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
     expect(utterance.text).toBe('Hello world');
 
+    // Trigger onend (will call playNextChunk which completes and calls hooks.onEnd)
     utterance.onend?.();
+
+    // Wait for async playNextChunk to complete
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(hooks.onEnd).toHaveBeenCalled();
     expect(hooks.onError).not.toHaveBeenCalled();
   });
 
-  test('エラー発生時はonErrorが呼ばれ、再生は停止する', async () => {
+  test('エラー発生時はリトライ後にonErrorが呼ばれ、再生は停止する', async () => {
     const hooks = {
       onEnd: jest.fn(),
       onError: jest.fn(),
@@ -56,8 +60,26 @@ describe('TTSEngine (PlaybackController)', () => {
     const engine = new TTSEngine();
     await engine.start(createTab(), defaultSettings, hooks);
 
-    const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
-    utterance.onerror?.({ error: 'network' });
+    // Trigger first error
+    const utterance1 = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+    utterance1.onerror?.({ error: 'network' });
+
+    // Wait for first retry (100ms delay)
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // Trigger error on first retry
+    const utterance2 = (SpeechSynthesisUtterance as jest.Mock).mock.results[1].value;
+    utterance2.onerror?.({ error: 'network' });
+
+    // Wait for second retry (100ms delay)
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // Trigger error on second retry (this is the 3rd attempt, max retries = 2)
+    const utterance3 = (SpeechSynthesisUtterance as jest.Mock).mock.results[2].value;
+    utterance3.onerror?.({ error: 'network' });
+
+    // Wait for error handling to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(hooks.onError).toHaveBeenCalled();
     expect(hooks.onEnd).not.toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
+import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
 
 interface TTSEngineOptions {
   speech?: SpeechSynthesis;
@@ -21,6 +22,12 @@ export class TTSEngine implements PlaybackController {
   private currentSettings: TTSSettings | null = null;
   private currentHooks: PlaybackHooks | null = null;
   private isResuming: boolean = false;
+
+  // Chunking support for long text (Web Speech API limitations)
+  private chunks: TextChunk[] = [];
+  private currentChunkIndex: number = 0;
+  private chunkRetryCount: number = 0;
+  private readonly maxChunkRetries: number = 2;
 
   private readonly speech: SpeechSynthesis;
   private readonly createUtteranceFn: (
@@ -56,26 +63,38 @@ export class TTSEngine implements PlaybackController {
 
     this.stop();
 
-    // Store for Firefox pause/resume support
+    // Store for pause/resume support
     this.originalText = textToSpeak;
     this.currentSettings = settings;
     this.currentHooks = hooks;
     this.pausedPosition = 0;
-
-    this.currentText = textToSpeak;
     this.totalLength = textToSpeak.length;
     this.currentPosition = 0;
     this.isPaused = false;
 
-    const utterance = this.createUtteranceFn(textToSpeak);
-    utterance.text = textToSpeak;
-    this.utterance = utterance;
+    // Split text into chunks to avoid Web Speech API limitations
+    // Chrome: 200-300 chars or 15 second timeout
+    // Firefox: Similar limitations
+    const chunkConfig: ChunkConfig = {
+      maxChunkSize: 300,
+      minChunkSize: 50,
+    };
 
-    this.applySettings(utterance, settings);
-    await this.applyVoice(utterance, settings.voice);
-    this.bindUtteranceEvents(utterance, hooks);
+    const chunkResult = chunkText(textToSpeak, chunkConfig);
+    this.chunks = chunkResult.chunks;
+    this.currentChunkIndex = 0;
+    this.chunkRetryCount = 0;
 
-    this.speech.speak(utterance);
+    this.logger.info(
+      `[TTSEngine] Starting TTS with ${chunkResult.totalChunks} chunks`,
+      {
+        originalLength: chunkResult.originalLength,
+        chunks: chunkResult.totalChunks,
+      },
+    );
+
+    // Start playing first chunk
+    await this.playChunkAt(0);
   }
 
   pause(): void {
@@ -83,9 +102,15 @@ export class TTSEngine implements PlaybackController {
       return;
     }
 
-    // Save current position for Firefox compatibility
-    // Firefox doesn't support pause() properly, so we use cancel() + position tracking
+    // Save current position for pause/resume
+    // Store both global position and chunk index
     this.pausedPosition = this.currentPosition;
+
+    this.logger.info("[TTSEngine] Pausing playback", {
+      position: this.pausedPosition,
+      chunkIndex: this.currentChunkIndex,
+      totalChunks: this.chunks.length,
+    });
 
     try {
       // IMPORTANT: Set isPaused BEFORE calling cancel()
@@ -119,6 +144,26 @@ export class TTSEngine implements PlaybackController {
       return;
     }
 
+    this.logger.info("[TTSEngine] Resuming playback", {
+      position: this.pausedPosition,
+      chunkIndex: this.currentChunkIndex,
+      hasChunks: this.chunks.length > 0,
+    });
+
+    // If we have chunks, resume from current chunk
+    if (this.chunks.length > 0) {
+      this.isPaused = false;
+      this.isResuming = true;
+
+      // Resume from current chunk
+      this.playChunkAt(this.currentChunkIndex).catch((error) => {
+        this.logger.error("[TTSEngine] Failed to resume from chunk", error);
+        this.isResuming = false;
+      });
+      return;
+    }
+
+    // Fallback: Legacy resume behavior (for compatibility)
     // Get remaining text from paused position
     const remainingText = this.originalText.substring(this.pausedPosition);
 
@@ -230,11 +275,163 @@ export class TTSEngine implements PlaybackController {
     }
   }
 
+  /**
+   * Play a specific chunk by index
+   * @param chunkIndex - Index of chunk to play
+   */
+  private async playChunkAt(chunkIndex: number): Promise<void> {
+    if (!this.currentHooks || !this.currentSettings) {
+      throw new Error("TTSEngine: missing hooks or settings for chunk playback");
+    }
+
+    if (chunkIndex < 0 || chunkIndex >= this.chunks.length) {
+      this.logger.error(`[TTSEngine] Invalid chunk index: ${chunkIndex}/${this.chunks.length}`);
+      return;
+    }
+
+    const chunk = this.chunks[chunkIndex];
+    this.currentChunkIndex = chunkIndex;
+    this.currentText = chunk.text;
+
+    this.logger.info(
+      `[TTSEngine] Playing chunk ${chunkIndex + 1}/${this.chunks.length}`,
+      {
+        chunkLength: chunk.text.length,
+        startOffset: chunk.startOffset,
+      },
+    );
+
+    const utterance = this.createUtteranceFn(chunk.text);
+    utterance.text = chunk.text;
+    this.utterance = utterance;
+
+    this.applySettings(utterance, this.currentSettings);
+    await this.applyVoice(utterance, this.currentSettings.voice);
+    this.bindUtteranceEventsForChunk(utterance, this.currentHooks, chunk);
+
+    this.speech.speak(utterance);
+  }
+
+  /**
+   * Play next chunk in the queue
+   * Called automatically when current chunk finishes
+   */
+  private async playNextChunk(): Promise<void> {
+    const nextIndex = this.currentChunkIndex + 1;
+
+    if (nextIndex >= this.chunks.length) {
+      // All chunks completed
+      this.logger.info("[TTSEngine] All chunks completed");
+      if (this.currentHooks) {
+        this.cleanup();
+        this.currentHooks.onEnd();
+      }
+      return;
+    }
+
+    // Reset retry count for next chunk
+    this.chunkRetryCount = 0;
+    await this.playChunkAt(nextIndex);
+  }
+
+  /**
+   * Retry current chunk on error
+   */
+  private async retryCurrentChunk(): Promise<void> {
+    if (this.chunkRetryCount >= this.maxChunkRetries) {
+      this.logger.error(
+        `[TTSEngine] Max retries (${this.maxChunkRetries}) reached for chunk ${this.currentChunkIndex}`,
+      );
+      // Throw error to trigger error handling in onerror handler
+      throw new Error(`Max retries (${this.maxChunkRetries}) reached for chunk ${this.currentChunkIndex}`);
+    }
+
+    this.chunkRetryCount++;
+    this.logger.warn(
+      `[TTSEngine] Retrying chunk ${this.currentChunkIndex} (attempt ${this.chunkRetryCount}/${this.maxChunkRetries})`,
+    );
+
+    // Small delay before retry
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await this.playChunkAt(this.currentChunkIndex);
+  }
+
   private bindUtteranceEvents(
     utterance: SpeechSynthesisUtterance,
     hooks: PlaybackHooks,
   ): void {
     this.bindUtteranceEventsWithOffset(utterance, hooks, 0);
+  }
+
+  /**
+   * Bind events for chunk-based playback
+   * Handles automatic progression to next chunk on completion
+   */
+  private bindUtteranceEventsForChunk(
+    utterance: SpeechSynthesisUtterance,
+    hooks: PlaybackHooks,
+    chunk: TextChunk,
+  ): void {
+    utterance.onstart = () => {
+      // Only reset isPaused if not resuming (to prevent state reset on resume)
+      if (!this.isResuming) {
+        this.isPaused = false;
+      } else {
+        // Clear resuming flag after onstart fires
+        this.isResuming = false;
+      }
+    };
+
+    utterance.onend = () => {
+      // Don't call hooks.onEnd() if we're paused (Firefox fires onend when cancel() is called)
+      if (!this.isPaused) {
+        // Move to next chunk instead of completing
+        this.playNextChunk().catch((error) => {
+          this.logger.error("[TTSEngine] Failed to play next chunk", error);
+          hooks.onError(error instanceof Error ? error : new Error(String(error)));
+        });
+      }
+    };
+
+    utterance.onerror = (event: any) => {
+      const errorType = typeof event?.error === "string" ? event.error : "unknown";
+      this.logger.error(
+        `[TTSEngine] Chunk ${this.currentChunkIndex} error: ${errorType}`,
+        event,
+      );
+
+      // Retry on error
+      this.retryCurrentChunk().catch((error) => {
+        this.logger.error("[TTSEngine] Retry failed", error);
+        // If retry fails, report error to hooks
+        const finalError = new Error(
+          `Speech synthesis error after ${this.chunkRetryCount} retries: ${errorType}`,
+        );
+        try {
+          this.speech.cancel();
+        } catch (cancelError) {
+          this.logger.warn("TTSEngine: cancel after error failed", cancelError);
+        }
+        this.cleanup();
+        hooks.onError(finalError);
+      });
+    };
+
+    utterance.onpause = () => {
+      this.isPaused = true;
+    };
+
+    utterance.onresume = () => {
+      this.isPaused = false;
+    };
+
+    utterance.onboundary = (event: any) => {
+      if (typeof event?.charIndex === "number") {
+        // Calculate position as chunk start offset + char index within chunk
+        this.currentPosition = chunk.startOffset + event.charIndex;
+        this.emitProgress(hooks);
+      }
+    };
   }
 
   private bindUtteranceEventsWithOffset(
@@ -314,6 +511,9 @@ export class TTSEngine implements PlaybackController {
     this.currentPosition = 0;
     this.totalLength = 0;
     this.isResuming = false;
+    this.chunks = [];
+    this.currentChunkIndex = 0;
+    this.chunkRetryCount = 0;
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {

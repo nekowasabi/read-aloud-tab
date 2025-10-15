@@ -305,6 +305,22 @@ describe('Offscreen Document', () => {
 
   describe('Error Handling', () => {
     it('should send error notification on speech error', async () => {
+      // Configure mock to trigger error on each speak call
+      let errorCallCount = 0;
+      const maxErrorCalls = 3; // Initial + 2 retries
+
+      mockSpeechSynthesis.speak.mockImplementation((utterance: any) => {
+        mockSpeechSynthesis.speaking = true;
+        setTimeout(() => {
+          if (utterance.onstart) utterance.onstart({} as any);
+          // Trigger error for first 3 calls (initial + 2 retries)
+          if (errorCallCount < maxErrorCalls && utterance.onerror) {
+            errorCallCount++;
+            utterance.onerror({ error: 'synthesis-failed' } as any);
+          }
+        }, 0);
+      });
+
       const { initializeOffscreenDocument } = await import('../offscreen');
 
       initializeOffscreenDocument();
@@ -331,14 +347,8 @@ describe('Offscreen Document', () => {
       const listener = (chrome.runtime.onMessage.addListener as jest.Mock).mock.calls[0][0];
       await listener(message, {}, jest.fn());
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      // Simulate error event
-      if (mockUtterance.onerror) {
-        mockUtterance.onerror({ error: 'synthesis-failed' } as any);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for all retries to complete (3 attempts * 100ms delay + buffer)
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       expect(sentMessages).toContainEqual(
         expect.objectContaining({
