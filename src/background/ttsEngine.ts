@@ -73,11 +73,12 @@ export class TTSEngine implements PlaybackController {
     this.isPaused = false;
 
     // Split text into chunks to avoid Web Speech API limitations
-    // Chrome: 200-300 chars or 15 second timeout
-    // Firefox: Similar limitations
+    // Web Speech API has a ~15 second timeout
+    // Japanese reading speed: ~5-6 chars/second at rate 1.0
+    // Safe chunk size: 10 seconds × 5 chars/sec = 50 chars
     const chunkConfig: ChunkConfig = {
-      maxChunkSize: 300,
-      minChunkSize: 50,
+      maxChunkSize: 60,  // Conservative for Japanese text (10-12 sec at rate 1.0)
+      minChunkSize: 20,  // Avoid too small fragments
     };
 
     const chunkResult = chunkText(textToSpeak, chunkConfig);
