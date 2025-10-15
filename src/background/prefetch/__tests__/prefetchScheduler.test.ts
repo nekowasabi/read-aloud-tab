@@ -77,13 +77,20 @@ describe('PrefetchScheduler', () => {
 
   it('recomputes priorities when status updates change ordering', () => {
     const enqueue = jest.fn();
-    const scheduler = new PrefetchScheduler({ enqueue, cancel: jest.fn(), maxPrefetchAhead: 2 });
+    const cancel = jest.fn();
+    const scheduler = new PrefetchScheduler({ enqueue, cancel, maxPrefetchAhead: 2 });
 
     const status1 = baseStatus();
     status1.tabs = [makeTab(1), makeTab(2), makeTab(3)];
     status1.totalCount = 3;
 
     scheduler.handleStatusUpdate(status1);
+
+    // First call should schedule current tab (1) + maxPrefetchAhead (2) = tabs 1, 2, 3
+    expect(enqueue).toHaveBeenCalledTimes(3);
+    expect(enqueue).toHaveBeenNthCalledWith(1, expect.objectContaining({ tabId: 1, priority: 0 }));
+    expect(enqueue).toHaveBeenNthCalledWith(2, expect.objectContaining({ tabId: 2, priority: 1 }));
+    expect(enqueue).toHaveBeenNthCalledWith(3, expect.objectContaining({ tabId: 3, priority: 2 }));
 
     enqueue.mockClear();
 
@@ -95,8 +102,8 @@ describe('PrefetchScheduler', () => {
 
     scheduler.handleStatusUpdate(status2);
 
-    expect(enqueue).toHaveBeenCalledTimes(2);
-    expect(enqueue).toHaveBeenNthCalledWith(1, expect.objectContaining({ tabId: 2, priority: 0 }));
-    expect(enqueue).toHaveBeenNthCalledWith(2, expect.objectContaining({ tabId: 3, priority: 1 }));
+    // Second call with currentIndex=1 should want tabs 2 and 3
+    // All tabs are already scheduled, so no new enqueue calls
+    expect(enqueue).toHaveBeenCalledTimes(0);
   });
 });

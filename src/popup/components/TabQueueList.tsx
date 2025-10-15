@@ -161,7 +161,6 @@ export default function TabQueueList({
       title="読み上げキュー"
       description={`${tabs.length} 件 / 状態: ${statusLabel}`}
       actions={[
-        { label: 'リセット', onClick: onResetQueue, disabled: isQueueEmpty },
         { label: '◀ 前へ', onClick: onSkipPrevious, disabled: isQueueEmpty },
         { label: '次へ ▶', onClick: onSkipNext, disabled: isQueueEmpty },
         ...(onClearQueue ? [{ label: 'リセット', onClick: onClearQueue, disabled: isQueueEmpty }] : []),

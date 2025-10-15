@@ -98,7 +98,7 @@ export class AiProcessor {
           this.client.summarize(
             processedContent,
             this.options.maxSummaryTokens,
-            settings.customSummaryPrompt
+            settings.summaryPrompt || undefined
           ),
           this.options.timeoutMs
         );
@@ -109,8 +109,9 @@ export class AiProcessor {
         processedContent = await this.withTimeout(
           this.client.translate(
             processedContent,
+            'Japanese',
             this.options.maxTranslationTokens,
-            settings.customTranslationPrompt
+            settings.translationPrompt || undefined
           ),
           this.options.timeoutMs
         );

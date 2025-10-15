@@ -72,6 +72,8 @@ describe('TabManager AI統合', () => {
       openRouterModel: 'test-model',
       enableAiSummary: false,
       enableAiTranslation: false,
+      summaryPrompt: '',
+      translationPrompt: '',
     });
 
     const { loadQueue, saveQueue } = require('../../shared/utils/storage');
@@ -83,8 +85,15 @@ describe('TabManager AI統合', () => {
     });
     (saveQueue as jest.Mock).mockResolvedValue(undefined);
 
+    // resolveContentモックを追加してensureTabReadyがAI処理まで到達できるようにする
+    const mockResolveContent = jest.fn().mockResolvedValue({
+      content: mockTab.content,
+      extractedAt: mockTab.extractedAt,
+    });
+
     manager = new TabManager({
       playback: mockPlayback,
+      resolveContent: mockResolveContent,
     });
   });
 
@@ -96,6 +105,8 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
 
@@ -120,18 +131,24 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
+      // Set up mocks before adding tab
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(true);
       mockAiProcessor.processContent.mockResolvedValue('Summarized content');
+
+      // Reinitialize to pick up new settings
+      await manager.initialize();
 
       await manager.addTab(mockTab);
 
       // Act
       await manager.processNext(0);
 
-      // Wait for async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Wait for async operations (AI processing takes time)
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Assert
       expect(mockAiProcessor.processContent).toHaveBeenCalled();
@@ -147,18 +164,24 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: true,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
+      // Set up mocks before adding tab
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(true);
       mockAiProcessor.processContent.mockResolvedValue('翻訳されたコンテンツ');
+
+      // Reinitialize to pick up new settings
+      await manager.initialize();
 
       await manager.addTab(mockTab);
 
       // Act
       await manager.processNext(0);
 
-      // Wait for async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Wait for async operations (AI processing takes time)
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Assert
       expect(mockAiProcessor.processContent).toHaveBeenCalled();
@@ -174,18 +197,24 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: true,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
+      // Set up mocks before adding tab
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(true);
       mockAiProcessor.processContent.mockResolvedValue('要約されて翻訳されたコンテンツ');
+
+      // Reinitialize to pick up new settings
+      await manager.initialize();
 
       await manager.addTab(mockTab);
 
       // Act
       await manager.processNext(0);
 
-      // Wait for async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Wait for async operations (AI processing takes time)
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Assert
       expect(mockAiProcessor.processContent).toHaveBeenCalled();
@@ -201,6 +230,8 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(false);
@@ -227,18 +258,24 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
+      // Set up mocks before adding tab
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(true);
       mockAiProcessor.processContent.mockRejectedValue(new Error('API Error'));
+
+      // Reinitialize to pick up new settings
+      await manager.initialize();
 
       await manager.addTab(mockTab);
 
       // Act
       await manager.processNext(0);
 
-      // Wait for async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Wait for async operations (AI processing takes time)
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Assert - エラーが発生してもplaybackが開始される
       expect(mockPlayback.start).toHaveBeenCalled();
@@ -261,15 +298,21 @@ describe('TabManager AI統合', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
+      // Set up mocks before adding tab
       (StorageManager.getAiSettings as jest.Mock).mockResolvedValue(aiSettings);
       mockAiProcessor.isEnabled.mockReturnValue(true);
       mockAiProcessor.processContent.mockResolvedValue('Summarized content');
 
+      // Reinitialize to pick up new settings
+      await manager.initialize();
+
       // タブを追加してprocessedContentを設定
       await manager.addTab(mockTab);
       await manager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       let snapshot = manager.getSnapshot();
       expect(snapshot.tabs[0].processedContent).toBe('Summarized content');

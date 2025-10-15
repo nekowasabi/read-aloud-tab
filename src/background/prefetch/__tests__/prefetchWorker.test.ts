@@ -1,5 +1,10 @@
 import { PrefetchWorker } from '../worker';
 import { AiSettings, TabInfo } from '../../../shared/types';
+import * as languageDetector from '../../../shared/utils/languageDetector';
+
+// Mock language detector to force translation
+jest.spyOn(languageDetector, 'isTranslationNeeded').mockReturnValue(true);
+jest.spyOn(languageDetector, 'detectLanguage').mockReturnValue('ja');
 
 describe('PrefetchWorker', () => {
   const makeTab = (overrides: Partial<TabInfo> = {}): TabInfo => ({

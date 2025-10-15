@@ -42,6 +42,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
 
       // Act
@@ -58,6 +60,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settingsWithKey);
       expect(MockedOpenRouterClient).toHaveBeenCalledTimes(1);
@@ -67,6 +71,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
 
       // Act
@@ -86,6 +92,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -100,6 +108,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: true,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -114,6 +124,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -128,6 +140,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -153,6 +167,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       processor.updateSettings(settings);
 
@@ -175,6 +191,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: true,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       processor.updateSettings(settings);
 
@@ -186,7 +204,7 @@ describe('AiProcessor', () => {
 
       // Assert
       expect(mockClient.summarize).not.toHaveBeenCalled();
-      expect(mockClient.translate).toHaveBeenCalledWith('Original content', 2000, undefined);
+      expect(mockClient.translate).toHaveBeenCalledWith('Original content', 'Japanese', 2000, undefined);
       expect(result).toBe(translatedContent);
     });
 
@@ -197,6 +215,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: true,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       processor.updateSettings(settings);
 
@@ -210,7 +230,7 @@ describe('AiProcessor', () => {
 
       // Assert
       expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
-      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 2000, undefined);
+      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 'Japanese', 2000, undefined);
       expect(result).toBe(translatedContent);
     });
 
@@ -221,6 +241,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -240,6 +262,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -257,6 +281,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -279,6 +305,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -298,6 +326,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -322,6 +352,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'default summary',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -352,6 +384,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       processor.updateSettings(settings);
 
@@ -379,7 +413,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: false,
-        customSummaryPrompt: 'Custom summary prompt for testing',
+        summaryPrompt: 'Custom summary prompt for testing',
+        translationPrompt: 'default translation',
       };
       processor.updateSettings(settings);
 
@@ -405,7 +440,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: true,
-        customTranslationPrompt: 'Custom translation prompt for testing',
+        summaryPrompt: 'default summary',
+        translationPrompt: 'Custom translation prompt for testing',
       };
       processor.updateSettings(settings);
 
@@ -418,6 +454,7 @@ describe('AiProcessor', () => {
       // Assert
       expect(mockClient.translate).toHaveBeenCalledWith(
         'Original content',
+        'Japanese',
         2000,
         'Custom translation prompt for testing'
       );
@@ -431,8 +468,8 @@ describe('AiProcessor', () => {
         openRouterModel: 'test-model',
         enableAiSummary: true,
         enableAiTranslation: true,
-        customSummaryPrompt: undefined,
-        customTranslationPrompt: undefined,
+        summaryPrompt: '',
+        translationPrompt: '',
       };
       processor.updateSettings(settings);
 
@@ -446,7 +483,7 @@ describe('AiProcessor', () => {
 
       // Assert
       expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
-      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 2000, undefined);
+      expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 'Japanese', 2000, undefined);
       expect(result).toBe(translatedContent);
     });
   });

@@ -495,24 +495,6 @@ export class TabManager {
     this.emitStatus();
   }
 
-  async clearQueue(): Promise<void> {
-    await this.ensureInitialized();
-
-    if (this.queue.tabs.length === 0) {
-      await this.stopInternal(true);
-      this.queue.currentIndex = 0;
-      await this.persistQueue();
-      this.emitStatus();
-      return;
-    }
-
-    await this.stopInternal(true);
-    this.queue.tabs = [];
-    this.queue.currentIndex = 0;
-    await this.persistQueue();
-    this.emitStatus();
-  }
-
   async onTabClosed(tabId: number): Promise<void> {
     await this.ensureInitialized();
     const index = this.queue.tabs.findIndex((tab) => tab.tabId === tabId);

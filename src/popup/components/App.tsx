@@ -416,7 +416,6 @@ export default function App() {
         status={queueStatus}
         onRemoveTab={handleRemoveTab}
         onReorder={handleReorder}
-        onResetQueue={handleResetQueue}
         onSkipNext={() => {
           skipNext().catch((commandError) => {
             const message = commandError instanceof Error ? commandError.message : '次のタブへの移動に失敗しました';

@@ -111,7 +111,7 @@ export abstract class BaseApiClient {
    * @private
    */
   private isApiError(error: Error): boolean {
-    const apiErrorMessages = Object.values(API_ERROR_MESSAGES);
+    const apiErrorMessages = Object.values(API_ERROR_MESSAGES) as string[];
     return apiErrorMessages.some(msg => error.message.includes(msg));
   }
 }

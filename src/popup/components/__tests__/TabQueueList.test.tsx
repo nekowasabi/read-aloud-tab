@@ -72,7 +72,6 @@ const renderList = (props?: Partial<TabQueueListProps>) => {
     status: 'reading',
     onRemoveTab: jest.fn(),
     onReorder: jest.fn(),
-    onResetQueue: jest.fn(),
     onSkipNext: jest.fn(),
     onSkipPrevious: jest.fn(),
     onClearQueue: jest.fn(),
@@ -126,14 +125,6 @@ describe('TabQueueList', () => {
     });
 
     expect(props.onReorder).not.toHaveBeenCalled();
-  });
-
-  test('リセットボタンで onResetQueue が呼ばれる', () => {
-    const { props } = renderList();
-    const resetButton = screen.getByRole('button', { name: 'リセット' });
-    fireEvent.click(resetButton);
-
-    expect(props.onResetQueue).toHaveBeenCalled();
   });
 
   test('prefetch 状態に応じて再試行ボタンを表示しコールバックを呼び出す', () => {

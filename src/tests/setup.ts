@@ -35,14 +35,6 @@ const mockChrome = {
       addListener: jest.fn(),
       removeListener: jest.fn(),
     },
-    local: {
-      set: jest.fn().mockResolvedValue(undefined),
-      remove: jest.fn().mockResolvedValue(undefined),
-    },
-    onChanged: {
-      addListener: jest.fn(),
-      removeListener: jest.fn(),
-    },
   },
   tabs: {
     query: jest.fn().mockResolvedValue([]),
