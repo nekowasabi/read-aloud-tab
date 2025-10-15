@@ -82,6 +82,75 @@ export class BackgroundOrchestrator {
     if (!this.chrome?.runtime) {
       throw new Error('Chrome runtime APIs are not available');
     }
+
+    // Set content resolver for TabManager to enable AI prefetch waiting
+    // @ts-expect-error - resolveContent is private but we need to set it
+    this.tabManager['resolveContent'] = this.createContentResolver;
+  }
+
+  /**
+   * Content resolver for TabManager
+   * Waits for AI summary/translation if enabled before returning
+   */
+  private createContentResolver = async (tab: TabInfo) => {
+    // If no content, request extraction first
+    if (!tab.content || tab.content.trim().length === 0) {
+      this.emitContentRequest(tab.tabId, 'missing');
+      return null;
+    }
+
+    // If AI prefetcher is available and enabled, wait for summary/translation
+    if (this.prefetcher) {
+      try {
+        const settings = await import('../shared/utils/storage').then((m) => m.StorageManager.getAiSettings());
+        const needsAi = settings.enableAiSummary || settings.enableAiTranslation;
+
+        if (needsAi) {
+          this.logger.info(`[BackgroundOrchestrator] Waiting for AI prefetch for tab ${tab.tabId}...`);
+          const success = await this.prefetcher.waitForPrefetch(tab.tabId, 30000);
+
+          if (success) {
+            this.logger.info(`[BackgroundOrchestrator] AI prefetch completed for tab ${tab.tabId}`);
+            // Get updated tab info with summary/translation
+            const updatedTab = this.tabManager.getTabById(tab.tabId);
+            if (updatedTab) {
+              return {
+                content: updatedTab.content,
+                summary: updatedTab.summary,
+                translation: updatedTab.translation,
+                extractedAt: updatedTab.extractedAt,
+              };
+            }
+          } else {
+            this.logger.warn(`[BackgroundOrchestrator] AI prefetch timeout for tab ${tab.tabId}, proceeding with original content`);
+          }
+        }
+      } catch (error) {
+        this.logger.warn('[BackgroundOrchestrator] Failed to check AI settings or wait for prefetch', error);
+      }
+    }
+
+    // Return current content (fallback or AI disabled)
+    return {
+      content: tab.content,
+      summary: tab.summary,
+      translation: tab.translation,
+      extractedAt: tab.extractedAt,
+    };
+  };
+
+  private emitContentRequest(tabId: number, reason: 'missing' | 'stale'): void {
+    const event = { type: 'QUEUE_CONTENT_REQUEST', payload: { tabId, reason } } as const;
+    for (const listener of this.unsubscribeFns) {
+      // This is a workaround - we need to emit to command listeners
+      // but we don't have direct access here
+    }
+    // Send directly via tabs API
+    try {
+      this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
+    } catch (error) {
+      this.logger.error('[BackgroundOrchestrator] Failed to request content extraction', error);
+    }
   }
 
   async initialize(): Promise<void> {
@@ -258,6 +327,9 @@ export class BackgroundOrchestrator {
         return { success: true };
       case 'QUEUE_UPDATE_SETTINGS':
         await this.handleUpdateSettings(message.payload.settings);
+        return { success: true };
+      case 'QUEUE_CLEAR':
+        await this.tabManager.clearQueue();
         return { success: true };
       case 'REQUEST_QUEUE_STATE':
         return { success: true, payload: this.tabManager.getSnapshot() };
@@ -534,11 +606,6 @@ export class BackgroundOrchestrator {
   }
 
   private async handleShortcutCommand(command: string): Promise<void> {
-    // デバッグ用: アラート表示（本番環境では削除可能）
-    if (typeof globalThis !== 'undefined') {
-      console.log(`[Read Aloud Tab] Shortcut command received: ${command}`);
-    }
-
     this.logger.info(`Shortcut command received: ${command}`);
 
     switch (command) {

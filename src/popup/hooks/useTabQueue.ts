@@ -26,6 +26,7 @@ export interface UseTabQueueResult {
   progressByTab: Record<number, number>;
   addTab: (tab: QueueTabInput, options?: CommandOptions) => Promise<void>;
   removeTab: (tabId: number) => Promise<void>;
+  clearQueue: () => Promise<void>;
   reorderTabs: (from: number, to: number) => Promise<void>;
   skipNext: () => Promise<void>;
   skipPrevious: () => Promise<void>;
@@ -208,6 +209,11 @@ export default function useTabQueue(): UseTabQueueResult {
     [sendCommand],
   );
 
+  const clearQueue = useCallback(
+    (): Promise<void> => sendCommand({ type: 'QUEUE_CLEAR' }),
+    [sendCommand],
+  );
+
   const reorderTabs = useCallback(
     (fromIndex: number, toIndex: number): Promise<void> =>
       sendCommand({ type: 'QUEUE_REORDER', payload: { fromIndex, toIndex } }),
@@ -249,6 +255,7 @@ export default function useTabQueue(): UseTabQueueResult {
     progressByTab: progress,
     addTab,
     removeTab,
+    clearQueue,
     reorderTabs,
     skipNext,
     skipPrevious,

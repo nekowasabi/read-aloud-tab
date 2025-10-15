@@ -1,5 +1,5 @@
 import { OpenRouterClient } from '../shared/services/openrouter';
-import { AiSettings, TabInfo, KeepAliveDiagnostics } from '../shared/types';
+import { AiSettings, TabInfo, KeepAliveDiagnostics, STORAGE_KEYS } from '../shared/types';
 import { StorageManager } from '../shared/utils/storage';
 import { QueueStatusPayload, PrefetchStatusSnapshot } from '../shared/messages';
 import { LoggerLike, TabManager } from './tabManager';
@@ -21,7 +21,7 @@ interface AiPrefetcherOptions {
 
 const DEFAULT_SUMMARY_MAX_TOKENS = 480;
 const DEFAULT_TRANSLATION_MAX_TOKENS = 1200;
-const DEFAULT_SETTINGS_TTL = 60_000;
+const DEFAULT_SETTINGS_TTL = 0;
 const STATUS_STORAGE_KEY = 'prefetch_status';
 
 export interface PrefetchStatusBroadcast {
@@ -50,6 +50,7 @@ export class AiPrefetcher {
   private cachedSettingsTimestamp = 0;
   private clientCacheKey: string | null = null;
   private clientInstance: OpenRouterClient | null = null;
+  private storageChangeListener?: (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void;
 
   constructor(options: AiPrefetcherOptions) {
     this.tabManager = options.tabManager;
@@ -67,6 +68,8 @@ export class AiPrefetcher {
       }
     });
     this.storage = options.storage ?? chrome.storage;
+
+    this.setupStorageChangeListener();
   }
 
   initialize(): void {
@@ -121,6 +124,9 @@ export class AiPrefetcher {
     this.scheduler = null;
     this.worker = null;
     this.statusMap.clear();
+    if (this.storageChangeListener && typeof chrome !== 'undefined' && chrome.storage?.onChanged?.removeListener) {
+      chrome.storage.onChanged.removeListener(this.storageChangeListener);
+    }
   }
 
   retry(tabId: number): void {
@@ -132,6 +138,26 @@ export class AiPrefetcher {
       type: 'PREFETCH_STATUS_SYNC',
       payload: this.getStatusSnapshot(),
     });
+  }
+
+  private setupStorageChangeListener(): void {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged?.addListener) {
+      return;
+    }
+
+    this.storageChangeListener = (changes, areaName) => {
+      if (areaName !== 'sync') {
+        return;
+      }
+      if (STORAGE_KEYS.AI_SETTINGS in changes) {
+        this.cachedSettings = null;
+        this.cachedSettingsTimestamp = 0;
+        this.clientInstance = null;
+        this.clientCacheKey = null;
+      }
+    };
+
+    chrome.storage.onChanged.addListener(this.storageChangeListener);
   }
 
   getStatusSnapshot(): PrefetchStatusSnapshot {
@@ -149,9 +175,43 @@ export class AiPrefetcher {
     });
   }
 
+  /**
+   * Check if prefetch processing is complete for a specific tab
+   * Returns true if summary/translation generation is completed or not needed
+   */
+  isPrefetchComplete(tabId: number): boolean {
+    const status = this.statusMap.get(tabId);
+    if (!status) {
+      // No prefetch status means it hasn't started or isn't needed
+      return true;
+    }
+    return status.state === 'completed' || status.state === 'failed';
+  }
+
+  /**
+   * Wait for prefetch completion for a specific tab
+   * Returns a promise that resolves when prefetch is complete or timeout occurs
+   */
+  async waitForPrefetch(tabId: number, timeoutMs: number = 30000): Promise<boolean> {
+    const startTime = Date.now();
+
+    // Poll status every 100ms
+    while (Date.now() - startTime < timeoutMs) {
+      if (this.isPrefetchComplete(tabId)) {
+        const status = this.statusMap.get(tabId);
+        return status?.state === 'completed';
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Timeout
+    this.logger.warn(`[AiPrefetcher] Timeout waiting for prefetch completion: tabId=${tabId}`);
+    return false;
+  }
+
   private async ensureSettings(): Promise<AiSettings> {
     const now = Date.now();
-    if (!this.cachedSettings || now - this.cachedSettingsTimestamp > this.settingsTtlMs) {
+    if (!this.cachedSettings || this.settingsTtlMs === 0 || now - this.cachedSettingsTimestamp > this.settingsTtlMs) {
       this.cachedSettings = await StorageManager.getAiSettings();
       this.cachedSettingsTimestamp = now;
     }
@@ -175,7 +235,7 @@ export class AiPrefetcher {
       return content;
     }
     const client = await this.getClient(settings);
-    const result = await client.summarize(content, this.summaryMaxTokens);
+    const result = await client.summarize(content, this.summaryMaxTokens, settings.summaryPrompt);
     return result.trim();
   }
 
@@ -185,7 +245,7 @@ export class AiPrefetcher {
       return text;
     }
     const client = await this.getClient(settings);
-    const result = await client.translate(text, target, this.translationMaxTokens);
+    const result = await client.translate(text, target, this.translationMaxTokens, settings.translationPrompt);
     return result.trim();
   }
 
@@ -196,6 +256,12 @@ export class AiPrefetcher {
   private handleStatusUpdate(update: PrefetchStatusUpdate): void {
     const entry = { ...update, updatedAt: Date.now() };
     this.statusMap.set(update.tabId, entry);
+
+    // Clear scheduled status when prefetch completes or fails
+    if (update.state === 'completed' || update.state === 'failed') {
+      this.scheduler?.clearScheduled(update.tabId);
+    }
+
     this.persistStatus();
     this.broadcast({
       type: 'PREFETCH_STATUS_SYNC',

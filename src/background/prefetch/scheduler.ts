@@ -38,8 +38,11 @@ export class PrefetchScheduler {
     this.reconcileSchedule(targets.map((tab) => tab.tabId));
 
     targets.forEach((tab, index) => {
-      this.enqueueJob({ tabId: tab.tabId, priority: index });
-      this.scheduled.add(tab.tabId);
+      // Only enqueue if not already scheduled to prevent duplicate jobs
+      if (!this.scheduled.has(tab.tabId)) {
+        this.enqueueJob({ tabId: tab.tabId, priority: index });
+        this.scheduled.add(tab.tabId);
+      }
     });
   }
 
@@ -63,6 +66,13 @@ export class PrefetchScheduler {
     this.cancelPrefetchForTab(tabId);
     this.enqueueJob({ tabId, priority: 0 });
     this.scheduled.add(tabId);
+  }
+
+  /**
+   * Clear scheduled status for a tab (called when prefetch completes)
+   */
+  clearScheduled(tabId: number): void {
+    this.scheduled.delete(tabId);
   }
 
   private reconcileSchedule(nextIds: number[]): void {

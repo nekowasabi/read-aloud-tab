@@ -57,6 +57,7 @@ export type QueueCommandMessage =
   | { type: 'QUEUE_SKIP'; payload: QueueSkipPayload }
   | { type: 'QUEUE_CONTROL'; payload: QueueControlPayload }
   | { type: 'QUEUE_UPDATE_SETTINGS'; payload: QueueSettingsUpdatePayload }
+  | { type: 'QUEUE_CLEAR' }
   | { type: 'REQUEST_QUEUE_STATE' };
 
 export interface QueueStatusPayload {
@@ -140,6 +141,7 @@ export function isQueueCommandMessage(message: unknown): message is QueueCommand
     case 'QUEUE_SKIP':
     case 'QUEUE_CONTROL':
     case 'QUEUE_UPDATE_SETTINGS':
+    case 'QUEUE_CLEAR':
     case 'REQUEST_QUEUE_STATE':
       return true;
     default:

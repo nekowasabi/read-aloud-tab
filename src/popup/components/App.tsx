@@ -29,6 +29,7 @@ export default function App() {
     progressByTab,
     addTab,
     removeTab,
+    clearQueue,
     reorderTabs,
     skipNext,
     skipPrevious,
@@ -52,33 +53,24 @@ export default function App() {
 
     (async () => {
       try {
-        console.log('[Popup Init] Starting initialization...');
-
-        console.log('[Popup Init] Querying active tab...');
         const browserAPI = BrowserAdapter.getInstance();
         const tabs = await browserAPI.tabs.query({ active: true, currentWindow: true });
-        console.log('[Popup Init] Active tab query result:', tabs);
 
         if (mounted && tabs[0]) {
           setActiveTab(tabs[0]);
-          console.log('[Popup Init] Active tab set:', tabs[0].id, tabs[0].url);
         } else {
           console.warn('[Popup Init] No active tab found');
         }
 
-        console.log('[Popup Init] Loading settings...');
         const [savedSettings, devMode] = await Promise.all([
           StorageManager.getSettings(),
           StorageManager.getDeveloperMode(),
         ]);
-        console.log('[Popup Init] Settings loaded:', savedSettings);
 
         if (mounted) {
           setSettings(savedSettings);
           setDeveloperMode(devMode);
         }
-
-        console.log('[Popup Init] Initialization successful');
       } catch (initError) {
         console.error('[Popup Init] Initialization failed:', initError);
         console.error('[Popup Init] Error name:', (initError as Error)?.name);
@@ -108,7 +100,6 @@ export default function App() {
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
       if (areaName === 'sync') {
         if (changes.tts_settings?.newValue) {
-          console.log('[Popup] Settings changed externally:', changes.tts_settings.newValue);
           setSettings(changes.tts_settings.newValue);
         }
         if (changes[STORAGE_KEYS.DEVELOPER_MODE]) {
@@ -430,6 +421,12 @@ export default function App() {
         onSkipPrevious={() => {
           skipPrevious().catch((commandError) => {
             const message = commandError instanceof Error ? commandError.message : '前のタブへの移動に失敗しました';
+            setError(message);
+          });
+        }}
+        onClearQueue={() => {
+          clearQueue().catch((commandError) => {
+            const message = commandError instanceof Error ? commandError.message : 'キューのリセットに失敗しました';
             setError(message);
           });
         }}

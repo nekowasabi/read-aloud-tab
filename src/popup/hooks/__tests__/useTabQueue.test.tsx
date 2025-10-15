@@ -66,19 +66,26 @@ describe('useTabQueue', () => {
     (chrome.runtime.connect as jest.Mock).mockReturnValue(port);
 
     const TestComponent = () => {
-      const { removeTab } = useTabQueue();
+      const { removeTab, clearQueue } = useTabQueue();
       return (
-        <button onClick={() => removeTab(42)}>remove</button>
+        <>
+          <button onClick={() => removeTab(42)}>remove</button>
+          <button onClick={() => clearQueue()}>clear</button>
+        </>
       );
     };
 
     render(<TestComponent />);
 
     fireEvent.click(screen.getByText('remove'));
+    fireEvent.click(screen.getByText('clear'));
 
     expect(port.postMessage).toHaveBeenCalledWith({
       type: 'QUEUE_REMOVE',
       payload: { tabId: 42 },
+    });
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: 'QUEUE_CLEAR',
     });
   });
 });

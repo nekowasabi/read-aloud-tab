@@ -38,6 +38,7 @@ describe('BackgroundOrchestrator', () => {
       removeTab: jest.fn().mockResolvedValue(undefined),
       reorderTabs: jest.fn().mockResolvedValue(undefined),
       skipTab: jest.fn().mockResolvedValue(undefined),
+      clearQueue: jest.fn().mockResolvedValue(undefined),
       processNext: jest.fn().mockResolvedValue(undefined),
       pause: jest.fn(),
       resume: jest.fn(),
@@ -167,6 +168,23 @@ describe('BackgroundOrchestrator', () => {
       expect.objectContaining({ tabId: 123 }),
       expect.objectContaining({ position: undefined, autoStart: undefined }),
     );
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
+  });
+
+  test('QUEUE_CLEAR メッセージでキューをリセットする', async () => {
+    const { stub } = createTabManagerStub();
+    const { chromeLike, emitRuntimeMessage } = createChromeLike();
+    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike });
+    await orchestrator.initialize();
+
+    const message: QueueCommandMessage = {
+      type: 'QUEUE_CLEAR',
+    } as QueueCommandMessage;
+
+    const sendResponse = jest.fn();
+    await emitRuntimeMessage(message, {}, sendResponse);
+
+    expect(stub.clearQueue).toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
   });
 

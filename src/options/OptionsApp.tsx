@@ -20,12 +20,7 @@ const DEFAULT_SETTINGS: TTSSettings = {
   voice: null,
 };
 
-const DEFAULT_AI_SETTINGS: AiSettings = {
-  openRouterApiKey: '',
-  openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
-  enableAiSummary: false,
-  enableAiTranslation: false,
-};
+const DEFAULT_AI_SETTINGS: AiSettings = StorageManager.validateAiSettings({});
 
 export default function OptionsApp() {
   const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
@@ -77,15 +72,17 @@ export default function OptionsApp() {
   };
 
   const handleAiSettingChange = async (key: keyof AiSettings, value: string | boolean) => {
-    const updated: AiSettings = {
+    const updated: Partial<AiSettings> = {
       ...aiSettings,
       [key]: value,
     };
 
-    setAiSettings(updated);
+    const validated = StorageManager.validateAiSettings(updated);
+
+    setAiSettings(validated);
 
     try {
-      await StorageManager.saveAiSettings(updated);
+      await StorageManager.saveAiSettings(validated);
       setMessage('AI設定を保存しました');
     } catch (error) {
       console.error('OptionsApp: failed to save AI settings', error);
@@ -123,8 +120,9 @@ export default function OptionsApp() {
       await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
 
       if (parsed.aiSettings) {
-        await StorageManager.saveAiSettings(parsed.aiSettings);
-        setAiSettings(parsed.aiSettings);
+        const validatedAi = StorageManager.validateAiSettings(parsed.aiSettings);
+        await StorageManager.saveAiSettings(validatedAi);
+        setAiSettings(validatedAi);
       }
 
       setSettings(parsed.settings);
@@ -248,6 +246,18 @@ export default function OptionsApp() {
           </label>
         </div>
         <div className="setting-item">
+          <label htmlFor="summaryPrompt">要約プロンプト</label>
+          <textarea
+            id="summaryPrompt"
+            value={aiSettings.summaryPrompt}
+            onChange={(event) => handleAiSettingChange('summaryPrompt', event.target.value)}
+            rows={4}
+            className="settings-textarea"
+            placeholder="要約結果のトーンや構成を指示するプロンプトを入力"
+          />
+          <p className="setting-hint">例: 箇条書きで 3 行以内の日本語要約を生成するよう指示します。</p>
+        </div>
+        <div className="setting-item">
           <label htmlFor="enableAiTranslation">
             <input
               id="enableAiTranslation"
@@ -258,6 +268,18 @@ export default function OptionsApp() {
             />
             AI翻訳を有効化
           </label>
+        </div>
+        <div className="setting-item">
+          <label htmlFor="translationPrompt">翻訳プロンプト</label>
+          <textarea
+            id="translationPrompt"
+            value={aiSettings.translationPrompt}
+            onChange={(event) => handleAiSettingChange('translationPrompt', event.target.value)}
+            rows={4}
+            className="settings-textarea"
+            placeholder="翻訳スタイルや注意点を指示するプロンプト。{{targetLanguage}} プレースホルダーが利用できます"
+          />
+          <p className="setting-hint">{'例: 「{{targetLanguage}} で自然な文章になるように訳し、機械翻訳の不自然さを避ける」など。'}</p>
         </div>
         <div className="setting-item">
           <label htmlFor="openRouterApiKey">OpenRouter APIキー</label>

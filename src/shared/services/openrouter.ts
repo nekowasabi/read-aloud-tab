@@ -69,14 +69,16 @@ export class OpenRouterClient {
    * @param maxTokens 最大トークン数
    * @returns 要約されたテキスト
    */
-  async summarize(content: string, maxTokens: number): Promise<string> {
+  async summarize(content: string, maxTokens: number, systemPrompt?: string): Promise<string> {
     try {
       const request: OpenRouterRequest = {
         model: this.model,
         messages: [
           {
             role: 'system',
-            content: 'Summarize the following content concisely.',
+            content: (systemPrompt && systemPrompt.trim().length > 0)
+              ? systemPrompt.trim()
+              : 'Summarize the following content concisely.',
           },
           {
             role: 'user',
@@ -110,14 +112,20 @@ export class OpenRouterClient {
    * @param maxTokens 最大トークン数
    * @returns 翻訳されたテキスト
    */
-  async translate(content: string, targetLanguage: string, maxTokens: number): Promise<string> {
+  async translate(content: string, targetLanguage: string, maxTokens: number, systemPrompt?: string): Promise<string> {
     try {
       const request: OpenRouterRequest = {
         model: this.model,
         messages: [
           {
             role: 'system',
-            content: `Translate the following content into ${targetLanguage}. Preserve meaning and important nuances. Respond using only the translated text.`,
+            content: (() => {
+              const fallback = `Translate the following content into ${targetLanguage}. Preserve meaning and important nuances. Respond using only the translated text.`;
+              if (!systemPrompt || systemPrompt.trim().length === 0) {
+                return fallback;
+              }
+              return systemPrompt.replace(/\{\{\s*targetLanguage\s*\}\}/gi, targetLanguage).trim() || fallback;
+            })(),
           },
           {
             role: 'user',

@@ -10,6 +10,10 @@ export interface AiSettings {
   enableAiSummary: boolean;
   /** AI翻訳機能の有効化フラグ */
   enableAiTranslation: boolean;
+  /** 要約用システムプロンプト */
+  summaryPrompt: string;
+  /** 翻訳用システムプロンプト */
+  translationPrompt: string;
 }
 
 /**

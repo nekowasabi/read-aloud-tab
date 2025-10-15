@@ -126,4 +126,28 @@ describe('TabManager performance features', () => {
     },
     10000
   );
+
+  test('prefers translation then summary for playback content', async () => {
+    const playback = createPlaybackStub();
+    const { manager } = await createManager({ playback });
+
+    const tab = createTab(200, 20);
+    tab.translation = 'Translated text';
+    tab.summary = 'Summarized text';
+    await manager.addTab(tab);
+
+    await manager.processNext();
+
+    expect((playback.start as jest.Mock).mock.calls.length).toBe(1);
+    const playbackTab = (playback.start as jest.Mock).mock.calls[0][0];
+    expect(playbackTab.content).toBe('Translated text');
+
+    // Remove translation to ensure summary is used
+    (playback.start as jest.Mock).mockClear();
+    await manager.stop();
+    await manager.onTabUpdated(200, { translation: '' });
+    await manager.processNext();
+    const playbackTabSummary = (playback.start as jest.Mock).mock.calls[0][0];
+    expect(playbackTabSummary.content).toBe('Summarized text');
+  });
 });

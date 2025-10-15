@@ -13,9 +13,6 @@ class ContentScript {
 
     this.setupMessageListener();
     this.isInitialized = true;
-
-    // Content Scriptの準備完了を通知
-    console.log('Read Aloud Tab: Content script initialized');
   }
 
   private setupMessageListener(): void {

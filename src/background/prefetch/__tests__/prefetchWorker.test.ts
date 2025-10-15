@@ -18,6 +18,8 @@ describe('PrefetchWorker', () => {
     openRouterModel: 'model',
     enableAiSummary: true,
     enableAiTranslation: true,
+    summaryPrompt: 'summary',
+    translationPrompt: 'translation',
   } as AiSettings;
 
   const createWorker = () => {

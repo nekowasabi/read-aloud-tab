@@ -372,6 +372,21 @@ export class TabManager {
       return;
     }
 
+    const playbackText = this.selectPlaybackContent(tab);
+    if (!playbackText) {
+      this.logger.warn('TabManager: no playable content available after prefetch', {
+        tabId: tab.tabId,
+        hasContent: Boolean(tab.content),
+        hasSummary: Boolean(tab.summary),
+        hasTranslation: Boolean(tab.translation),
+      });
+      this.queue.status = 'paused';
+      this.queue.currentIndex = targetIndex;
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
     this.queue.currentIndex = targetIndex;
     this.queue.status = 'reading';
     await this.persistQueue();
@@ -381,7 +396,12 @@ export class TabManager {
     this.activePlaybackToken = token;
 
     try {
-      await this.playback.start(tab, this.queue.settings, {
+      const playbackTab: TabInfo = {
+        ...tab,
+        content: playbackText,
+      };
+
+      await this.playback.start(playbackTab, this.queue.settings, {
         onEnd: () => this.handlePlaybackEnd(token),
         onError: (error) => this.handlePlaybackError(token, error, tab.tabId),
         onProgress: (progress) => this.handlePlaybackProgress(token, tab.tabId, progress),
@@ -418,6 +438,24 @@ export class TabManager {
 
   async stop(): Promise<void> {
     await this.stopInternal(true);
+    await this.persistQueue();
+    this.emitStatus();
+  }
+
+  async clearQueue(): Promise<void> {
+    await this.ensureInitialized();
+
+    if (this.queue.tabs.length === 0) {
+      await this.stopInternal(true);
+      this.queue.currentIndex = 0;
+      await this.persistQueue();
+      this.emitStatus();
+      return;
+    }
+
+    await this.stopInternal(true);
+    this.queue.tabs = [];
+    this.queue.currentIndex = 0;
     await this.persistQueue();
     this.emitStatus();
   }
@@ -842,10 +880,8 @@ export class TabManager {
       return false;
     }
 
-    if (tab.content && tab.content.length > 0) {
-      return true;
-    }
-
+    // Always call resolveContent if available, even if content exists
+    // This allows waiting for AI summary/translation before playback
     if (this.resolveContent) {
       try {
         const result = await this.resolveContent(tab);
@@ -869,6 +905,11 @@ export class TabManager {
       } catch (error) {
         this.logError('CONTENT_RESOLVE_FAILED', 'TabManager: content resolver failed', error);
       }
+    }
+
+    // Fallback: if no resolver or resolver failed, check if we have content
+    if (tab.content && tab.content.length > 0) {
+      return true;
     }
 
     this.emitContentRequest(tab.tabId, 'missing');
@@ -898,6 +939,25 @@ export class TabManager {
         tab.translation = undefined;
       }
     }
+  }
+
+  private selectPlaybackContent(tab: TabInfo): string | null {
+    const translation = tab.translation?.trim();
+    if (translation && translation.length > 0) {
+      return translation;
+    }
+
+    const summary = tab.summary?.trim();
+    if (summary && summary.length > 0) {
+      return summary;
+    }
+
+    const content = tab.content?.trim();
+    if (content && content.length > 0) {
+      return content;
+    }
+
+    return null;
   }
 
   private logError(code: string, message: string, detail?: unknown): void {

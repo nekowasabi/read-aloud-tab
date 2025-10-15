@@ -26,6 +26,8 @@ export class StorageManager {
     openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
     enableAiSummary: false,
     enableAiTranslation: false,
+    summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+    translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
   };
 
   private static readonly DEFAULT_DEVELOPER_MODE = false;
@@ -82,7 +84,9 @@ export class StorageManager {
     try {
       const browserAPI = BrowserAdapter.getInstance();
       const result = await browserAPI.storage.sync.get([STORAGE_KEYS.AI_SETTINGS]);
-      return result[STORAGE_KEYS.AI_SETTINGS] || this.DEFAULT_AI_SETTINGS;
+      const settings = result[STORAGE_KEYS.AI_SETTINGS] || {};
+      const normalized = this.validateAiSettings(settings);
+      return normalized;
     } catch (error) {
       console.error('Failed to load AI settings:', error);
       return this.DEFAULT_AI_SETTINGS;
@@ -101,10 +105,16 @@ export class StorageManager {
 
   static validateAiSettings(settings: Partial<AiSettings>): AiSettings {
     return {
-      openRouterApiKey: (settings.openRouterApiKey || this.DEFAULT_AI_SETTINGS.openRouterApiKey).trim(),
-      openRouterModel: settings.openRouterModel || this.DEFAULT_AI_SETTINGS.openRouterModel,
+      openRouterApiKey: (settings.openRouterApiKey ?? this.DEFAULT_AI_SETTINGS.openRouterApiKey).trim(),
+      openRouterModel: (settings.openRouterModel ?? this.DEFAULT_AI_SETTINGS.openRouterModel).trim(),
       enableAiSummary: settings.enableAiSummary ?? this.DEFAULT_AI_SETTINGS.enableAiSummary,
       enableAiTranslation: settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
+      summaryPrompt: typeof settings.summaryPrompt === 'string'
+        ? settings.summaryPrompt.trim()
+        : this.DEFAULT_AI_SETTINGS.summaryPrompt,
+      translationPrompt: typeof settings.translationPrompt === 'string'
+        ? settings.translationPrompt.trim()
+        : this.DEFAULT_AI_SETTINGS.translationPrompt,
     };
   }
 
@@ -280,8 +290,6 @@ export async function removeIgnoredDomain(domain: string): Promise<void> {
  * @returns {Promise<ReadingQueue>} Migrated reading queue
  */
 export async function migrateStorageSchema(oldData: any): Promise<ReadingQueue> {
-  console.log('Migrating storage schema from v1 to v2');
-
   const migratedQueue: ReadingQueue = {
     tabs: [],
     currentIndex: 0,

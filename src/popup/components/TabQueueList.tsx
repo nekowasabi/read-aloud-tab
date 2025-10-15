@@ -27,6 +27,7 @@ export interface TabQueueListProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
+  onClearQueue?: () => void;
   prefetchStatuses?: PrefetchStatusPayload[];
   onRetryPrefetch?: (tabId: number) => void;
 }
@@ -95,6 +96,7 @@ export default function TabQueueList({
   onReorder,
   onSkipNext,
   onSkipPrevious,
+  onClearQueue,
   prefetchStatuses,
   onRetryPrefetch,
 }: TabQueueListProps) {
@@ -161,6 +163,7 @@ export default function TabQueueList({
       actions={[
         { label: '◀ 前へ', onClick: onSkipPrevious, disabled: isQueueEmpty },
         { label: '次へ ▶', onClick: onSkipNext, disabled: isQueueEmpty },
+        ...(onClearQueue ? [{ label: 'リセット', onClick: onClearQueue, disabled: isQueueEmpty }] : []),
       ]}
     >
       <div className="queue-status-chip" aria-live="polite">

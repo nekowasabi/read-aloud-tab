@@ -9,6 +9,14 @@ jest.mock('../../shared/utils/storage', () => ({
     saveSettings: jest.fn(),
     getAiSettings: jest.fn(),
     saveAiSettings: jest.fn(),
+    validateAiSettings: jest.fn((settings) => ({
+      openRouterApiKey: (settings?.openRouterApiKey || '').trim(),
+      openRouterModel: settings?.openRouterModel || 'meta-llama/llama-3.2-1b-instruct',
+      enableAiSummary: settings?.enableAiSummary ?? false,
+      enableAiTranslation: settings?.enableAiTranslation ?? false,
+      summaryPrompt: settings?.summaryPrompt?.trim() || 'default summary prompt',
+      translationPrompt: settings?.translationPrompt?.trim() || 'default translation prompt',
+    })),
   },
   getIgnoredDomains: jest.fn(),
 }));
@@ -22,16 +30,21 @@ jest.mock('../../shared/services/openrouter', () => ({
 const storage = require('../../shared/utils/storage');
 const { OpenRouterClient } = require('../../shared/services/openrouter');
 
+const baseAiSettings = {
+  openRouterApiKey: '',
+  openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
+  enableAiSummary: false,
+  enableAiTranslation: false,
+  summaryPrompt: 'default summary prompt',
+  translationPrompt: 'default translation prompt',
+};
+
 describe('OptionsApp', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (chrome.storage.sync.get as jest.Mock).mockResolvedValue({});
     (chrome.storage.sync.set as jest.Mock).mockResolvedValue(undefined);
-    storage.StorageManager.getAiSettings.mockResolvedValue({
-      openRouterApiKey: '',
-      openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
-      enableAiSummary: false,
-    });
+    storage.StorageManager.getAiSettings.mockResolvedValue(baseAiSettings);
   });
 
   test('初期表示で設定値と無視リストをロードしてフォームに反映する', async () => {
@@ -90,17 +103,22 @@ describe('OptionsApp', () => {
     storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
     storage.getIgnoredDomains.mockResolvedValue([]);
     storage.StorageManager.getAiSettings.mockResolvedValue({
+      ...baseAiSettings,
       openRouterApiKey: 'test-key',
       openRouterModel: 'test-model',
       enableAiSummary: true,
+      summaryPrompt: 'summary prompt',
+      translationPrompt: 'translation prompt',
     });
 
     render(<OptionsApp />);
 
     await waitFor(() => {
       expect(screen.getByLabelText('AI要約を有効化')).toBeInTheDocument();
+      expect(screen.getByLabelText('要約プロンプト')).toBeInTheDocument();
       expect(screen.getByLabelText('OpenRouter APIキー')).toBeInTheDocument();
       expect(screen.getByLabelText('OpenRouterモデル名')).toBeInTheDocument();
+      expect(screen.getByLabelText('翻訳プロンプト')).toBeInTheDocument();
     });
   });
 
@@ -119,15 +137,27 @@ describe('OptionsApp', () => {
         expect.objectContaining({ enableAiSummary: true })
       );
     });
+
+    const summaryPromptInput = await screen.findByLabelText('要約プロンプト');
+    fireEvent.change(summaryPromptInput, { target: { value: '新しい要約プロンプト' } });
+
+    await waitFor(() => {
+      expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ summaryPrompt: '新しい要約プロンプト' })
+      );
+    });
   });
 
   test('エクスポートにAI設定が含まれる（APIキーは除外）', async () => {
     storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
     storage.getIgnoredDomains.mockResolvedValue([]);
     storage.StorageManager.getAiSettings.mockResolvedValue({
+      ...baseAiSettings,
       openRouterApiKey: 'secret-key',
       openRouterModel: 'test-model',
       enableAiSummary: true,
+      summaryPrompt: 'export summary',
+      translationPrompt: 'export translation',
     });
 
     render(<OptionsApp />);
@@ -142,6 +172,8 @@ describe('OptionsApp', () => {
       expect(parsed.aiSettings.openRouterApiKey).toBe(''); // APIキーは除外
       expect(parsed.aiSettings.openRouterModel).toBe('test-model');
       expect(parsed.aiSettings.enableAiSummary).toBe(true);
+      expect(parsed.aiSettings.summaryPrompt).toBe('export summary');
+      expect(parsed.aiSettings.translationPrompt).toBe('export translation');
     });
   });
 
@@ -162,6 +194,9 @@ describe('OptionsApp', () => {
             openRouterApiKey: '',
             openRouterModel: 'imported-model',
             enableAiSummary: true,
+            enableAiTranslation: true,
+            summaryPrompt: 'import summary',
+            translationPrompt: 'import translation',
           },
         }),
       },
@@ -174,6 +209,9 @@ describe('OptionsApp', () => {
         openRouterApiKey: '',
         openRouterModel: 'imported-model',
         enableAiSummary: true,
+        enableAiTranslation: true,
+        summaryPrompt: 'import summary',
+        translationPrompt: 'import translation',
       });
     });
   });
@@ -187,10 +225,9 @@ describe('OptionsApp', () => {
 
     test('接続テストボタンが表示される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
         openRouterApiKey: 'test-key',
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       render(<OptionsApp />);
@@ -201,10 +238,8 @@ describe('OptionsApp', () => {
 
     test('APIキー未入力時は接続テストボタンが無効化される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
-        openRouterApiKey: '',
+        ...baseAiSettings,
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       render(<OptionsApp />);
@@ -215,10 +250,9 @@ describe('OptionsApp', () => {
 
     test('接続テスト成功時に成功メッセージが表示される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
         openRouterApiKey: 'valid-key',
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       const mockTestConnection = jest.fn().mockResolvedValue({
@@ -241,10 +275,9 @@ describe('OptionsApp', () => {
 
     test('接続テスト失敗時にエラーメッセージが表示される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
         openRouterApiKey: 'invalid-key',
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       const mockTestConnection = jest.fn().mockResolvedValue({
@@ -268,10 +301,9 @@ describe('OptionsApp', () => {
 
     test('接続テスト中はボタンが無効化される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
         openRouterApiKey: 'test-key',
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       let resolveTestConnection: (value: any) => void;
@@ -304,10 +336,9 @@ describe('OptionsApp', () => {
 
     test('接続テスト中はローディングメッセージが表示される', async () => {
       storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
         openRouterApiKey: 'test-key',
         openRouterModel: 'test-model',
-        enableAiSummary: false,
-        enableAiTranslation: false,
       });
 
       let resolveTestConnection: (value: any) => void;

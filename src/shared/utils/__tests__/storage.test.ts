@@ -398,6 +398,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'summary',
+        translationPrompt: 'translation',
       };
 
       mockStorage.sync.get.mockResolvedValue({
@@ -421,6 +423,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });
   });
@@ -433,6 +437,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'gpt-4',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'summary',
+        translationPrompt: 'translation',
       };
 
       mockStorage.sync.set.mockResolvedValue(undefined);
@@ -451,6 +457,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'summary',
+        translationPrompt: 'translation',
       };
 
       mockStorage.sync.set.mockRejectedValue(new Error('Storage error'));
@@ -468,6 +476,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'valid-model',
         enableAiSummary: true,
         enableAiTranslation: true,
+        summaryPrompt: 'summary',
+        translationPrompt: 'translation',
       };
 
       const result = StorageManager.validateAiSettings(validSettings);
@@ -487,6 +497,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
         enableAiTranslation: false,
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });
 
@@ -498,6 +510,8 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });
 
@@ -507,11 +521,55 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'test-model',
         enableAiSummary: false,
         enableAiTranslation: false,
+        summaryPrompt: 'summary',
+        translationPrompt: 'translation',
       };
 
       const result = StorageManager.validateAiSettings(settingsWithWhitespace);
 
       expect(result.openRouterApiKey).toBe('test-key');
+    });
+
+    it('should preserve empty string for openRouterModel', () => {
+      const settingsWithEmptyModel: Partial<AiSettings> = {
+        openRouterApiKey: 'test-key',
+        openRouterModel: '',
+        enableAiSummary: true,
+      };
+
+      const result = StorageManager.validateAiSettings(settingsWithEmptyModel);
+
+      expect(result.openRouterModel).toBe('');
+      expect(result.openRouterApiKey).toBe('test-key');
+      expect(result.enableAiSummary).toBe(true);
+    });
+
+    it('should preserve empty string for openRouterApiKey', () => {
+      const settingsWithEmptyKey: Partial<AiSettings> = {
+        openRouterApiKey: '',
+        openRouterModel: 'custom-model',
+        enableAiSummary: false,
+      };
+
+      const result = StorageManager.validateAiSettings(settingsWithEmptyKey);
+
+      expect(result.openRouterApiKey).toBe('');
+      expect(result.openRouterModel).toBe('custom-model');
+      expect(result.enableAiSummary).toBe(false);
+    });
+
+    it('should use defaults only for null/undefined values', () => {
+      const settingsWithNullish: Partial<AiSettings> = {
+        openRouterApiKey: undefined,
+        openRouterModel: null as any,
+        enableAiSummary: true,
+      };
+
+      const result = StorageManager.validateAiSettings(settingsWithNullish);
+
+      expect(result.openRouterApiKey).toBe('');
+      expect(result.openRouterModel).toBe('meta-llama/llama-3.2-1b-instruct');
+      expect(result.enableAiSummary).toBe(true);
     });
   });
 });

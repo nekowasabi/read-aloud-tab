@@ -13,8 +13,6 @@ const initPopup = () => {
 
   const root = ReactDOM.createRoot(rootElement);
   root.render(<App />);
-
-  console.log('Read Aloud Tab popup initialized');
 };
 
 // DOMが読み込まれたら初期化

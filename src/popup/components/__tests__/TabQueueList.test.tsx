@@ -74,6 +74,7 @@ const renderList = (props?: Partial<TabQueueListProps>) => {
     onReorder: jest.fn(),
     onSkipNext: jest.fn(),
     onSkipPrevious: jest.fn(),
+    onClearQueue: jest.fn(),
     prefetchStatuses: [],
     onRetryPrefetch: jest.fn(),
   };
@@ -147,5 +148,12 @@ describe('TabQueueList', () => {
     fireEvent.click(retryButton);
 
     expect(onRetryPrefetch).toHaveBeenCalledWith(1);
+  });
+
+  test('リセットボタンで onClearQueue が呼ばれる', () => {
+    const { props } = renderList();
+    const resetButton = screen.getByRole('button', { name: 'リセット' });
+    fireEvent.click(resetButton);
+    expect(props.onClearQueue).toHaveBeenCalled();
   });
 });

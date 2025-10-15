@@ -1,6 +1,7 @@
 import { AiPrefetcher, PrefetchStatusBroadcast } from '../aiPrefetcher';
 import { TabManager } from '../tabManager';
 import { QueueStatusPayload } from '../../shared/messages';
+import { STORAGE_KEYS } from '../../shared/types';
 
 const baseStatus = (): QueueStatusPayload => ({
   status: 'reading',
@@ -115,5 +116,27 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     expect(broadcastMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'PREFETCH_STATUS_SYNC' })
     );
+  });
+
+  it('invalidates cached settings when AI settings change in storage', () => {
+    const prefetcher = new AiPrefetcher({
+      tabManager: tabManagerMock as TabManager,
+      broadcast: broadcastMock,
+      storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+    });
+
+    prefetcher.initialize();
+
+    // Simulate cached values
+    (prefetcher as any).cachedSettings = { enableAiSummary: false };
+    (prefetcher as any).clientInstance = {};
+    (prefetcher as any).clientCacheKey = 'old';
+
+    const listener = (chrome.storage.onChanged.addListener as jest.Mock).mock.calls[0][0];
+    listener({ [STORAGE_KEYS.AI_SETTINGS]: { newValue: {} } }, 'sync');
+
+    expect((prefetcher as any).cachedSettings).toBeNull();
+    expect((prefetcher as any).clientInstance).toBeNull();
+    expect((prefetcher as any).clientCacheKey).toBeNull();
   });
 });

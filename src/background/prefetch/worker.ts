@@ -1,5 +1,6 @@
 import { AiSettings, TabInfo } from '../../shared/types';
 import { PrefetchJob } from './scheduler';
+import { detectLanguage, isTranslationNeeded } from '../../shared/utils/languageDetector';
 
 interface PrefetchResult {
   tabId: number;
@@ -132,6 +133,10 @@ export class PrefetchWorker {
     this.emitStatus({ tabId: job.tabId, state: 'processing' });
 
     const settings = await this.getSettings();
+    this.logger.info?.(
+      `[PrefetchWorker] Starting job for tab ${job.tabId} with settings: summary=${settings.enableAiSummary}, translation=${settings.enableAiTranslation}, summaryPrompt=${settings.summaryPrompt ? 'custom' : 'default'}, translationPrompt=${settings.translationPrompt ? 'custom' : 'default'}`
+    );
+
     if (!settings || !settings.openRouterApiKey || settings.openRouterApiKey.trim().length === 0) {
       this.logger.warn('PrefetchWorker: missing API key, skipping job');
       this.emitStatus({ tabId: job.tabId, state: 'failed', error: 'API key not configured' });
@@ -165,12 +170,37 @@ export class PrefetchWorker {
     let translation: string | undefined;
 
     if (summaryNeeded) {
+      this.logger.info?.(`[PrefetchWorker] Generating summary for tab ${job.tabId}`);
       summary = (await this.summarize(tab.content)).trim();
+      this.logger.info?.(
+        `[PrefetchWorker] Summary generated for tab ${job.tabId}, length=${summary.length}, preview=${summary.slice(0, 80)}...`
+      );
+    } else {
+      this.logger.info?.(`[PrefetchWorker] Summary disabled for tab ${job.tabId}`);
     }
 
     if (translationNeeded) {
       const translationSource = summary ?? tab.content;
-      translation = (await this.translate(translationSource, this.translationTarget)).trim();
+
+      // Check if translation is actually needed (source language != target language)
+      if (!isTranslationNeeded(translationSource, this.translationTarget)) {
+        const sourceLanguage = detectLanguage(translationSource);
+        this.logger.info?.(
+          `[PrefetchWorker] Translation skipped for tab ${job.tabId}: source (${sourceLanguage}) and target (${this.translationTarget}) are the same language`
+        );
+        // Use source as-is (summary or content)
+        translation = translationSource;
+      } else {
+        this.logger.info?.(
+          `[PrefetchWorker] Generating translation for tab ${job.tabId}, source=${summary ? 'summary' : 'content'}, target=${this.translationTarget}`
+        );
+        translation = (await this.translate(translationSource, this.translationTarget)).trim();
+        this.logger.info?.(
+          `[PrefetchWorker] Translation generated for tab ${job.tabId}, length=${translation.length}, preview=${translation.slice(0, 80)}...`
+        );
+      }
+    } else {
+      this.logger.info?.(`[PrefetchWorker] Translation disabled for tab ${job.tabId}`);
     }
 
     await this.resultStore.save({
@@ -192,6 +222,7 @@ export class PrefetchWorker {
     }
 
     this.emitStatus({ tabId: job.tabId, state: 'completed' });
+    this.logger.info?.(`[PrefetchWorker] Job completed for tab ${job.tabId}`);
     await this.resultStore.prune();
   }
 }
