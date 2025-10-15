@@ -196,6 +196,25 @@ export class BackgroundOrchestrator {
     this.registerCommandListeners();
     this.registerKeepAliveListeners();
     this.registerDeveloperModeListener();
+
+    // Check if playback needs to be resumed after Service Worker restart
+    const snapshot = this.tabManager.getSnapshot();
+    if (snapshot.status === 'reading') {
+      this.logger.info('[BackgroundOrchestrator] Service Worker restarted during playback, attempting to resume...');
+
+      // For Chrome with Offscreen API, ensure offscreen document is available
+      if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+        const hasOffscreen = await this.ensureOffscreenDocument();
+        if (!hasOffscreen) {
+          this.logger.warn('[BackgroundOrchestrator] Cannot resume: offscreen document unavailable');
+          // TabManager will handle state sync in resumePlaybackIfNeeded
+        } else {
+          this.logger.info('[BackgroundOrchestrator] Offscreen document ready for resume');
+        }
+      }
+    }
+
+    // Resume playback if needed
     this.tabManager.resumePlaybackIfNeeded().catch((error) => {
       this.logger.warn('BackgroundOrchestrator: failed to resume playback', error);
     });
@@ -230,6 +249,36 @@ export class BackgroundOrchestrator {
       this.logger.error('[BackgroundOrchestrator] Failed to setup offscreen document', error);
       // Don't throw - allow initialization to continue without offscreen support
       this.logger.warn('[BackgroundOrchestrator] Continuing without offscreen document support');
+    }
+  }
+
+  /**
+   * Ensure Offscreen Document exists, recreating if necessary.
+   * This is critical after Service Worker restarts.
+   * @returns true if offscreen document is available, false otherwise
+   */
+  private async ensureOffscreenDocument(): Promise<boolean> {
+    if (BrowserAdapter.getBrowserType() !== 'chrome' || !BrowserAdapter.isFeatureSupported('offscreen')) {
+      return false;
+    }
+
+    try {
+      const hasOffscreen = await BrowserAdapter.hasOffscreenDocument();
+      if (hasOffscreen) {
+        return true;
+      }
+
+      this.logger.warn('[BackgroundOrchestrator] Offscreen document missing, recreating...');
+      await BrowserAdapter.createOffscreenDocument(
+        'offscreen.html',
+        ['AUDIO_PLAYBACK' as any],
+        'Text-to-speech audio playback'
+      );
+      this.logger.info('[BackgroundOrchestrator] Offscreen document recreated successfully');
+      return true;
+    } catch (error) {
+      this.logger.error('[BackgroundOrchestrator] Failed to ensure offscreen document', error);
+      return false;
     }
   }
 
@@ -402,6 +451,18 @@ export class BackgroundOrchestrator {
       },
       logger: this.logger,
       onKeepAlive: async () => {
+        // Ensure offscreen document exists if we're using Chrome with offscreen
+        if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+          const snapshot = this.tabManager.getSnapshot();
+          if (snapshot.status === 'reading') {
+            const hasOffscreen = await this.ensureOffscreenDocument();
+            if (!hasOffscreen) {
+              this.logger.error('[KeepAlive] Offscreen document missing during reading state, pausing playback');
+              this.tabManager.pause();
+            }
+          }
+        }
+
         const snapshot = this.tabManager.getSnapshot();
         this.broadcastStatus(snapshot);
       },
@@ -668,9 +729,21 @@ export class BackgroundOrchestrator {
   }
 
   /**
-   * Forward TTS control commands to Offscreen Document
+   * Forward TTS control commands to Offscreen Document.
+   * Ensures offscreen document exists before sending commands.
    */
   private async forwardToOffscreen(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
+    // Ensure offscreen document exists (recreate if necessary after Service Worker restart)
+    const hasOffscreen = await this.ensureOffscreenDocument();
+    if (!hasOffscreen) {
+      this.logger.error(`[BackgroundOrchestrator] Cannot forward ${action}: offscreen document unavailable`);
+      // Sync TabManager state to paused if offscreen is unavailable
+      if (action === 'start' || action === 'resume') {
+        this.tabManager.pause();
+      }
+      throw new Error('Offscreen document unavailable');
+    }
+
     let message: OffscreenCommandMessage;
 
     switch (action) {
@@ -702,13 +775,37 @@ export class BackgroundOrchestrator {
         throw new Error(`Unsupported offscreen action: ${action}`);
     }
 
-    try {
-      await this.chrome.runtime.sendMessage(message);
-      this.logger.info(`[BackgroundOrchestrator] Forwarded ${action} command to offscreen`);
-    } catch (error) {
-      this.logger.error(`[BackgroundOrchestrator] Failed to forward ${action} to offscreen`, error);
-      // Don't throw - log error and continue
+    // Retry logic for message sending
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.chrome.runtime.sendMessage(message);
+        this.logger.info(`[BackgroundOrchestrator] Forwarded ${action} command to offscreen (attempt ${attempt})`);
+        return; // Success
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.logger.warn(`[BackgroundOrchestrator] Failed to forward ${action} (attempt ${attempt}/2)`, error);
+
+        if (attempt < 2) {
+          // On first failure, try to recreate offscreen document
+          this.logger.warn('[BackgroundOrchestrator] Attempting to recreate offscreen document...');
+          const recreated = await this.ensureOffscreenDocument();
+          if (!recreated) {
+            break; // No point retrying if recreation failed
+          }
+          // Small delay before retry
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
     }
+
+    // All retries failed
+    this.logger.error(`[BackgroundOrchestrator] Failed to forward ${action} after 2 attempts`, lastError);
+    // Sync TabManager state to paused on failure
+    if (action === 'start' || action === 'resume') {
+      this.tabManager.pause();
+    }
+    throw lastError || new Error(`Failed to forward ${action} to offscreen`);
   }
 
   /**

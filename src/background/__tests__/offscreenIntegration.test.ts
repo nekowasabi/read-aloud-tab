@@ -45,6 +45,21 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
     jest.spyOn(BrowserAdapter, 'isFeatureSupported').mockImplementation((feature: string) => {
       return feature === 'offscreen';
     });
+    // Mock BrowserAdapter methods to use our mocked chrome API
+    jest.spyOn(BrowserAdapter, 'hasOffscreenDocument').mockImplementation(async () => {
+      if (!mockChrome?.runtime?.getContexts) return false;
+      try {
+        const contexts = await mockChrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+        return contexts.length > 0;
+      } catch {
+        return false;
+      }
+    });
+    jest.spyOn(BrowserAdapter, 'createOffscreenDocument').mockImplementation(async (url, reasons, justification) => {
+      if (mockChrome?.offscreen?.createDocument) {
+        await mockChrome.offscreen.createDocument({ url, reasons, justification });
+      }
+    });
 
     // Mock TabManager
     tabManager = {
@@ -54,6 +69,16 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
       addErrorListener: jest.fn().mockReturnValue(() => {}),
       addCommandListener: jest.fn().mockReturnValue(() => {}),
       resumePlaybackIfNeeded: jest.fn().mockResolvedValue(undefined),
+      pause: jest.fn(),
+      getSnapshot: jest.fn().mockReturnValue({
+        status: 'idle',
+        currentIndex: 0,
+        tabs: [],
+        settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+        totalCount: 0,
+        activeTabId: null,
+        updatedAt: Date.now(),
+      }),
     } as any;
   });
 
@@ -142,13 +167,18 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
         payload: { action: 'start' },
       };
 
-      await messageHandler(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      messageHandler(message, {}, sendResponse);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'OFFSCREEN_TTS_START',
         })
       );
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
     });
 
     it('should forward PAUSE command to offscreen document', async () => {
@@ -165,13 +195,18 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
         payload: { action: 'pause' },
       };
 
-      await messageHandler(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      messageHandler(message, {}, sendResponse);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'OFFSCREEN_TTS_PAUSE',
         })
       );
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
     });
 
     it('should forward RESUME command to offscreen document', async () => {
@@ -188,13 +223,18 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
         payload: { action: 'resume' },
       };
 
-      await messageHandler(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      messageHandler(message, {}, sendResponse);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'OFFSCREEN_TTS_RESUME',
         })
       );
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
     });
 
     it('should forward STOP command to offscreen document', async () => {
@@ -211,13 +251,18 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
         payload: { action: 'stop' },
       };
 
-      await messageHandler(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      messageHandler(message, {}, sendResponse);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'OFFSCREEN_TTS_STOP',
         })
       );
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
     });
   });
 
@@ -337,13 +382,19 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
       try {
         messageHandler(message, {}, sendResponse);
         // Wait a bit for async handling
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 150));
       } catch (e) {
         error = e as Error;
       }
 
       expect(error).toBeNull();
-      expect(sendResponse).toHaveBeenCalledWith({ success: true });
+      // Should return error response since offscreen message sending failed
+      expect(sendResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.any(String),
+        })
+      );
     });
   });
 
@@ -373,9 +424,12 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
       const messageHandler = mockRuntime.onMessage.addListener.mock.calls[0][0];
 
       // Rapid sequence of commands
-      await messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'start' } }, {}, jest.fn());
-      await messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'stop' } }, {}, jest.fn());
-      await messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'start' } }, {}, jest.fn());
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'start' } }, {}, jest.fn());
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'stop' } }, {}, jest.fn());
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'start' } }, {}, jest.fn());
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Should have sent multiple messages to offscreen
       expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
