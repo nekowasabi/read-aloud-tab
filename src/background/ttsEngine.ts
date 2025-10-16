@@ -28,6 +28,8 @@ export class TTSEngine implements PlaybackController {
   private currentChunkIndex: number = 0;
   private chunkRetryCount: number = 0;
   private readonly maxChunkRetries: number = 2;
+  private nextUtterance: SpeechSynthesisUtterance | null = null; // Pre-prepared next chunk
+  private isPreparing: boolean = false; // Prevent duplicate preparation
 
   private readonly speech: SpeechSynthesis;
   private readonly createUtteranceFn: (
@@ -87,7 +89,7 @@ export class TTSEngine implements PlaybackController {
     // Japanese reading speed: ~5-6 chars/second at rate 1.0
     // Safe chunk size: 10 seconds × 5 chars/sec = 50 chars
     const chunkConfig: ChunkConfig = {
-      maxChunkSize: 60,  // Conservative for Japanese text (10-12 sec at rate 1.0)
+      maxChunkSize: 80,  // Balanced: reduces chunk count while staying safe (13-16 sec at rate 1.0)
       minChunkSize: 20,  // Avoid too small fragments
     };
 
@@ -378,6 +380,53 @@ export class TTSEngine implements PlaybackController {
     await this.playChunkAt(this.currentChunkIndex);
   }
 
+  /**
+   * Pre-prepare next chunk to minimize transition gaps
+   * Called when current chunk reaches ~80% progress
+   */
+  private async prepareNextChunk(nextChunkIndex: number): Promise<void> {
+    if (this.isPreparing || this.nextUtterance) {
+      // Already preparing or prepared
+      return;
+    }
+
+    if (!this.currentSettings || !this.currentHooks) {
+      return;
+    }
+
+    if (nextChunkIndex < 0 || nextChunkIndex >= this.chunks.length) {
+      // No next chunk available
+      return;
+    }
+
+    this.isPreparing = true;
+
+    try {
+      const nextChunk = this.chunks[nextChunkIndex];
+      const utterance = this.createUtteranceFn(nextChunk.text);
+      utterance.text = nextChunk.text;
+
+      // Pre-apply settings
+      this.applySettings(utterance, this.currentSettings);
+      await this.applyVoice(utterance, this.currentSettings.voice);
+
+      this.nextUtterance = utterance;
+
+      this.logger.info(
+        `[TTSEngine] Pre-prepared next chunk ${nextChunkIndex + 1}/${this.chunks.length}`,
+        {
+          chunkLength: nextChunk.text.length,
+          startOffset: nextChunk.startOffset,
+        },
+      );
+    } catch (error) {
+      this.logger.warn("[TTSEngine] Failed to prepare next chunk", error);
+      this.nextUtterance = null;
+    } finally {
+      this.isPreparing = false;
+    }
+  }
+
   private bindUtteranceEvents(
     utterance: SpeechSynthesisUtterance,
     hooks: PlaybackHooks,
@@ -411,11 +460,39 @@ export class TTSEngine implements PlaybackController {
         if (hooks.onProgress) {
           hooks.onProgress(100);
         }
-        // Move to next chunk instead of completing
-        this.playNextChunk().catch((error) => {
-          this.logger.error("[TTSEngine] Failed to play next chunk", error);
-          hooks.onError(error instanceof Error ? error : new Error(String(error)));
-        });
+
+        // Check if we have pre-prepared next chunk for smooth transition
+        const nextIndex = this.currentChunkIndex + 1;
+        if (nextIndex < this.chunks.length && this.nextUtterance) {
+          // Use pre-prepared utterance for instant transition
+          const preparedUtterance = this.nextUtterance;
+          const nextChunk = this.chunks[nextIndex];
+
+          this.nextUtterance = null; // Clear prepared utterance
+          this.currentChunkIndex = nextIndex;
+          this.currentText = nextChunk.text;
+          this.utterance = preparedUtterance;
+          this.chunkRetryCount = 0; // Reset retry count for new chunk
+
+          this.logger.info(
+            `[TTSEngine] Smooth transition to chunk ${nextIndex + 1}/${this.chunks.length} (pre-prepared)`,
+            {
+              chunkLength: nextChunk.text.length,
+              startOffset: nextChunk.startOffset,
+            },
+          );
+
+          // Bind events for the new chunk
+          this.bindUtteranceEventsForChunk(preparedUtterance, hooks, nextChunk);
+          // Speak immediately (no await needed, minimizes gap)
+          this.speech.speak(preparedUtterance);
+        } else {
+          // Fallback to async playNextChunk if not prepared
+          this.playNextChunk().catch((error) => {
+            this.logger.error("[TTSEngine] Failed to play next chunk", error);
+            hooks.onError(error instanceof Error ? error : new Error(String(error)));
+          });
+        }
       }
     };
 
@@ -469,6 +546,17 @@ export class TTSEngine implements PlaybackController {
         });
 
         this.emitProgress(hooks);
+
+        // Pre-prepare next chunk when current chunk reaches 80% to minimize transition gap
+        const chunkProgress = (event.charIndex / chunk.text.length) * 100;
+        if (chunkProgress >= 80 && !this.nextUtterance && !this.isPreparing) {
+          const nextChunkIndex = this.currentChunkIndex + 1;
+          if (nextChunkIndex < this.chunks.length) {
+            this.prepareNextChunk(nextChunkIndex).catch((error) => {
+              this.logger.warn("[TTSEngine] Failed to prepare next chunk in onboundary", error);
+            });
+          }
+        }
       }
     };
   }
@@ -572,6 +660,8 @@ export class TTSEngine implements PlaybackController {
     this.chunks = [];
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
+    this.nextUtterance = null; // Clear pre-prepared utterance
+    this.isPreparing = false; // Reset preparation flag
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {

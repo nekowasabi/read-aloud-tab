@@ -1,218 +1,201 @@
-# title: 読み上げ機能の完全性確保（チャンク計算と進捗管理の修正）
+# title: TTSチャンク間の音切れ（プツッという音）の完全解消
 
 ## 概要
-- 記事の読み上げが途中で終わる問題と、進捗が早期に100%になり次のタブに切り替わる問題を解決する
-- テキストチャンキングの offset 計算バグを修正し、進捗計算を実際の音声完了と同期させる
+- read-aloudの実装を調査し、Web Speech APIによるチャンク間の完全なギャップレス再生を実現する
 
 ### goal
-- ユーザーが長文記事を読み上げ機能で利用する際、最後まで途切れることなく読み上げが完了する
-- 進捗バーが実際の音声再生と同期し、音声完了前に次のタブに切り替わらない
+- ユーザーが長文を読み上げる際、チャンク切り替え時に音切れ（プツッという音）が一切聞こえない、スムーズで自然な読み上げ体験を提供する
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- textChunker.ts の startOffset 計算バグを修正し、チャンク分割が正確に行われるようにする
-- TTSEngine の進捗計算を修正し、音声再生完了まで100%に到達しないようにする
-- テストを追加して offset 計算と進捗計算の正確性を保証する
-- 実際の長文記事で最後まで読み上げが完了し、適切なタイミングで次のタブに移行することを確認する
+- read-aloud (https://github.com/ken107/read-aloud) と同等の完全なギャップレス音声再生を実現する
+- チャンク切り替え時の音切れを完全に解消する
+- Web Speech APIの15秒タイムアウト制約を守りつつ、最適なチャンクサイズを実現する
 
 ## 実装仕様
 
-### 問題1: textChunker の startOffset 計算バグ
-**src/shared/utils/textChunker.ts:123-124** に startOffset 計算のバグが存在する:
+### read-aloudの調査結果
 
-```typescript
-// 現在のバグコード（間違い）
-currentChunk = sentence;
-currentStartOffset += currentChunk.length;  // 新しいsentenceの長さを足している
-```
-
-このコードでは、**新しいチャンク（sentence）の長さ**を offset に足してしまっており、**前のチャンクの長さ**が考慮されていない。
-
-#### 影響
-1. **offsetのずれ**: 各チャンクの startOffset/endOffset が実際のテキスト位置とずれる
-2. **進捗計算の誤り**: onboundary イベントでの currentPosition 計算が狂う
-3. **読み上げ範囲の不足**: チャンクが元のテキスト全体をカバーしきれず、途中で終わる
-
-#### 修正方針（Option A）
-順序を修正する:
-```typescript
-// 正しいコード
-currentStartOffset += currentChunk.length;  // 先に前のチャンクの長さを足す
-currentChunk = sentence;  // その後、新しいチャンクを開始
-```
-
-#### 具体例
-テキスト: "こんにちは。これはテストです。さようなら。" (45文字)
-maxChunkSize=15 の場合：
-
-**修正前（間違い）:**
-- chunk 0: startOffset=0, endOffset=7, text="こんにちは。"
-- 次の currentStartOffset = 0 + **10** = 10 ← 間違い（sentenceの長さ）
-- chunk 1: startOffset=**10**, endOffset=20 ← ずれている
-
-**修正後（正しい）:**
-- chunk 0: startOffset=0, endOffset=7, text="こんにちは。"
-- 次の currentStartOffset = 0 + **7** = 7 ✓（前のchunkの長さ）
-- chunk 1: startOffset=**7**, endOffset=17 ✓ 正確
-
-### 問題2: 進捗計算の早期100%到達
-**src/background/ttsEngine.ts** の進捗計算において、`onboundary` イベントが音声再生前に発火するため、進捗が実際の音声完了より早く100%に達する問題が存在する。
-
-#### タイムライン
-```
-1. テキスト: "これはテストです。" (最後のチャンク)
-2. onboundary (最後の文字) 発火 → progress = 100% 🚨
-3. UI が「完了」と判断 → 次のタブに切り替え
-4. [2-3秒の遅延]
-5. "です。" の音声再生が完了
-6. onend 発火 → playNextChunk() 呼び出し
-   しかし既にUIは次のタブに移動済み
-```
-
-#### 影響
-1. **音声の途切れ**: 最後の数秒が再生される前に次のタブに切り替わる
-2. **UX の低下**: ユーザーが完全に聞き終わる前に内容が変わる
-3. **進捗の不正確さ**: 進捗バーが実際の再生状態を反映していない
-
-#### 修正方針（Option A）
-進捗を99%でキャップし、`onend` で確実に100%にする:
-
-```typescript
-// calculateProgress() の修正
-private calculateProgress(): number {
-  if (this.totalLength === 0) {
-    return 0;
+#### 成功要因1: 即座のPrefetch
+- **タイミング**: `onstart`イベント時に次のチャンクをprefetch
+- **効果**: チャンク開始直後から次の準備を開始し、十分な準備時間を確保
+- **コード例**:
+  ```javascript
+  utterance.onstart = () => {
+    if (nextText && engine.prefetch != null)
+      engine.prefetch(nextText, options)
   }
-  const ratio = this.currentPosition / this.totalLength;
-  // 99%でキャップ（onend で100%にする）
-  return Math.max(0, Math.min(99, ratio * 100));
-}
+  ```
 
-// bindUtteranceEventsForChunk() の修正
-utterance.onend = () => {
-  if (!this.isPaused) {
-    // 完了時に明示的に100%を通知
-    if (this.currentHooks?.onProgress) {
-      this.currentHooks.onProgress(100);
-    }
-    // その後、次のチャンクへ移動
-    this.playNextChunk().catch(...);
-  }
-};
-```
+#### 成功要因2: RxJS Observableによる宣言的な連鎖
+- イベントドリブンではなく、Observable連鎖で管理
+- `onend` → `cmd$.next({name: "forward"})` → 即座に次を再生
+- `switchMap`や`concatMap`で非同期処理を連鎖
 
-#### 他の選択肢
-- **Option B**: 最後のチャンクのみ95%でキャップ（より正確だが複雑）
-- **Option C**: onboundary の debounce 処理（複雑でメリットが少ない）
+#### 成功要因3: タイミング計算による予測
+- `nextStartTime = Date.now() + 650 / options.rate`
+- チャンク間の遅延を予測計算して管理
+
+#### 成功要因4: Prefetchキャッシュ
+- `prefetchAudio = [utterance, options, url]`
+- 準備済みのUtteranceをキャッシュし、即座に利用可能な状態を維持
+
+### 現在の実装の問題点
+
+#### 問題1: Prefetchタイミングが遅すぎる
+- **現状**: `onboundary`の80%時点で準備開始
+- **問題**: 準備完了までに時間が足りず、`onend`時に未準備の可能性
+- **影響**: フォールバックの非同期処理により音切れ発生
+
+#### 問題2: onend内の処理が重すぎる
+- **現状**: `onend`内で`bindUtteranceEventsForChunk()`を実行 (ttsEngine.ts:486)
+- **問題**: イベントバインディング処理中にギャップ発生
+- **影響**: 数十〜数百ミリ秒の遅延が「プツッ」という音として聞こえる
+
+#### 問題3: イベントバインディングの順序
+- **現状**: `speak()`の直前にイベントをバインド
+- **リスク**: タイミングによってはイベントが失われる可能性
+
+#### 問題4: チャンクサイズが小さい
+- **現状**: 80文字（rate 1.0で13-16秒）
+- **問題**: 切り替え頻度が高く、わずかなギャップでも目立つ
 
 ## 生成AIの学習用コンテキスト
-### 実装対象ファイル
-- src/shared/utils/textChunker.ts
-  - chunkText 関数の startOffset 計算ロジック
+### 実装ファイル
 - src/background/ttsEngine.ts
-  - calculateProgress メソッドの進捗計算上限
-  - bindUtteranceEventsForChunk メソッドの onend ハンドラ
+  - TTSEngineクラス：Web Speech APIを使用した音声合成エンジン
+  - 特に注目: `prepareNextChunk()`, `bindUtteranceEventsForChunk()`, `playChunkAt()`
 
-### テストファイル
-- src/shared/utils/__tests__/textChunker.test.ts
-  - offset 計算の正確性を検証するテスト
-- src/background/__tests__/ttsEngine.test.ts
-  - 進捗が99%でキャップされることを確認
-  - onend で100%になることを確認
-
-### 参照ファイル
-- src/background/tabManager.ts
-  - handlePlaybackProgress: 進捗受信と次タブへの切り替えロジック
-- src/background/offscreen/offscreen.ts
-  - TTSEngine の利用箇所
+### 参考実装
+- https://github.com/ken107/read-aloud
+  - js/speech.js: RxJSベースの状態管理とprefetch機構
+  - js/tts-engines.js: 各種TTSエンジンの実装とprefetchメソッド
 
 ## Process
-### process1 textChunker.ts のバグ修正
-#### sub1 startOffset 計算順序の修正
-@target: src/shared/utils/textChunker.ts
-@ref: なし
-- [x] 123-124行目の順序を修正
-  - `currentStartOffset += currentChunk.length;` を先に実行
-  - その後 `currentChunk = sentence;` を実行
-  - これにより、前のチャンクの長さが正確に offset に反映される
 
-### process2 包括的なテストの追加
-#### sub1 textChunker のユニットテスト作成
-@target: src/shared/utils/__tests__/textChunker.test.ts
-@ref: src/shared/utils/textChunker.ts
-- [x] テストファイルを新規作成
-- [x] offset 計算の正確性を検証
-  - 各チャンクの startOffset/endOffset が連続していることを確認
-  - 全チャンクの endOffset が元のテキスト長と一致することを確認
-- [x] エッジケースのテスト
-  - 空テキスト
-  - 単一チャンク（maxChunkSize 以下）
-  - 複数チャンク（長文）
-  - 境界条件（ちょうど maxChunkSize）
-- [x] チャンクテキストの整合性検証
-  - 全チャンクを結合すると元のテキストになることを確認
+### process1 Prefetchタイミングをonstartに変更
+@target: src/background/ttsEngine.ts
+@ref: https://github.com/ken107/read-aloud/blob/master/js/speech.js
+
+- [ ] `bindUtteranceEventsForChunk()`の`onstart`ハンドラーに次チャンクのprefetch処理を追加
+  - 現在の`onboundary`での80%判定を`onstart`に移動
+  - チャンク開始直後（最初の`onstart`発火時）に次のチャンクを準備開始
+- [ ] `onboundary`の80%判定コード（ttsEngine.ts:523-532）を削除
+- [ ] `onstart`で`prepareNextChunk(this.currentChunkIndex + 1)`を呼び出す
+  - 条件: 次のチャンクが存在し、未準備の場合のみ
+
+### process2 イベントバインディングの事前実行
+@target: src/background/ttsEngine.ts
+
+- [ ] `prepareNextChunk()`メソッドを拡張
+  - Utterance作成・設定適用に加えて、イベントバインディングも事前実行
+  - 新規メソッド`bindPreparedUtteranceEvents()`を作成
+- [ ] 準備済みUtteranceには既にイベントがバインド済みの状態を保持
+  - `nextUtterance`と共に`nextChunk`情報も保持する必要がある
+  - `private nextChunkInfo: {utterance: SpeechSynthesisUtterance, chunk: TextChunk} | null`
+
+### process3 onendハンドラーの最小化
+@target: src/background/ttsEngine.ts
+
+- [ ] `onend`内の処理を最小限に削減
+  ```typescript
+  utterance.onend = () => {
+    if (!this.isPaused && this.nextChunkInfo) {
+      // 状態更新のみ（同期処理）
+      this.currentChunkIndex++;
+      this.utterance = this.nextChunkInfo.utterance;
+      this.currentText = this.nextChunkInfo.chunk.text;
+      const preparedInfo = this.nextChunkInfo;
+      this.nextChunkInfo = null;
+      this.chunkRetryCount = 0;
+
+      // 即座に再生（イベントは既にバインド済み）
+      this.speech.speak(preparedInfo.utterance);
+    } else if (!this.nextChunkInfo) {
+      // フォールバック
+      this.playNextChunk().catch(...);
+    }
+  }
+  ```
+- [ ] 進捗100%通知はprefetch側で処理
+
+### process4 チャンクサイズの最適化
+@target: src/background/ttsEngine.ts
+
+- [ ] `maxChunkSize: 80` → `120` に変更
+  - rate 1.0: 120文字 ÷ 5文字/秒 = 24秒（危険）
+  - rate 1.2: 120文字 ÷ 6文字/秒 = 20秒（危険）
+  - rate 1.5: 120文字 ÷ 7.5文字/秒 = 16秒（許容範囲）
+- [ ] または動的サイズ計算を導入
+  ```typescript
+  const safeReadingTime = 12; // 安全マージン
+  const charsPerSecond = 5;
+  const maxChunkSize = Math.floor(safeReadingTime * charsPerSecond * settings.rate);
+  // rate 1.0 → 60文字
+  // rate 1.5 → 90文字
+  // rate 2.0 → 120文字
+  ```
+
+### process5 準備状態の管理改善
+@target: src/background/ttsEngine.ts
+
+- [ ] `nextUtterance`を`nextChunkInfo`に置き換え
+  ```typescript
+  private nextChunkInfo: {
+    utterance: SpeechSynthesisUtterance;
+    chunk: TextChunk;
+    index: number;
+  } | null = null;
+  ```
+- [ ] `cleanup()`で`nextChunkInfo`をクリア
+- [ ] `pause()`時も`nextChunkInfo`をクリア（再開時に再準備）
 
 ### process10 ユニットテスト
-- process2 で実施済み
 
-### process50 フォローアップ: 進捗計算の修正
-#### sub1 進捗計算の99%キャップ実装
-@target: src/background/ttsEngine.ts
-@ref: なし
-- [ ] calculateProgress() メソッドを修正
-  - 進捗の上限を99%に変更（100% は onend でのみ到達）
-  - 計算ロジック: `Math.min(99, ratio * 100)`
-
-#### sub2 onend での100%進捗通知
-@target: src/background/ttsEngine.ts
-@ref: なし
-- [ ] bindUtteranceEventsForChunk() メソッドの onend ハンドラを修正
-  - playNextChunk() の前に `hooks.onProgress(100)` を呼び出し
-  - 音声完了時に確実に100%を通知してから次のチャンクへ移行
-
-#### sub3 進捗計算のテスト追加
 @target: src/background/__tests__/ttsEngine.test.ts
-@ref: src/background/ttsEngine.ts
-- [ ] 進捗が99%でキャップされることを確認するテストを追加
-- [ ] onend で100%になることを確認するテストを追加
-- [ ] 既存テストが引き続きパスすることを確認
 
-### process60 AI要約の途中切れ問題修正
-#### sub1 maxSummaryTokens の増加
-@target: src/background/tabManager.ts, src/background/aiProcessor.ts
-@ref: なし
-- [x] maxSummaryTokens を 500 → 1500 に増加（3倍）
-  - tabManager.ts (line 128): AiProcessor初期化時の設定
-  - aiProcessor.ts (line 36): デフォルト値の変更
-  - これにより、要約が最後まで完了する十分な長さを確保
+- [ ] `onstart`でのprefetch動作をテスト
+  - 最初のチャンクの`onstart`で2番目のチャンクが準備されることを確認
+- [ ] 準備済みUtteranceでの即座の再生をテスト
+  - `onend`から次の`speak()`までの時間が最小化されることを確認
+- [ ] フォールバック動作のテスト
+  - 準備が間に合わなかった場合の動作確認
+- [ ] 動的チャンクサイズのテスト（実装する場合）
+  - 各rateでのチャンクサイズが適切であることを確認
 
-#### sub2 デフォルトプロンプトの改善
-@target: src/shared/utils/storage.ts
-@ref: なし
-- [x] summaryPrompt の改善 (line 31)
-  - 完全な要約を保証する指示を追加
-  - 構造化された要約フォーマット（キーポイント・詳細・結論）
-  - 最後に必ず結論を含めるよう明示的に指示
+### process50 フォローアップ
 
-#### 問題の詳細
-デバッグログ解析により判明:
-- TTS/チャンキングシステムは完璧に動作（17チャンク全て正常再生）
-- 実際の問題: AI要約が途中で切れている（883文字で"...みたいな。"と終了）
-- 原因: maxSummaryTokens=500 が小さすぎてトークン制限で打ち切られる
-- 影響: ユーザーが記事の全体像を把握できず、読み上げが不自然に終わる
+#### 追加調査: RxJS導入の検討
+- read-aloudのようなObservableベースのアーキテクチャへの移行を検討
+- イベントドリブンからストリーム処理への段階的な移行計画
+- メリット: より宣言的で、タイミング制御が容易
+- デメリット: 大規模なリファクタリングが必要
 
-#### 期待される効果
-- 要約が最後まで完了する（結論を含む完全な要約）
-- ユーザーが記事の全体像を正確に把握できる
-- 読み上げが途中で不自然に終わる問題が解消される
+#### パフォーマンス測定
+- チャンク間のギャップ時間を計測するメトリクス追加
+- `onend`発火から次の`onstart`までの時間をログ出力
+- 目標: 50ms以下（人間が知覚できない範囲）
 
 ### process100 リファクタリング
 
+- [ ] `bindUtteranceEventsForChunk()`を分割
+  - 共通イベント処理
+  - チャンク固有の処理
+- [ ] prefetch関連のロジックを独立したメソッドに抽出
+  - `shouldPrefetchNext()`: prefetchが必要かどうかの判定
+  - `getPrefetchIndex()`: 次のprefetch対象インデックスを取得
+
 ### process200 ドキュメンテーション
-- [x] PLAN.md の作成（本ファイル）
-- [ ] 修正内容をコミットメッセージに記載
-  - process1-2: "fix(textChunker): correct startOffset calculation in chunk splitting"
-  - process50: "fix(tts): cap progress at 99% until audio playback completes"
-  - process60: "fix(ai): increase maxSummaryTokens and improve summary prompt for complete summaries"
+
+- [ ] CLAUDE.mdに音切れ対策の実装方針を追記
+  - Prefetchのタイミング戦略
+  - イベントバインディングのベストプラクティス
+- [ ] ttsEngine.tsのコメントを更新
+  - `prepareNextChunk()`の詳細な説明
+  - `onstart`でのprefetch理由を明記
+- [ ] パフォーマンス特性をドキュメント化
+  - チャンクサイズとrate設定の関係
+  - タイムアウトリスクの説明
+
