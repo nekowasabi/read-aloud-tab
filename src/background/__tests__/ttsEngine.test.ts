@@ -205,4 +205,97 @@ describe('TTSEngine (PlaybackController)', () => {
     const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
     expect(utterance.text).toBe('Original content');
   });
+
+  // process50: 進捗計算の修正テスト
+  describe('進捗計算（process50）', () => {
+    test('onboundaryでの進捗は99%でキャップされる', async () => {
+      const hooks = {
+        onEnd: jest.fn(),
+        onError: jest.fn(),
+        onProgress: jest.fn(),
+      };
+
+      const engine = new TTSEngine();
+      const tab = createTab({ content: 'Hello world test' });
+      await engine.start(tab, defaultSettings, hooks);
+
+      const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+
+      // Simulate boundary at the very end (last character)
+      const lastCharIndex = 'Hello world test'.length - 1;
+      utterance.onboundary?.({ name: 'word', charIndex: lastCharIndex });
+
+      // Progress should be capped at 99%, not 100%
+      expect(hooks.onProgress).toHaveBeenCalled();
+      const lastProgressCall = hooks.onProgress.mock.calls[hooks.onProgress.mock.calls.length - 1][0];
+      expect(lastProgressCall).toBeLessThanOrEqual(99);
+    });
+
+    test('onendで100%進捗が通知される', async () => {
+      const hooks = {
+        onEnd: jest.fn(),
+        onError: jest.fn(),
+        onProgress: jest.fn(),
+      };
+
+      const engine = new TTSEngine();
+      const tab = createTab({ content: 'Short text' });
+      await engine.start(tab, defaultSettings, hooks);
+
+      const utterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[0].value;
+
+      // Clear previous progress calls
+      hooks.onProgress.mockClear();
+
+      // Trigger onend (which should call playNextChunk and then hooks.onEnd)
+      utterance.onend?.();
+
+      // Wait for async completion
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Should have called onProgress with 100 before onEnd
+      expect(hooks.onProgress).toHaveBeenCalledWith(100);
+      expect(hooks.onEnd).toHaveBeenCalled();
+    });
+
+    test('複数チャンクの場合、最後のチャンクのonendで100%進捗が通知される', async () => {
+      const hooks = {
+        onEnd: jest.fn(),
+        onError: jest.fn(),
+        onProgress: jest.fn(),
+      };
+
+      const engine = new TTSEngine();
+      // Create long content that will be split into multiple chunks
+      const longContent = 'A'.repeat(150); // Should create multiple 60-char chunks
+      const tab = createTab({ content: longContent });
+      await engine.start(tab, defaultSettings, hooks);
+
+      // Get first chunk utterance
+      let utteranceCount = (SpeechSynthesisUtterance as jest.Mock).mock.results.length;
+      const firstUtterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[utteranceCount - 1].value;
+
+      // Simulate first chunk completion (will trigger playNextChunk)
+      firstUtterance.onend?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Get second chunk utterance (should be created after first completes)
+      utteranceCount = (SpeechSynthesisUtterance as jest.Mock).mock.results.length;
+      const secondUtterance = (SpeechSynthesisUtterance as jest.Mock).mock.results[utteranceCount - 1].value;
+
+      // Simulate second chunk has more content (simulate boundary event)
+      secondUtterance.onboundary?.({ name: 'word', charIndex: 30 });
+
+      // Clear progress calls before final chunk
+      hooks.onProgress.mockClear();
+
+      // Simulate final chunk completion (will complete all chunks)
+      secondUtterance.onend?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // For the last chunk, should call onProgress(100) before onEnd
+      expect(hooks.onProgress).toHaveBeenCalledWith(100);
+      expect(hooks.onEnd).toHaveBeenCalled();
+    });
+  });
 });

@@ -61,6 +61,16 @@ export class TTSEngine implements PlaybackController {
       throw new Error("No readable content available for the selected tab");
     }
 
+    // Debug logging: content lengths
+    this.logger.info("[TTSEngine] Content analysis", {
+      hasProcessedContent: !!tab.processedContent,
+      processedContentLength: tab.processedContent?.length || 0,
+      originalContentLength: tab.content?.length || 0,
+      selectedLength: textToSpeak.length,
+      textPreview: textToSpeak.substring(0, 50) + "...",
+      textSuffix: "..." + textToSpeak.substring(textToSpeak.length - 50),
+    });
+
     this.stop();
 
     // Store for pause/resume support
@@ -91,8 +101,19 @@ export class TTSEngine implements PlaybackController {
       {
         originalLength: chunkResult.originalLength,
         chunks: chunkResult.totalChunks,
+        totalLength: this.totalLength,
       },
     );
+
+    // Debug logging: chunk details
+    this.chunks.forEach((chunk, index) => {
+      this.logger.info(`[TTSEngine] Chunk ${index}`, {
+        startOffset: chunk.startOffset,
+        endOffset: chunk.endOffset,
+        length: chunk.text.length,
+        textPreview: chunk.text.substring(0, 30) + "...",
+      });
+    });
 
     // Start playing first chunk
     await this.playChunkAt(0);
@@ -386,6 +407,10 @@ export class TTSEngine implements PlaybackController {
     utterance.onend = () => {
       // Don't call hooks.onEnd() if we're paused (Firefox fires onend when cancel() is called)
       if (!this.isPaused) {
+        // Notify 100% progress before moving to next chunk or completing
+        if (hooks.onProgress) {
+          hooks.onProgress(100);
+        }
         // Move to next chunk instead of completing
         this.playNextChunk().catch((error) => {
           this.logger.error("[TTSEngine] Failed to play next chunk", error);
@@ -429,7 +454,20 @@ export class TTSEngine implements PlaybackController {
     utterance.onboundary = (event: any) => {
       if (typeof event?.charIndex === "number") {
         // Calculate position as chunk start offset + char index within chunk
+        const oldPosition = this.currentPosition;
         this.currentPosition = chunk.startOffset + event.charIndex;
+        const progress = this.calculateProgress();
+
+        // Debug logging: track position changes
+        this.logger.info("[TTSEngine] onboundary", {
+          charIndex: event.charIndex,
+          chunkStartOffset: chunk.startOffset,
+          oldPosition,
+          newPosition: this.currentPosition,
+          totalLength: this.totalLength,
+          progress: progress.toFixed(2) + "%",
+        });
+
         this.emitProgress(hooks);
       }
     };
@@ -453,6 +491,10 @@ export class TTSEngine implements PlaybackController {
     utterance.onend = () => {
       // Don't call hooks.onEnd() if we're paused (Firefox fires onend when cancel() is called)
       if (!this.isPaused) {
+        // Notify 100% progress before completing
+        if (hooks.onProgress) {
+          hooks.onProgress(100);
+        }
         this.cleanup();
         hooks.onEnd();
       }
@@ -502,7 +544,22 @@ export class TTSEngine implements PlaybackController {
       return 0;
     }
     const ratio = this.currentPosition / this.totalLength;
-    return Math.max(0, Math.min(100, ratio * 100));
+    const uncapped = ratio * 100;
+    const capped = Math.max(0, Math.min(99, uncapped));
+
+    // Debug logging: show calculation details
+    if (uncapped !== capped) {
+      this.logger.info("[TTSEngine] Progress capped", {
+        currentPosition: this.currentPosition,
+        totalLength: this.totalLength,
+        ratio: ratio.toFixed(4),
+        uncapped: uncapped.toFixed(2) + "%",
+        capped: capped + "%",
+      });
+    }
+
+    // Cap at 99% (onend will send 100%)
+    return capped;
   }
 
   private cleanup(): void {

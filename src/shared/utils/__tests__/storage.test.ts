@@ -444,7 +444,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });
@@ -518,7 +518,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });
@@ -531,7 +531,7 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a concise summary in Japanese with 3-4 bullet points highlighting the key ideas and action items.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
       });
     });

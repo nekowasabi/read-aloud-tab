@@ -33,7 +33,7 @@ export class AiProcessor {
    */
   constructor(options: AiProcessorOptions = {}) {
     this.options = {
-      maxSummaryTokens: options.maxSummaryTokens ?? 500,
+      maxSummaryTokens: options.maxSummaryTokens ?? 1500,
       maxTranslationTokens: options.maxTranslationTokens ?? 2000,
       timeoutMs: options.timeoutMs ?? 30000, // デフォルト30秒
       maxContentLength: options.maxContentLength ?? 5000, // デフォルト5000文字

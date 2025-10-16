@@ -179,7 +179,7 @@ describe('AiProcessor', () => {
       const result = await processor.processContent(mockTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 1500, undefined);
       expect(mockClient.translate).not.toHaveBeenCalled();
       expect(result).toBe(summarizedContent);
     });
@@ -229,7 +229,7 @@ describe('AiProcessor', () => {
       const result = await processor.processContent(mockTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 1500, undefined);
       expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 'Japanese', 2000, undefined);
       expect(result).toBe(translatedContent);
     });
@@ -403,7 +403,7 @@ describe('AiProcessor', () => {
       await processor.processContent(shortTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith(shortContent, 500, undefined);
+      expect(mockClient.summarize).toHaveBeenCalledWith(shortContent, 1500, undefined);
     });
 
     test('カスタム要約プロンプトが使用される', async () => {
@@ -427,7 +427,7 @@ describe('AiProcessor', () => {
       // Assert
       expect(mockClient.summarize).toHaveBeenCalledWith(
         'Original content',
-        500,
+        1500,
         'Custom summary prompt for testing'
       );
       expect(result).toBe(summarizedContent);
@@ -482,7 +482,7 @@ describe('AiProcessor', () => {
       const result = await processor.processContent(mockTab, settings);
 
       // Assert
-      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 500, undefined);
+      expect(mockClient.summarize).toHaveBeenCalledWith('Original content', 1500, undefined);
       expect(mockClient.translate).toHaveBeenCalledWith(summarizedContent, 'Japanese', 2000, undefined);
       expect(result).toBe(translatedContent);
     });

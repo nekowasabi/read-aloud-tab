@@ -125,7 +125,7 @@ export class TabManager {
     this.logger = options.logger || console;
     this.now = options.now || (() => Date.now());
     this.aiProcessor = new AiProcessor({
-      maxSummaryTokens: 500,
+      maxSummaryTokens: 1500,
       maxTranslationTokens: 2000,
     });
   }
