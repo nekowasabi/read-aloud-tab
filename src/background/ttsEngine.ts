@@ -1,6 +1,8 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
+import { Subject, Subscription, of, EMPTY } from 'rxjs';
+import { tap, filter, switchMap, catchError } from 'rxjs/operators';
 
 interface TTSEngineOptions {
   speech?: SpeechSynthesis;
@@ -29,16 +31,9 @@ export class TTSEngine implements PlaybackController {
   private chunkRetryCount: number = 0;
   private readonly maxChunkRetries: number = 2;
 
-  // Pre-prepared next chunk with events already bound
-  private nextChunkInfo: {
-    utterance: SpeechSynthesisUtterance;
-    chunk: TextChunk;
-    index: number;
-  } | null = null;
-  private isPreparing: boolean = false; // Prevent duplicate preparation
-
-  // Overlap queueing flag (process6)
-  private nextChunkQueued: boolean = false;
+  // Observable-based chunk transition (process1-7)
+  private chunkTransition$ = new Subject<'next' | 'complete'>();
+  private subscription: Subscription | null = null;
 
   // Performance measurement (process7)
   private lastChunkEndTime: number = 0;
@@ -137,8 +132,63 @@ export class TTSEngine implements PlaybackController {
       });
     });
 
+    // Setup Observable pipeline for chunk transitions (process3)
+    this.setupChunkTransitionPipeline(hooks);
+
     // Start playing first chunk
     await this.playChunkAt(0);
+  }
+
+  /**
+   * Setup Observable pipeline for gapless chunk transitions
+   *
+   * Read-aloud pattern implementation:
+   * - Minimal onend handler (just emits to Subject)
+   * - Observable chain handles heavy operations
+   * - switchMap prevents race conditions between chunks
+   */
+  private setupChunkTransitionPipeline(hooks: PlaybackHooks): void {
+    this.subscription = this.chunkTransition$.pipe(
+      tap((event) => {
+        if (event === 'next') {
+          this.currentChunkIndex++;
+          this.logger.info(`[TTSEngine] Transitioning to chunk ${this.currentChunkIndex + 1}/${this.chunks.length}`);
+        } else if (event === 'complete') {
+          this.logger.info('[TTSEngine] All chunks completed');
+          this.cleanup();
+          hooks.onEnd();
+        }
+      }),
+      filter((event) => event === 'next'),
+      filter(() => this.currentChunkIndex < this.chunks.length),
+      switchMap(async () => {
+        const chunk = this.chunks[this.currentChunkIndex];
+        const utterance = this.createUtteranceFn(chunk.text);
+        utterance.text = chunk.text;
+
+        // Apply settings and voice
+        this.applySettings(utterance, this.currentSettings!);
+        await this.applyVoice(utterance, this.currentSettings!.voice);
+
+        // Bind events
+        this.bindUtteranceEvents(utterance, hooks, chunk);
+
+        // Update state
+        this.utterance = utterance;
+        this.currentText = chunk.text;
+        this.chunkRetryCount = 0;
+
+        // Immediately speak
+        this.speech.speak(utterance);
+
+        return utterance;
+      }),
+      catchError((error) => {
+        this.logger.error('[TTSEngine] Chunk transition failed', error);
+        hooks.onError(error instanceof Error ? error : new Error(String(error)));
+        return EMPTY;
+      })
+    ).subscribe();
   }
 
   pause(): void {
@@ -161,11 +211,6 @@ export class TTSEngine implements PlaybackController {
       // Firefox fires utterance.onend when cancel() is called, and we need
       // to prevent that onend handler from calling hooks.onEnd()
       this.isPaused = true;
-
-      // Clear any prepared chunk (will re-prepare on resume)
-      this.nextChunkInfo = null;
-      this.isPreparing = false;
-      this.nextChunkQueued = false; // Reset queueing flag (process6)
 
       // Use cancel() instead of pause() for Firefox compatibility
       this.speech.cancel();
@@ -356,32 +401,10 @@ export class TTSEngine implements PlaybackController {
 
     this.applySettings(utterance, this.currentSettings);
     await this.applyVoice(utterance, this.currentSettings.voice);
-    // Use prefetch-enabled event binding (includes onstart prefetch trigger)
-    this.bindUtteranceEventsForPrefetchedChunk(utterance, this.currentHooks, chunk, chunkIndex);
+    // Bind events with Observable-based chunk transition (process2)
+    this.bindUtteranceEvents(utterance, this.currentHooks, chunk);
 
     this.speech.speak(utterance);
-  }
-
-  /**
-   * Play next chunk in the queue
-   * Called automatically when current chunk finishes
-   */
-  private async playNextChunk(): Promise<void> {
-    const nextIndex = this.currentChunkIndex + 1;
-
-    if (nextIndex >= this.chunks.length) {
-      // All chunks completed
-      this.logger.info("[TTSEngine] All chunks completed");
-      if (this.currentHooks) {
-        this.cleanup();
-        this.currentHooks.onEnd();
-      }
-      return;
-    }
-
-    // Reset retry count for next chunk
-    this.chunkRetryCount = 0;
-    await this.playChunkAt(nextIndex);
   }
 
   /**
@@ -407,179 +430,47 @@ export class TTSEngine implements PlaybackController {
   }
 
   /**
-   * Pre-prepare next chunk to minimize transition gaps (PROCESS 2 implementation)
-   *
-   * Called from onstart event when current chunk begins playback.
-   * This method performs all expensive operations ahead of time:
-   * 1. Create utterance
-   * 2. Apply settings (rate, pitch, volume)
-   * 3. Apply voice selection
-   * 4. Bind all event handlers (PROCESS 2)
-   *
-   * By doing all this work during current chunk playback, the onend handler
-   * only needs to update state and call speak() - resulting in minimal gap.
-   *
-   * @param nextChunkIndex - Index of the chunk to prepare
+   * Bind events for chunk-based playback with Observable transition
    */
-  private async prepareNextChunk(nextChunkIndex: number): Promise<void> {
-    if (this.isPreparing || this.nextChunkInfo) {
-      // Already preparing or prepared
-      return;
-    }
-
-    if (!this.currentSettings || !this.currentHooks) {
-      return;
-    }
-
-    if (nextChunkIndex < 0 || nextChunkIndex >= this.chunks.length) {
-      // No next chunk available
-      return;
-    }
-
-    this.isPreparing = true;
-
-    try {
-      const nextChunk = this.chunks[nextChunkIndex];
-      const utterance = this.createUtteranceFn(nextChunk.text);
-      utterance.text = nextChunk.text;
-
-      // Pre-apply settings (expensive operation - do it now, not in onend)
-      this.applySettings(utterance, this.currentSettings);
-      await this.applyVoice(utterance, this.currentSettings.voice);
-
-      // PROCESS 2: Bind events in advance (expensive operation - do it now, not in onend)
-      // This eliminates event binding overhead from the critical onend path
-      // The utterance will be fully ready to play when speak() is called
-      this.bindUtteranceEventsForPrefetchedChunk(utterance, this.currentHooks, nextChunk, nextChunkIndex);
-
-      // Store prepared chunk info for instant retrieval in onend
-      this.nextChunkInfo = {
-        utterance,
-        chunk: nextChunk,
-        index: nextChunkIndex,
-      };
-
-      this.logger.info(
-        `[TTSEngine] Pre-prepared next chunk ${nextChunkIndex + 1}/${this.chunks.length} with events bound`,
-        {
-          chunkLength: nextChunk.text.length,
-          startOffset: nextChunk.startOffset,
-        },
-      );
-    } catch (error) {
-      this.logger.warn("[TTSEngine] Failed to prepare next chunk", error);
-      this.nextChunkInfo = null;
-    } finally {
-      this.isPreparing = false;
-    }
-  }
-
-  /**
-   * Bind events for a prefetched chunk with gapless playback optimization
-   *
-   * This method implements the three key optimizations for eliminating audio gaps:
-   *
-   * PROCESS 1: Prefetch timing moved to onstart
-   * - Triggers prefetch immediately when chunk starts playing (not at 80% boundary)
-   * - Provides maximum preparation time for next chunk
-   *
-   * PROCESS 2: Events are pre-bound during prefetch
-   * - All event handlers are attached to the utterance before it's queued
-   * - Eliminates event binding overhead during chunk transition
-   *
-   * PROCESS 3: Minimal onend processing
-   * - onend only updates state and calls speak() - no heavy operations
-   * - Events already bound, so no bindUtteranceEvents() call needed
-   * - Fallback to async playNextChunk() only when prefetch didn't complete
-   */
-  private bindUtteranceEventsForPrefetchedChunk(
+  private bindUtteranceEvents(
     utterance: SpeechSynthesisUtterance,
     hooks: PlaybackHooks,
-    chunk: TextChunk,
-    chunkIndex: number,
+    chunk: TextChunk
   ): void {
     utterance.onstart = () => {
-      // PROCESS 7: Measure gap time between chunks
+      // Measure gap time between chunks for performance monitoring
       if (this.lastChunkEndTime > 0) {
         const gap = Date.now() - this.lastChunkEndTime;
         this.logger.info(`[TTSEngine] Chunk transition gap: ${gap}ms`);
       }
 
-      // Only reset isPaused if not resuming
+      // Reset pause state
       if (!this.isResuming) {
         this.isPaused = false;
       } else {
         this.isResuming = false;
       }
-
-      // PROCESS 1: Prefetch next chunk immediately on chunk start
-      // This provides maximum time for preparation (full chunk duration)
-      // instead of waiting until 80% progress (onboundary approach)
-      const nextChunkIndex = chunkIndex + 1;
-      if (nextChunkIndex < this.chunks.length && !this.nextChunkInfo && !this.isPreparing) {
-        this.prepareNextChunk(nextChunkIndex).catch((error) => {
-          this.logger.warn("[TTSEngine] Failed to prepare next chunk in prefetched onstart", error);
-        });
-      }
     };
 
     utterance.onend = () => {
+      // Minimal onend handler (read-aloud pattern)
+      // Just record time and emit to Observable - no heavy operations
+      this.lastChunkEndTime = Date.now();
+      if (hooks.onProgress) hooks.onProgress(100);
+
       if (!this.isPaused) {
-        // PROCESS 7: Record chunk end time for gap measurement
-        this.lastChunkEndTime = Date.now();
-
-        if (hooks.onProgress) {
-          hooks.onProgress(100);
-        }
-
-        // PROCESS 6: Check if next chunk was already queued
-        if (this.nextChunkInfo && this.nextChunkQueued) {
-          // Overlap queueing succeeded: next chunk already queued to Web Speech API
-          // Only update state - do NOT call speak() (would cause duplicate playback)
-          this.logger.info(
-            `[TTSEngine] Transition to queued chunk ${this.nextChunkInfo.index + 1}/${this.chunks.length}`,
-          );
-          this.currentChunkIndex = this.nextChunkInfo.index;
-          this.currentText = this.nextChunkInfo.chunk.text;
-          this.utterance = this.nextChunkInfo.utterance;
-          this.nextChunkInfo = null;
-          this.nextChunkQueued = false;
-          this.chunkRetryCount = 0;
-          // speak() is NOT called - already queued!
-        } else if (this.nextChunkInfo && !this.nextChunkQueued) {
-          // Overlap queueing failed (50% not reached): fall back to immediate speak()
-          // Fast path: prefetch completed but not queued yet
-          const preparedInfo = this.nextChunkInfo;
-          this.currentChunkIndex = preparedInfo.index;
-          this.currentText = preparedInfo.chunk.text;
-          this.utterance = preparedInfo.utterance;
-          this.nextChunkInfo = null;
-          this.chunkRetryCount = 0;
-
-          this.logger.info(
-            `[TTSEngine] Instant transition to chunk ${preparedInfo.index + 1}/${this.chunks.length} (not queued, calling speak())`,
-            {
-              chunkLength: preparedInfo.chunk.text.length,
-              startOffset: preparedInfo.chunk.startOffset,
-            },
-          );
-
-          // Immediate speak() with pre-bound events
-          this.speech.speak(preparedInfo.utterance);
+        // Emit to Observable Subject (synchronous)
+        if (this.currentChunkIndex + 1 < this.chunks.length) {
+          this.chunkTransition$.next('next');
         } else {
-          // Complete fallback: prefetch didn't complete in time
-          // Use async playNextChunk() - will have slight gap but maintains correctness
-          this.playNextChunk().catch((error) => {
-            this.logger.error("[TTSEngine] Failed to play next chunk", error);
-            hooks.onError(error instanceof Error ? error : new Error(String(error)));
-          });
+          this.chunkTransition$.next('complete');
         }
       }
     };
 
     utterance.onerror = (event: any) => {
       const errorType = typeof event?.error === "string" ? event.error : "unknown";
-      this.logger.error(`[TTSEngine] Chunk ${chunkIndex} error: ${errorType}`, event);
+      this.logger.error(`[TTSEngine] Chunk ${this.currentChunkIndex} error: ${errorType}`, event);
 
       this.retryCurrentChunk().catch((error) => {
         this.logger.error("[TTSEngine] Retry failed", error);
@@ -610,17 +501,6 @@ export class TTSEngine implements PlaybackController {
         this.currentPosition = chunk.startOffset + event.charIndex;
         const progress = this.calculateProgress();
 
-        // PROCESS 6: Overlap queueing at 50% progress
-        // Queue next chunk to Web Speech API when current chunk reaches 50%
-        // This allows browser to prepare the next chunk while current is playing
-        // Calculate chunk-level progress (not global progress)
-        const chunkProgress = (event.charIndex / chunk.text.length) * 100;
-        if (chunkProgress >= 50 && this.nextChunkInfo && !this.nextChunkQueued) {
-          this.logger.info(`[TTSEngine] Queueing next chunk at ${chunkProgress.toFixed(1)}% chunk progress`);
-          this.speech.speak(this.nextChunkInfo.utterance);
-          this.nextChunkQueued = true;
-        }
-
         this.logger.info("[TTSEngine] onboundary", {
           charIndex: event.charIndex,
           chunkStartOffset: chunk.startOffset,
@@ -628,19 +508,11 @@ export class TTSEngine implements PlaybackController {
           newPosition: this.currentPosition,
           totalLength: this.totalLength,
           progress: progress.toFixed(2) + "%",
-          chunkProgress: chunkProgress.toFixed(1) + "%",
         });
 
         this.emitProgress(hooks);
       }
     };
-  }
-
-  private bindUtteranceEvents(
-    utterance: SpeechSynthesisUtterance,
-    hooks: PlaybackHooks,
-  ): void {
-    this.bindUtteranceEventsWithOffset(utterance, hooks, 0);
   }
 
   private bindUtteranceEventsWithOffset(
@@ -733,6 +605,12 @@ export class TTSEngine implements PlaybackController {
   }
 
   private cleanup(): void {
+    // Unsubscribe from Observable to prevent memory leaks
+    if (this.subscription) {
+      this.subscription.unsubscribe();
+      this.subscription = null;
+    }
+
     this.utterance = null;
     this.isPaused = false;
     this.currentText = "";
@@ -742,10 +620,7 @@ export class TTSEngine implements PlaybackController {
     this.chunks = [];
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
-    this.nextChunkInfo = null; // Clear pre-prepared chunk
-    this.isPreparing = false; // Reset preparation flag
-    this.nextChunkQueued = false; // Reset queueing flag (process6)
-    this.lastChunkEndTime = 0; // Reset performance measurement (process7)
+    this.lastChunkEndTime = 0;
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {

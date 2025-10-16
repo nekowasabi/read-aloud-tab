@@ -268,6 +268,8 @@ cmd$.pipe(
   - 必要な型定義のインポート
 - [ ] `chunkTransition$: Subject<'next' | 'complete'>`フィールドを追加
 - [ ] `subscription: Subscription | null`フィールドを追加（購読管理用）
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process2 onendハンドラーの最小化（read-aloud方式）
 @target: src/background/ttsEngine.ts
@@ -289,6 +291,8 @@ cmd$.pipe(
   };
   ```
 - [ ] 既存の複雑な分岐（キュー済み/未キュー/フォールバック）を削除
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process3 Observable連鎖による次チャンク再生
 @target: src/background/ttsEngine.ts
@@ -336,6 +340,8 @@ cmd$.pipe(
   }
   ```
 - [ ] `start()`メソッドで`setupChunkTransitionPipeline()`を呼び出す
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process4 不要なコードの削除
 @target: src/background/ttsEngine.ts
@@ -346,6 +352,8 @@ cmd$.pipe(
 - [ ] `bindUtteranceEventsForPrefetchedChunk()`メソッドを削除
 - [ ] `onstart`内のprefetch呼び出しを削除
 - [ ] `onboundary`内の50%キューイングロジックを削除
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process5 cleanup処理の更新
 @target: src/background/ttsEngine.ts
@@ -364,6 +372,8 @@ cmd$.pipe(
   }
   ```
 - [ ] `pause()`メソッドでも購読を解除（必要に応じて）
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process6 動的チャンクサイズの保持
 @target: src/background/ttsEngine.ts
@@ -375,6 +385,8 @@ cmd$.pipe(
   const maxChunkSize = Math.floor(safeReadingTime * charsPerSecond * settings.rate);
   ```
 - [ ] これはread-aloudにも存在する有効な最適化
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process7 パフォーマンス計測の保持
 @target: src/background/ttsEngine.ts
@@ -390,6 +402,8 @@ cmd$.pipe(
     // ...
   };
   ```
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process10 ユニットテスト
 
@@ -409,6 +423,8 @@ cmd$.pipe(
   - process6（オーバーラップキューイング）のテストを削除
   - 動的チャンクサイズ（process4）のテストは維持
   - パフォーマンス計測（process7）のテストは維持
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process50 フォローアップ
 
@@ -424,6 +440,8 @@ cmd$.pipe(
 - [ ] read-aloudの他の最適化手法を調査
   - タイミング計算による予測（`nextStartTime = Date.now() + 650 / options.rate`）
   - より高度なObservableパターン
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process100 リファクタリング
 
@@ -435,6 +453,8 @@ cmd$.pipe(
 - [ ] ログ出力の整理
   - Observable連鎖に関連するログを追加
   - 不要になったprefetch関連のログを削除
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
 
 ### process200 ドキュメンテーション
 
@@ -450,3 +470,5 @@ cmd$.pipe(
   - 実装完了後の結果を記録
   - ギャップ時間の測定結果を記録
   - 今後の改善案を記録
+- [ ] 型チェック実施: `npm run typecheck`
+- [ ] テスト実施: `npm test`
