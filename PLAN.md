@@ -1,79 +1,107 @@
-# title: ブラウザ非アクティブ時のキュー切断調査
+# title: textChunker の startOffset 計算バグ修正
 
 ## 概要
-- ポップアップのフォーカス喪失時に発生するキュー切断および TTS 停止の要因を特定し、再発防止のための改善ポイントを整理する。
+- 記事の読み上げが途中で終わってしまう問題を解決する
+- テキストチャンキング時の offset 計算ロジックを修正し、全文が正確に読み上げられるようにする
 
 ### goal
-- 利用者が複数タブを連続読み上げ中にブラウザへフォーカスしなくても再生が継続する課題を明確化し、対応方針の土台を構築する。
+- ユーザーが長文記事を読み上げ機能で利用する際、最後まで途切れることなく読み上げが完了する
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- 切断の直接原因（ポートおよびサービスワーカーのアイドル化）と副次的影響（再生再開時の postMessage 失敗）をドキュメント化し、改善タスクへ繋ぐ。
+- textChunker.ts の startOffset 計算バグを修正し、チャンク分割が正確に行われるようにする
+- テストを追加して offset 計算の正確性を保証する
+- 実際の長文記事で最後まで読み上げが完了することを確認する
 
 ## 実装仕様
-- `useTabQueue` がポート切断時にエラー表示のみで再接続・ `portRef` クリアを行わない点を記録。
-- Manifest V3 サービスワーカーがポップアップ消失後にアイドルとなり、ポート切断とキュー停止を引き起こすフローを明示。
-- `TabManager.initialize` がサービスワーカー再起動後に状態を `idle` へ強制するため連続読み上げが継続しないことを整理。
-- 再生ボタンクリック時に発生する `Attempt to postMessage on disconnected port` の再現手順と原因を明記。
+
+### 問題の詳細
+**src/shared/utils/textChunker.ts:123-124** に startOffset 計算のバグが存在する:
+
+```typescript
+// 現在のバグコード（間違い）
+currentChunk = sentence;
+currentStartOffset += currentChunk.length;  // 新しいsentenceの長さを足している
+```
+
+このコードでは、**新しいチャンク（sentence）の長さ**を offset に足してしまっており、**前のチャンクの長さ**が考慮されていない。
+
+### 影響
+1. **offsetのずれ**: 各チャンクの startOffset/endOffset が実際のテキスト位置とずれる
+2. **進捗計算の誤り**: onboundary イベントでの currentPosition 計算が狂う
+3. **読み上げ範囲の不足**: チャンクが元のテキスト全体をカバーしきれず、途中で終わる
+
+### 修正方針（Option A）
+順序を修正する:
+```typescript
+// 正しいコード
+currentStartOffset += currentChunk.length;  // 先に前のチャンクの長さを足す
+currentChunk = sentence;  // その後、新しいチャンクを開始
+```
+
+### 具体例
+テキスト: "こんにちは。これはテストです。さようなら。" (45文字)
+maxChunkSize=15 の場合：
+
+**修正前（間違い）:**
+- chunk 0: startOffset=0, endOffset=7, text="こんにちは。"
+- 次の currentStartOffset = 0 + **10** = 10 ← 間違い（sentenceの長さ）
+- chunk 1: startOffset=**10**, endOffset=20 ← ずれている
+
+**修正後（正しい）:**
+- chunk 0: startOffset=0, endOffset=7, text="こんにちは。"
+- 次の currentStartOffset = 0 + **7** = 7 ✓（前のchunkの長さ）
+- chunk 1: startOffset=**7**, endOffset=17 ✓ 正確
 
 ## 生成AIの学習用コンテキスト
-### TypeScript
-- src/popup/hooks/useTabQueue.ts
-  - ポート接続と切断ハンドリングの現状実装を参照。
-- src/background/service.ts
-  - BackgroundOrchestrator によるポート管理とサービスワーカーのライフサイクルを確認。
-- src/background/tabManager.ts
-  - 再起動時に `status` を `idle` 化している初期化処理を参照。
-- src/background/offscreen/offscreen.ts
-  - Chrome offscreen ドキュメントが TTS を継続する仕組みを把握。
+### 実装対象ファイル
+- src/shared/utils/textChunker.ts
+  - chunkText 関数の startOffset 計算ロジック
 
-### Documentation
-- src/manifest/manifest.chrome.json
-  - Manifest V3 サービスワーカー構成と offscreen 権限を確認。
+### テストファイル
+- src/shared/utils/__tests__/textChunker.test.ts
+  - offset 計算の正確性を検証するテストを新規作成
+
+### 参照ファイル
+- src/background/ttsEngine.ts
+  - チャンキング機能の利用箇所
+  - offset を使った進捗計算ロジック
 
 ## Process
-### process1 切断挙動の実測と原因整理
-#### sub1 ポップアップ側のポート管理調査
-@target: src/popup/hooks/useTabQueue.ts
-@ref: src/popup/hooks/__tests__/useTabQueue.test.tsx
-- [x] 切断時に `portRef` が null へ戻されず、再接続処理が無い点を確認した。
+### process1 textChunker.ts のバグ修正
+#### sub1 startOffset 計算順序の修正
+@target: src/shared/utils/textChunker.ts
+@ref: なし
+- [x] 123-124行目の順序を修正
+  - `currentStartOffset += currentChunk.length;` を先に実行
+  - その後 `currentChunk = sentence;` を実行
+  - これにより、前のチャンクの長さが正確に offset に反映される
 
-#### sub2 バックグラウンドサービスワーカーの停止条件調査
-@target: src/background/service.ts
-@ref: src/manifest/manifest.chrome.json
-- [x] Manifest V3 サービスワーカーがアイドルで終了し、ポートが切断されるシナリオを整理した。
-
-#### sub3 キュー状態遷移の副作用確認
-@target: src/background/tabManager.ts
-@ref: src/background/ttsEngine.ts
-- [x] サービスワーカー再起動時に `reading` 状態が `idle` へ強制されるため、読み上げが継続しないことを確認した。
-
-#### sub4 再生コマンド送信時の例外調査
-@target: src/popup/components/App.tsx
-@ref: src/shared/messages.ts
-- [x] 切断後に `Attempt to postMessage on disconnected port` が発生する再現と原因を特定した。
+### process2 包括的なテストの追加
+#### sub1 textChunker のユニットテスト作成
+@target: src/shared/utils/__tests__/textChunker.test.ts
+@ref: src/shared/utils/textChunker.ts
+- [x] テストファイルを新規作成
+- [x] offset 計算の正確性を検証
+  - 各チャンクの startOffset/endOffset が連続していることを確認
+  - 全チャンクの endOffset が元のテキスト長と一致することを確認
+- [x] エッジケースのテスト
+  - 空テキスト
+  - 単一チャンク（maxChunkSize 以下）
+  - 複数チャンク（長文）
+  - 境界条件（ちょうど maxChunkSize）
+- [x] チャンクテキストの整合性検証
+  - 全チャンクを結合すると元のテキストになることを確認
 
 ### process10 ユニットテスト
-- [ ] 改善実装後に追加するテストケースを検討（現時点では調査のみ）。
+- process2 で実施済み
 
 ### process50 フォローアップ
-- [x] keep-alive 戦略（alarms/ハートビート）の設計とタスク化。
-  - Chrome Manifest V3 では service worker をイベント駆動で起こす必要があるため、読み上げが続く間だけ `chrome.alarms` を利用したハートビートを維持する。`BackgroundOrchestrator` のステータスリスナーで `reading` → heartbeat start、`idle`/`paused` → heartbeat stop をトリガし、`chrome.alarms.onAlarm` では no-op メッセージを `tabManager` に送ってイベントループをキープする。
-  - Offscreen Document が存在する場合は補助的に `chrome.runtime.connect` を用いた長寿命ポートを確立し、heartbeat が途切れた際に `chrome.runtime.Port` 経由で `PING` を送る fallback を設計する（Firefox では alarm のみ動作）。
-  - 実装タスク: 1) `src/background/keepAlive.ts` に heartbeat 管理モジュールを新設、2) `BackgroundOrchestrator.initialize` でキュー状態イベントに紐づけ、3) `src/background/index.ts` で `chrome.alarms.onAlarm` を購読し `BrowserAdapter` 経由の no-op メッセージを発火、4) e2e 的に queue resume/stop で alarm が正しく作成・破棄されることを Jest モックで検証。
-- [x] `useTabQueue` 再接続および `portRef` リセットロジックの実装検討。
-  - `port.onDisconnect` で `portRef.current` を null へ戻し、即時 UI 状態更新と再接続バックオフ（例: 500ms, 1s, 2s）を走らせる。バックオフは unmount 時にクリアできるように `retryTimerRef` を追加。
-  - `isConnected`/`error` ステートを `CONNECTING` フラグで拡張し、UI 側でスピナー表示と「再接続中」を出す余地を確保。`REQUEST_QUEUE_STATE` の初期送信は接続確立後に `port.postMessage` できるよう effect を分離。
-  - 実装タスク: 1) `useTabQueue` に再接続 effect を導入、2) `chrome.runtime.lastError` の内容を `error` に反映、3) 切断後に `QUEUE_STATUS_UPDATE` を受けた際の冪等性テストを `useTabQueue.test.tsx` に追加。
-- [x] `TabManager` 再起動後の状態復元機構の設計評価。
-  - 現状 `initialize` で `reading` を `idle` に戻しているため、`queue.statusPersisted` のようなフラグを `StorageManager` に保存し、service worker 再起動時に「前回 `reading` 中だったか」「現在のタブと progress」があれば自動 `resume` を試行する。復元が失敗した場合のみ `idle` へフォールバックしてエラーを通知。
-  - `activePlaybackToken` を永続化する代わりに `PlaybackController` へ `resumeFrom(tabId, progress)` API を追加する検討。progress が無いブラウザでも `SpeechSynthesisUtterance` を先頭から読み直す fallback を設ける。
-  - 実装タスク: 1) `TabManager.persistQueue` で `status`/`currentIndex`/`progressByTab` を保存、2) `initialize` 時に復元フローを追加し `BackgroundOrchestrator` から `resumePlaybackIfNeeded` を呼び出す、3) 復元テストを `src/background/__tests__/tabManager.test.ts` に追加して `reading` → restart → resume をカバー。
 
 ### process100 リファクタリング
-- [ ] 改善実装時にポート管理・状態管理を共通化する余地を検討。
 
 ### process200 ドキュメンテーション
-- [x] 調査結果を PLAN.md に反映した。
+- [x] PLAN.md の作成（本ファイル）
+- [ ] 修正内容をコミットメッセージに記載

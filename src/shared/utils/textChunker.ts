@@ -120,8 +120,8 @@ export function chunkText(text: string, config: ChunkConfig = {}): ChunkResult {
       });
 
       // Start new chunk with current sentence
-      currentChunk = sentence;
       currentStartOffset += currentChunk.length;
+      currentChunk = sentence;
     } else {
       // Add sentence to current chunk
       currentChunk = potentialChunk;
