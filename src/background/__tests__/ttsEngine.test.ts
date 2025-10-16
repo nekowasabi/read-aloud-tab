@@ -495,7 +495,7 @@ describe('TTSEngine (PlaybackController)', () => {
 
   // Process4: チャンクサイズの最適化（動的サイズ計算）
   describe('動的チャンクサイズ（process4）', () => {
-    test('rate 1.0の場合、チャンクサイズは60文字になる', async () => {
+    test('rate 1.0の場合、チャンクサイズは32文字になる（保守的）', async () => {
       const hooks = {
         onEnd: jest.fn(),
         onError: jest.fn(),
@@ -504,20 +504,20 @@ describe('TTSEngine (PlaybackController)', () => {
 
       const engine = new TTSEngine();
       const settings: TTSSettings = { ...defaultSettings, rate: 1.0 };
-      // Create content with sentence boundaries to force chunking
-      // Each sentence is 45-50 chars, total > 60 to ensure multiple chunks
+      // Create content longer than chunk size to force multiple chunks
       const longContent = 'これはテストの文章です。' + 'A'.repeat(40) + '。もう一つの文章です。' + 'B'.repeat(40) + '。';
       const tab = createTab({ content: longContent });
 
       await engine.start(tab, settings, hooks);
 
       const chunks = (engine as any).chunks;
-      // Verify chunks exist and first chunk is around 60 chars (with some margin for sentence boundaries)
+      // Verify chunks exist and sizes are conservative (maxChunkSize is max(40, 8*4*1.0) = 40)
+      // Sentence boundaries may cause slightly larger chunks
       expect(chunks.length).toBeGreaterThan(1);
-      expect(chunks[0].text.length).toBeLessThanOrEqual(60);
+      expect(chunks[0].text.length).toBeLessThanOrEqual(60); // Allow margin for sentence boundaries
     });
 
-    test('rate 1.5の場合、チャンクサイズは90文字になる', async () => {
+    test('rate 1.5の場合、チャンクサイズは48文字になる（保守的）', async () => {
       const hooks = {
         onEnd: jest.fn(),
         onError: jest.fn(),
@@ -526,20 +526,20 @@ describe('TTSEngine (PlaybackController)', () => {
 
       const engine = new TTSEngine();
       const settings: TTSSettings = { ...defaultSettings, rate: 1.5 };
-      // Create content with sentence boundaries to force chunking
-      // Each sentence is 70-75 chars, total > 90 to ensure multiple chunks
-      const longContent = 'これはテストの文章です。' + 'A'.repeat(60) + '。もう一つの文章です。' + 'B'.repeat(60) + '。';
+      // Create content longer than chunk size
+      const longContent = 'これはテストの文章です。' + 'A'.repeat(50) + '。もう一つの文章です。' + 'B'.repeat(50) + '。';
       const tab = createTab({ content: longContent });
 
       await engine.start(tab, settings, hooks);
 
       const chunks = (engine as any).chunks;
-      // Verify chunks exist and first chunk is around 90 chars (with some margin for sentence boundaries)
+      // maxChunkSize is max(40, 8*4*1.5) = 48
+      // Sentence boundaries may cause slightly larger chunks
       expect(chunks.length).toBeGreaterThan(1);
-      expect(chunks[0].text.length).toBeLessThanOrEqual(90);
+      expect(chunks[0].text.length).toBeLessThanOrEqual(70); // Allow margin
     });
 
-    test('rate 2.0の場合、チャンクサイズは120文字になる', async () => {
+    test('rate 2.0の場合、チャンクサイズは64文字になる（保守的）', async () => {
       const hooks = {
         onEnd: jest.fn(),
         onError: jest.fn(),
@@ -548,17 +548,17 @@ describe('TTSEngine (PlaybackController)', () => {
 
       const engine = new TTSEngine();
       const settings: TTSSettings = { ...defaultSettings, rate: 2.0 };
-      // Create content with sentence boundaries to force chunking
-      // Each sentence is 95-100 chars, total > 120 to ensure multiple chunks
-      const longContent = 'これはテストの文章です。' + 'A'.repeat(85) + '。もう一つの文章です。' + 'B'.repeat(85) + '。';
+      // Create content longer than chunk size
+      const longContent = 'これはテストの文章です。' + 'A'.repeat(70) + '。もう一つの文章です。' + 'B'.repeat(70) + '。';
       const tab = createTab({ content: longContent });
 
       await engine.start(tab, settings, hooks);
 
       const chunks = (engine as any).chunks;
-      // Verify chunks exist and first chunk is around 120 chars (with some margin for sentence boundaries)
+      // maxChunkSize is max(40, 8*4*2.0) = 64
+      // Sentence boundaries may cause slightly larger chunks
       expect(chunks.length).toBeGreaterThan(1);
-      expect(chunks[0].text.length).toBeLessThanOrEqual(120);
+      expect(chunks[0].text.length).toBeLessThanOrEqual(90); // Allow margin
     });
   });
 

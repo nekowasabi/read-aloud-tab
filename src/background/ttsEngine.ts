@@ -1,8 +1,8 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
-import { Subject, Subscription, of, EMPTY } from 'rxjs';
-import { tap, filter, switchMap, catchError } from 'rxjs/operators';
+import { Subject, Subscription, of, EMPTY, from } from 'rxjs';
+import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
 
 interface TTSEngineOptions {
   speech?: SpeechSynthesis;
@@ -93,15 +93,18 @@ export class TTSEngine implements PlaybackController {
 
     // Split text into chunks to avoid Web Speech API limitations
     // Web Speech API has a ~15 second timeout
-    // Japanese reading speed: ~5 chars/second at rate 1.0
-    // Dynamic chunk size based on rate to stay within safe timeout window
-    const safeReadingTime = 12; // Safe margin (seconds) before 15s timeout
-    const charsPerSecond = 5; // Base reading speed at rate 1.0
+    // Japanese reading speed varies significantly:
+    // - Hiragana/Katakana: faster
+    // - Kanji: slower
+    // - Punctuation: adds pauses
+    // Using conservative estimates to ensure we stay well under 15s
+    const safeReadingTime = 8; // Conservative margin (seconds) before 15s timeout
+    const charsPerSecond = 4; // Conservative reading speed considering Kanji and punctuation
     const maxChunkSize = Math.floor(safeReadingTime * charsPerSecond * settings.rate);
-    // Examples:
-    // rate 1.0 → 60 chars (12s reading time)
-    // rate 1.5 → 90 chars (12s reading time)
-    // rate 2.0 → 120 chars (12s reading time)
+    // Examples (more conservative):
+    // rate 1.0 → 32 chars (~8s reading time)
+    // rate 1.5 → 48 chars (~8s reading time)
+    // rate 2.0 → 64 chars (~8s reading time)
 
     const chunkConfig: ChunkConfig = {
       maxChunkSize: Math.max(40, maxChunkSize),  // Minimum 40 chars even at low rates
@@ -161,27 +164,30 @@ export class TTSEngine implements PlaybackController {
       }),
       filter((event) => event === 'next'),
       filter(() => this.currentChunkIndex < this.chunks.length),
-      switchMap(async () => {
+      switchMap(() => {
         const chunk = this.chunks[this.currentChunkIndex];
         const utterance = this.createUtteranceFn(chunk.text);
         utterance.text = chunk.text;
 
-        // Apply settings and voice
+        // Apply settings
         this.applySettings(utterance, this.currentSettings!);
-        await this.applyVoice(utterance, this.currentSettings!.voice);
 
-        // Bind events
-        this.bindUtteranceEvents(utterance, hooks, chunk);
+        // Convert async applyVoice to Observable
+        return from(this.applyVoice(utterance, this.currentSettings!.voice)).pipe(
+          tap(() => {
+            // Bind events
+            this.bindUtteranceEvents(utterance, hooks, chunk);
 
-        // Update state
-        this.utterance = utterance;
-        this.currentText = chunk.text;
-        this.chunkRetryCount = 0;
+            // Update state
+            this.utterance = utterance;
+            this.currentText = chunk.text;
+            this.chunkRetryCount = 0;
 
-        // Immediately speak
-        this.speech.speak(utterance);
-
-        return utterance;
+            // Immediately speak
+            this.speech.speak(utterance);
+          }),
+          map(() => utterance)
+        );
       }),
       catchError((error) => {
         this.logger.error('[TTSEngine] Chunk transition failed', error);
@@ -438,9 +444,13 @@ export class TTSEngine implements PlaybackController {
     chunk: TextChunk
   ): void {
     utterance.onstart = () => {
+      // Record chunk start time for duration measurement
+      const chunkStartTime = Date.now();
+      (utterance as any)._chunkStartTime = chunkStartTime;
+
       // Measure gap time between chunks for performance monitoring
       if (this.lastChunkEndTime > 0) {
-        const gap = Date.now() - this.lastChunkEndTime;
+        const gap = chunkStartTime - this.lastChunkEndTime;
         this.logger.info(`[TTSEngine] Chunk transition gap: ${gap}ms`);
       }
 
@@ -453,16 +463,28 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onend = () => {
+      // Measure actual chunk duration
+      const chunkStartTime = (utterance as any)._chunkStartTime;
+      if (chunkStartTime) {
+        const actualDuration = Date.now() - chunkStartTime;
+        const charsPerSecond = (chunk.text.length / actualDuration) * 1000;
+        this.logger.info(
+          `[TTSEngine] Chunk ${this.currentChunkIndex + 1} completed: ${actualDuration}ms for ${chunk.text.length} chars (${charsPerSecond.toFixed(2)} chars/sec)`
+        );
+      }
+
       // Minimal onend handler (read-aloud pattern)
       // Just record time and emit to Observable - no heavy operations
       this.lastChunkEndTime = Date.now();
-      if (hooks.onProgress) hooks.onProgress(100);
 
       if (!this.isPaused) {
         // Emit to Observable Subject (synchronous)
         if (this.currentChunkIndex + 1 < this.chunks.length) {
+          // More chunks to go - don't send 100% progress yet
           this.chunkTransition$.next('next');
         } else {
+          // Last chunk - send 100% progress before completion
+          if (hooks.onProgress) hooks.onProgress(100);
           this.chunkTransition$.next('complete');
         }
       }
@@ -470,6 +492,14 @@ export class TTSEngine implements PlaybackController {
 
     utterance.onerror = (event: any) => {
       const errorType = typeof event?.error === "string" ? event.error : "unknown";
+
+      // Log timeout errors specially (likely 15s timeout)
+      if (errorType === "interrupted" || errorType === "network") {
+        this.logger.warn(
+          `[TTSEngine] Possible timeout error (15s limit): ${errorType} for chunk ${this.currentChunkIndex + 1} (${chunk.text.length} chars)`
+        );
+      }
+
       this.logger.error(`[TTSEngine] Chunk ${this.currentChunkIndex} error: ${errorType}`, event);
 
       this.retryCurrentChunk().catch((error) => {
