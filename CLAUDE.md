@@ -408,3 +408,4 @@ interface TTSStatus {
 - Firefox WebExtensionsではまだbackground scriptが使用可能だが、将来的な互換性のため同じアーキテクチャを採用
 - Web Speech APIの音声はブラウザ/OSに依存するため、利用可能な音声リストの動的取得が必要
 - OpenRouter APIのレート制限に注意（要約リクエストのキューイングとリトライ機構の実装）
+- 読み上げ時のチャンクは15秒の制限があるため、読み上げ速度など考慮する必要がある
