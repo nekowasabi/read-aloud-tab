@@ -34,7 +34,7 @@ describe('Type Definitions', () => {
     });
 
     it('should support all QueueStatus values', () => {
-      const statuses: QueueStatus[] = ['idle', 'reading', 'paused', 'error'];
+      const statuses: QueueStatus[] = ['idle', 'reading', 'paused', 'error', 'processing'];
 
       statuses.forEach(status => {
         const queue: ReadingQueue = {

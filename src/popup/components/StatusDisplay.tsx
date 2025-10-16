@@ -64,6 +64,12 @@ export default function StatusDisplay({
             <div className="progress-text">{Math.round(progress)}%</div>
           </div>
         )}
+
+        {status === 'processing' && isConnected && (
+          <div className="progress-section">
+            <div className="spinner-small"></div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -85,6 +91,8 @@ function getStatusText(status: QueueStatus, connectionState: TabQueueConnectionS
       return '一時停止中';
     case 'error':
       return 'エラー';
+    case 'processing':
+      return '処理中...';
     default:
       return '待機中';
   }
@@ -101,6 +109,8 @@ function getStatusIcon(status: QueueStatus, connectionState: TabQueueConnectionS
       return '⏸️';
     case 'error':
       return '❌';
+    case 'processing':
+      return '⏳';
     default:
       return '⭕';
   }

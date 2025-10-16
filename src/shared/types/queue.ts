@@ -1,7 +1,7 @@
 import { TabInfo } from './tab';
 import { TTSSettings } from './tts';
 
-export type QueueStatus = 'idle' | 'reading' | 'paused' | 'error';
+export type QueueStatus = 'idle' | 'reading' | 'paused' | 'error' | 'processing';
 
 export interface ReadingQueue {
   tabs: TabInfo[];

@@ -655,17 +655,21 @@ export class BackgroundOrchestrator {
     });
   }
 
-  private async ensureActiveTabInQueue(snapshot?: QueueStatusPayload): Promise<boolean> {
+  /**
+   * Ensure an active tab exists in the queue.
+   * @returns The tabId of the newly added tab, or null if no tab was added
+   */
+  private async ensureActiveTabInQueue(snapshot?: QueueStatusPayload): Promise<number | null> {
     const queueSnapshot = snapshot ?? this.tabManager.getSnapshot();
 
     // 既に読み上げ対象のタブが存在する場合は何もしない
     const hasReadableTabs = queueSnapshot.tabs.some((tab) => !tab.isIgnored);
     if (hasReadableTabs) {
-      return false;
+      return null;
     }
 
     if (queueSnapshot.totalCount > 0) {
-      return false;
+      return null;
     }
 
     try {
@@ -675,12 +679,14 @@ export class BackgroundOrchestrator {
 
       if (!activeTab || !activeTab.id || !activeTab.url) {
         this.logger.warn('BackgroundOrchestrator: no active tab found');
-        return false;
+        return null;
       }
+
+      const tabId = activeTab.id;
 
       // タブ情報を作成（コンテンツは後で取得）
       const tab: TabInfo = {
-        tabId: activeTab.id,
+        tabId,
         url: activeTab.url,
         title: activeTab.title || '',
         isIgnored: false,
@@ -693,27 +699,91 @@ export class BackgroundOrchestrator {
         autoStart: false, // processNext()で手動で開始する
       });
 
-      this.logger.info('BackgroundOrchestrator: added active tab to queue', { tabId: activeTab.id, url: activeTab.url });
-      return true;
+      this.logger.info('BackgroundOrchestrator: added active tab to queue', { tabId, url: activeTab.url });
+      return tabId;
     } catch (error) {
       this.logger.error('BackgroundOrchestrator: failed to add active tab to queue', error);
-      return false;
+      return null;
     }
   }
 
+  /**
+   * Wait for tab content to be extracted with a timeout.
+   * @param tabId - The tab ID to wait for
+   * @param timeoutMs - Timeout in milliseconds (default: 5000ms)
+   * @returns true if content was extracted successfully, false if timeout
+   */
+  private async waitForTabContent(tabId: number, timeoutMs: number = 5000): Promise<boolean> {
+    const startTime = Date.now();
+
+    this.logger.info(`[BackgroundOrchestrator] Waiting for content extraction for tab ${tabId}...`);
+
+    // Poll for content with exponential backoff
+    let delay = 100; // Start with 100ms
+    while (Date.now() - startTime < timeoutMs) {
+      const tab = this.tabManager.getTabById(tabId);
+
+      if (tab && tab.content && tab.content.trim().length > 0) {
+        this.logger.info(`[BackgroundOrchestrator] Content extracted for tab ${tabId} after ${Date.now() - startTime}ms`);
+        return true;
+      }
+
+      // Wait with exponential backoff (max 500ms)
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, 500);
+    }
+
+    this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${tabId} after ${timeoutMs}ms`);
+    return false;
+  }
+
   private async handleControlCommand(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
-    // For Chrome with Offscreen API, delegate TTS control to offscreen document
+    // For Chrome with Offscreen API, handle tab preparation before forwarding
     if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+      // For 'start' action, ensure tab is ready before forwarding
+      if (action === 'start') {
+        const addedTabId = await this.ensureActiveTabInQueue();
+
+        // If a new tab was added, wait for content extraction
+        if (addedTabId !== null) {
+          this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
+
+          const contentReady = await this.waitForTabContent(addedTabId);
+
+          if (!contentReady) {
+            this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
+            // Don't proceed - let onTabUpdated handle auto-resume
+            return;
+          }
+        }
+      }
+
+      // Forward to offscreen document
       await this.forwardToOffscreen(action);
       return;
     }
 
     // For Firefox or Chrome without offscreen, use direct TTS control
     switch (action) {
-      case 'start':
-        await this.ensureActiveTabInQueue();
+      case 'start': {
+        const addedTabId = await this.ensureActiveTabInQueue();
+
+        // If a new tab was added, wait for content extraction
+        if (addedTabId !== null) {
+          this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
+
+          const contentReady = await this.waitForTabContent(addedTabId);
+
+          if (!contentReady) {
+            this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
+            // Don't call processNext yet - let onTabUpdated handle auto-resume
+            return;
+          }
+        }
+
         await this.tabManager.processNext();
         break;
+      }
       case 'pause':
         this.tabManager.pause();
         break;

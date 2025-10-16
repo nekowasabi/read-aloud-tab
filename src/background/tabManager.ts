@@ -156,7 +156,7 @@ export class TabManager {
     // Ensure types are normalized
     this.queue.tabs = this.queue.tabs.map((tab) => this.normalizeTabInfo(tab));
     this.queue.currentIndex = this.clampIndex(this.queue.currentIndex);
-    if (!['idle', 'reading', 'paused', 'error'].includes(this.queue.status)) {
+    if (!['idle', 'reading', 'paused', 'error', 'processing'].includes(this.queue.status)) {
       this.queue.status = 'idle';
     }
     this.progressByTab = { ...(this.queue.progressByTab ?? {}) };
@@ -389,6 +389,13 @@ export class TabManager {
     }
 
     const tab = this.queue.tabs[targetIndex];
+
+    // ステータスを処理中に変更してUIに通知
+    this.queue.status = 'processing';
+    this.queue.currentIndex = targetIndex;
+    await this.persistQueue();
+    this.emitStatus();
+
     const ready = await this.ensureTabReady(tab);
 
     if (!ready) {
@@ -561,7 +568,21 @@ export class TabManager {
     }
 
     // Auto-resume when content is added (both for reload and new tab)
-    if (update.content && index === this.queue.currentIndex && this.queue.status === 'paused') {
+    const shouldAutoResume = update.content && index === this.queue.currentIndex && this.queue.status === 'paused';
+
+    this.logger.info('[TabManager] onTabUpdated auto-resume check', {
+      tabId,
+      hasContent: !!update.content,
+      contentLength: update.content?.length || 0,
+      isCurrentTab: index === this.queue.currentIndex,
+      currentIndex: this.queue.currentIndex,
+      queueStatus: this.queue.status,
+      shouldAutoResume,
+      isReloaded,
+    });
+
+    if (shouldAutoResume) {
+      this.logger.info(`[TabManager] Auto-resuming playback for tab ${tabId} after content extraction`);
       await this.processNext(this.queue.currentIndex);
     } else {
       this.emitStatus();
