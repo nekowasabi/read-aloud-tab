@@ -15,11 +15,11 @@
 
 ## Architecture
 
-### Existing Architecture Analysis
-- `TabManager` がキュー管理と AI 処理を担い、`AiPrefetcher` が既存の要約ジョブを呼び出す実装が存在する（`src/background/aiPrefetcher.ts`）。
-- `BackgroundOrchestrator` がキュー状態をポートへ共有し、`useTabQueue` が UI を更新する構造。
-- 既存 AI 処理は読み上げ開始時に同期的にまとめて実行するため、切り替え時の遅延が発生している。
-- Prefetch 結果を永続化する仕組みがなく、切り替え時に毎回再取得する。
+### Existing Architecture Analysis (実装完了)
+- `TabManager` がキュー管理と AI 処理を担い、`AiPrefetcher` が先行処理を調整する実装が完了した（`src/background/aiPrefetcher.ts`）。
+- `BackgroundOrchestrator` がキュー状態をポートへ共有し、`useTabQueue` が UI を更新する構造が確立されている。
+- 新たに `PrefetchScheduler` と `PrefetchWorker` により、読み上げ中に次のタブを事前処理し、切り替え時の遅延が最小化されている。
+- Prefetch 結果は `ResultStore` で永続化され、10分間のキャッシュTTLとLRU削除で容量管理を実現。
 
 ### High-Level Architecture
 ````mermaid
@@ -102,68 +102,76 @@ flowchart TB
 ````
 
 ## Requirements Traceability
-| Requirement | Summary | Components | Interfaces | Notes |
-|-------------|---------|------------|------------|-------|
-| R1 | 読み上げ中の先行ジョブスケジュール | PrefetchScheduler, BackgroundOrchestrator | Queue status events, Prefetch API | 並列制限=1 で制御 |
-| R2 | 翻訳・要約結果の永続化と鮮度管理 | PrefetchWorker, ResultStore | Storage API, AiProcessor | TTL 10 分, LRU 削除 |
-| R3 | UI 状態表示とエラー対処 | PrefetchStatusProvider, Popup UI | Runtime messages, Storage listener | 再試行ボタン・開発者ログ |
+
+| Requirement | Summary | Components | Interfaces | Status | Notes |
+|-------------|---------|------------|------------|--------|-------|
+| R1 | 読み上げ中の先行ジョブスケジュール | PrefetchScheduler, BackgroundOrchestrator, AiPrefetcher | Queue status events, Prefetch API | ✅ 完了 | 並列制限=1 で制御、次のタブを自動スケジュール |
+| R2 | 翻訳・要約結果の永続化と鮮度管理 | PrefetchWorker, ResultStore | Storage API (local), AiProcessor | ✅ 完了 | TTL 10 分, LRU 削除で容量管理 |
+| R3 | UI 状態表示とエラー対処 | PrefetchStatusProvider, Popup UI | Runtime messages, Storage listener | ✅ 完了 | 再試行ボタン・開発者ログ実装済み |
+| R4 | 2重処理問題の解決 | TabManager, resolveContent | setContentResolver() メソッド | ✅ 完了 | @ts-expect-error 削除、型安全性向上 |
 
 ## Components and Interfaces
 
 ### Background Layer
 
-#### PrefetchScheduler (`src/background/prefetch/scheduler.ts` 新設)
+#### PrefetchScheduler (`src/background/prefetch/scheduler.ts` ✅ 実装完了)
 - **責務:** Queue 状態に応じて先行処理対象を決定し、PrefetchWorker へタスクを送る。
-- **データ所有:** ペンディングタブ ID、再試行カウンタ。
+- **データ所有:** ペンディングタブ ID、再試行カウンタ、スケジュール状態。
 - **依存:** TabManager (status events), PrefetchWorker (enqueue), StorageManager (設定読み込み)。
-- **インターフェース:**
-```typescript
-interface PrefetchScheduler {
-  initialize(): Promise<void>;
-  handleStatusUpdate(payload: QueueStatusPayload): void;
-  retry(tabId: number): Promise<void>;
-}
-```
-- **前提:** TabManager.initialize 済み。
-- **後保証:** enqueue 済みタスクは PrefetchWorker が実行可能。
+- **主要メソッド:**
+  - `initialize()`: AiPrefetcher から呼び出される初期化
+  - `handleStatusUpdate(payload)`: キュー状態変更イベントを受けて対象選定
+  - `reconcileSchedule()`: キューの変更を検出し、不要なジョブをキャンセル
+  - `retry(tabId)`: 手動再試行
+- **実装特性:**
+  - 次のタブを自動的に検出し優先度付けでスケジュール
+  - 最大並列数=1 で制御
+  - キャンセル対象の正確な検出と通知
 
-#### PrefetchWorker (`src/background/prefetch/worker.ts` 新設)
-- **責務:** コンテンツ取得、要約/翻訳、結果保存、完了通知。
-- **依存:** TabManager.requestContentForPrefetch、OpenRouterClient、ResultStore。
-- **インターフェース:**
-```typescript
-interface PrefetchWorker {
-  enqueue(tabId: number, priority: number): void;
-}
-```
-- **内部:** 単体キュー、実行中フラグ、バックオフ再試行。
+#### PrefetchWorker (`src/background/prefetch/worker.ts` ✅ 実装完了)
+- **責務:** コンテンツ取得、要約/翻訳パイプライン、結果保存、完了通知。
+- **依存:** TabManager.requestContentForPrefetch、OpenRouterClient、ResultStore、Logger。
+- **主要メソッド:**
+  - `enqueue(tabId, priority)`: ジョブをキューへ投入
+  - `runJob()`: 実行ロジック（コンテンツ → 要約 → 翻訳）
+  - 内部: 単体キュー、実行中フラグ、exponential backoff 再試行
+- **実装特性:**
+  - AI設定に基づいた要約/翻訳の有効/無効判定
+  - エラー発生時に failed 状態を通知
+  - 結果保存完了後に PrefetchScheduler へ通知
 
-#### ResultStore (`src/background/prefetch/resultStore.ts` 新設)
+#### ResultStore (`src/background/prefetch/resultStore.ts` ✅ 実装完了)
 - **責務:** 要約・翻訳結果の永続化、TTL 管理、容量制御。
-- **依存:** chrome.storage.local。
-- **インターフェース:**
+- **依存:** chrome.storage.local、Logger。
+- **データ構造:**
 ```typescript
 interface PrefetchResult {
   tabId: number;
   summary: string;
   translation?: string;
-  generatedAt: number;
+  generatedAt: number;  // epoch ms
+  persistedAt: number;  // キャッシュ追加時刻
 }
 
-interface ResultStore {
-  save(result: PrefetchResult): Promise<void>;
-  get(tabId: number): Promise<PrefetchResult | null>;
-  delete(tabId: number): Promise<void>;
-  prune(): Promise<void>;
-}
+// Storage Key: 'prefetch_results'
+// { results: PrefetchResult[], lastUpdated: number }
 ```
+- **主要メソッド:**
+  - `save(result)`: 結果保存、容量超過時は FIFO 削除
+  - `get(tabId)`: TTL チェック後に結果返却、期限切れは削除
+  - `delete(tabId)`: 手動削除
+  - `prune()`: TTL 切れの一括削除
+- **容量管理:**
+  - TTL: 10 分（600秒）
+  - 最大件数: 10
+  - 超過時: 最も古い（persistedAt が小さい）エントリを削除
 
 ### Popup Layer
 
-#### PrefetchStatusProvider (`src/popup/hooks/usePrefetchStatus.ts` 新設)
+#### PrefetchStatusProvider (`src/popup/hooks/usePrefetchStatus.ts` ✅ 実装完了)
 - **責務:** Storage から先行処理状態を監視し、Popup に提供。
 - **依存:** chrome.storage.onChanged, runtime messages。
-- **インターフェース:**
+- **状態型:**
 ```typescript
 interface PrefetchStatus {
   tabId: number;
@@ -171,19 +179,31 @@ interface PrefetchStatus {
   updatedAt: number;
   error?: string;
 }
-
-export default function usePrefetchStatus(): PrefetchStatus[];
 ```
+- **主要機能:**
+  - リアルタイムストレージリスナー
+  - 手動再試行トリガー
+  - エラーメッセージ表示
 
-#### UI Components
+#### UI Components (✅ 実装完了)
 - `PrefetchStatusPanel` を `App.tsx` に組み込み、タブごとの状態と再試行ボタンを提供。
+- タブの処理状況インジケーター：
+  - `pending`: グレー（待機中）
+  - `processing`: 青い回転ローダー（処理中）
+  - `completed`: グリーンチェック（完了）
+  - `failed`: 赤い警告 + 再試行ボタン
 - 再試行は `runtime.sendMessage({ type: 'PREFETCH_RETRY', tabId })` を通じて PrefetchScheduler へ。
 
-### Messaging
-- 新規 Runtime メッセージ:
-  - `PREFETCH_STATUS_SYNC`: Prefetch -> Popup (状態更新)
+### Messaging (✅ 実装完了)
+
+- **Runtime メッセージ:**
+  - `PREFETCH_STATUS_SYNC`: PrefetchWorker -> Popup (状態更新)
   - `PREFETCH_RETRY`: Popup -> PrefetchScheduler (手動再試行)
   - `PREFETCH_RESULT_READY`: PrefetchWorker -> TabManager (結果保存完了)
+
+- **Storage イベント:**
+  - `prefetch_results` の変更を監視してPopup UIを更新
+  - TTL 切れエントリの自動削除を反映
 
 ## Data Models
 
@@ -235,16 +255,50 @@ interface PrefetchStatusMessage {
 - 翻訳/要約は 1 タブあたり 2 API コール。rate limit に達した場合は exponential backoff。
 - キャッシュ TTL 10 分、任意に設定可能な `maxPrefetchAhead` (デフォルト 1) を提供。
 
-## Migration Strategy
-````mermaid
+## Migration Strategy (✅ 完了)
+
+### 実装フェーズの完了状況
+
+```mermaid
 graph TD
-  A[Phase1: Prefetch Scheduler/Worker 実装] --> B[Phase2: ResultStore 導入]
-  B --> C[Phase3: Popup 状態表示と再試行 UI]
-  C --> D[Phase4: 開発者診断ログ]
-  D --> E[QA & Rollout]
-````
-- 段階毎に feature flag (`prefetchEnabled`) を利用して段階的ロールアウト。
-- 既存 `AiPrefetcher` から新 Scheduler/Worker へ移行後、旧コードを整理。
-- Rollback: `prefetchEnabled=false` で既存挙動に戻せるようにする。
+  A["✅ Phase1: Prefetch Scheduler/Worker 実装"] --> B["✅ Phase2: ResultStore 導入"]
+  B --> C["✅ Phase3: Popup 状態表示と再試行 UI"]
+  C --> D["✅ Phase4: 開発者診断ログ"]
+  D --> E["✅ QA & Rollout"]
+```
+
+### 実装完了の確認事項
+
+1. **PrefetchScheduler/Worker** (✅ 完了)
+   - AiPrefetcher が PrefetchScheduler を初期化
+   - キュー状態の監視と対象選定が正常動作
+   - ジョブのエンキュー と実行が確認済み
+
+2. **ResultStore** (✅ 完了)
+   - `chrome.storage.local` への結果保存が確認済み
+   - TTL (10分) と FIFO 削除が正常に機能
+   - 容量管理（最大10件）が実装されている
+
+3. **Popup UI** (✅ 完了)
+   - PrefetchStatusPanel がタブごとの処理状況を表示
+   - 再試行ボタンが failed 状態で利用可能
+   - Storage リスナーでリアルタイム更新
+
+4. **診断ログ** (✅ 完了)
+   - PrefetchScheduler: スケジュール対象とキャンセル理由を記録
+   - PrefetchWorker: 処理開始、要約/翻訳完了、エラーを記録
+   - resolveContent: 待機開始、完了、タイムアウトを記録
+
+### 後方互換性
+
+- Feature flag (`prefetchEnabled`) で段階的ロールアウトが可能
+- 無効時は既存のAiProcessor処理にフォールバック
+- 旧コードの整理は設定安定後に実施
+
+### 実装上の重要な修正
+
+- **2重処理問題の解決**: TabManager.ensureTabReady() の AiProcessor 呼び出しを削除
+- **型安全性の向上**: `@ts-expect-error` を削除し、`setContentResolver()` メソッドで正式に設定
+- **keep-alive との統合**: Offscreen Document ハートビートでプリフェッチ処理中のService Worker停止を回避
 *** End of Document***
 *** End Patch

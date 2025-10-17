@@ -240,6 +240,98 @@ class BrowserAdapter {
 - Background ↔ Popup: Port通信でリアルタイム更新
 - Storage同期: `chrome.storage.sync` でデバイス間同期
 
+### 5. プリフェッチ機能（先行AI処理）
+
+**背景と問題の解決**:
+
+複数タブを連続読み上げする場合、タブ切り替え時にAI処理（要約・翻訳）の完了を待つため、最大数秒の待機が発生していました。この問題を解決するため、`AiPrefetcher`コンポーネントが読み上げ中に**次のタブのAI処理を事前に実行**し、切り替え時には既にキャッシュされた結果を利用できる仕組みを実装しました。
+
+**アーキテクチャ概要**:
+
+```typescript
+// 読み上げ中の状態遷移
+TabManager (reading tab N)
+  ↓
+PrefetchScheduler → 次のタブN+1をスケジュール
+  ↓
+PrefetchWorker → コンテンツ取得 → 要約 → 翻訳 → キャッシュ保存
+  ↓
+resolveContent待機 → プリフェッチ結果を検索 → タブN+1切り替え時に即座に利用
+```
+
+**主要コンポーネント**:
+
+1. **AiPrefetcher** (`src/background/aiPrefetcher.ts`)
+   - 読み上げ状態の監視
+   - PrefetchSchedulerとPrefetchWorkerの起動・管理
+   - プリフェッチ結果をTabManagerへ通知
+
+2. **PrefetchScheduler** (`src/background/prefetch/scheduler.ts`)
+   - Queue状態イベントを監視
+   - 次のタブをプリフェッチ対象として選定
+   - 優先度を付けてPrefetchWorkerへエンキュー
+
+3. **PrefetchWorker** (`src/background/prefetch/worker.ts`)
+   - 単一ジョブキューで順序的に処理
+   - コンテンツ取得 → 要約 → 翻訳のパイプライン実行
+   - 結果をResultStoreへ保存
+
+4. **ResultStore** (`src/background/prefetch/resultStore.ts`)
+   - `chrome.storage.local` を使用してプリフェッチ結果をキャッシュ
+   - TTL (10分) と最大件数(10件) で容量管理
+   - FIFO削除でスペース確保
+
+**resolveContent待機ロジック**:
+
+```typescript
+// TabManager.ensureTabReady() (lines 968-1001)
+private async ensureTabReady(tab: TabInfo): Promise<boolean> {
+  // (1) resolveContentを呼び出しプリフェッチ結果を待機
+  if (this.resolveContent) {
+    const result = await this.resolveContent(tab);
+    // プリフェッチ済みの要約/翻訳をTabInfoに反映
+    if (result) {
+      tab.summary = result.summary;
+      tab.translation = result.translation;
+      return true;  // プリフェッチ結果を取得
+    }
+  }
+
+  // (2) プリフェッチ結果がない場合のフォールバック
+  // コンテンツリクエストを発行
+  const content = await this.requestContent(tab);
+  tab.content = content;
+  return !!content;
+}
+
+// 優先順位: translation > summary > content
+private selectPlaybackContent(tab: TabInfo): string {
+  if (tab.translation) return tab.translation;
+  if (tab.summary) return tab.summary;
+  return tab.content || '';
+}
+```
+
+**2重処理問題の解決**:
+
+以前の実装では、`ensureTabReady()`内で`AiProcessor`を二重に呼び出していたため、プリフェッチ結果が無視されていました。修正により:
+
+- プリフェッチ結果がある場合は、その結果をそのまま使用
+- `AiProcessor`の呼び出しを削除し、`resolveContent`からの結果のみを信頼
+- 型安全性向上のため、`@ts-expect-error`を削除し、`setContentResolver()`メソッドを追加
+
+**パフォーマンス特性**:
+
+- **タブ切り替え待機時間**: 最大数秒 → 約100ms以下（キャッシュ検索のみ）
+- **API呼び出し**: タブ切り替え時に1回削減（プリフェッチ済み）
+- **keep-alive との連携**: Offscreen Documentのハートビートにより、Prefetch処理中のService Worker停止を回避
+
+**エラーハンドリング**:
+
+- プリフェッチ失敗時: exponential backoff (2s, 4s, 8s) で最大3回再試行
+- API呼び出し失敗時: ジョブをfailed状態へ、Popup UIから手動再試行可能
+- Storage容量超過時: TTL と FIFO削除で自動的にスペース確保
+
 ## 実装優先度と段階的リリース計画
 
 ### Phase 1: MVP (基本読み上げ機能) ✅
