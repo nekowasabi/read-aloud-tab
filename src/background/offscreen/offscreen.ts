@@ -14,11 +14,61 @@ import {
   isOffscreenCommandMessage,
 } from '../../shared/messages';
 
+/**
+ * Performance metrics for keep-alive monitoring
+ */
+interface KeepAliveMetrics {
+  totalHeartbeatsSent: number;
+  failedHeartbeats: number;
+  reconnectionAttempts: number;
+  lastHeartbeatGap: number;
+  connectionStartedAt: number;
+  totalDisconnects: number;
+}
+
+/**
+ * Configuration for heartbeat interval
+ */
+interface KeepAliveConfig {
+  heartbeatIntervalMs: number;
+  minIntervalMs: number;
+  maxIntervalMs: number;
+  adaptiveInterval: boolean;
+}
+
 class OffscreenTTSController {
   private ttsEngine: TTSEngine;
   private currentTab: TabInfo | null = null;
   private currentSettings: TTSSettings | null = null;
   private logger = console;
+
+  // Keep-alive port connection to Service Worker
+  private keepAlivePort: chrome.runtime.Port | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 10;
+  private heartbeatIntervalMs = 20000; // 20 seconds (configurable)
+
+  // Performance metrics
+  private metrics: KeepAliveMetrics = {
+    totalHeartbeatsSent: 0,
+    failedHeartbeats: 0,
+    reconnectionAttempts: 0,
+    lastHeartbeatGap: 0,
+    connectionStartedAt: 0,
+    totalDisconnects: 0,
+  };
+
+  // Configuration
+  private config: KeepAliveConfig = {
+    heartbeatIntervalMs: 20000,
+    minIntervalMs: 15000,
+    maxIntervalMs: 25000,
+    adaptiveInterval: false, // Disabled by default for stability
+  };
+
+  private lastHeartbeatAt: number | null = null;
 
   constructor() {
     this.ttsEngine = new TTSEngine({
@@ -37,6 +87,9 @@ class OffscreenTTSController {
         });
       return true; // Keep channel open for async response
     });
+
+    // Setup keep-alive port connection to Service Worker
+    this.setupKeepAlivePort();
 
     this.logger.info('[OffscreenTTS] Initialized');
   }
@@ -193,6 +246,225 @@ class OffscreenTTSController {
     chrome.runtime.sendMessage(message).catch((error) => {
       this.logger.warn('[OffscreenTTS] Failed to send message to service worker', error);
     });
+  }
+
+  /**
+   * Setup keep-alive port connection to Service Worker
+   * This port connection keeps the Service Worker alive in Chrome Manifest V3
+   */
+  private setupKeepAlivePort(): void {
+    try {
+      this.keepAlivePort = chrome.runtime.connect({ name: 'offscreen-keepalive' });
+      this.reconnectAttempts = 0;
+
+      // Track connection start time
+      this.metrics.connectionStartedAt = Date.now();
+
+      this.keepAlivePort.onDisconnect.addListener(() => {
+        this.handlePortDisconnect();
+      });
+
+      this.startHeartbeat();
+      this.logger.info('[OffscreenTTS] Keep-alive port connected');
+    } catch (error) {
+      this.logger.error('[OffscreenTTS] Failed to setup keep-alive port', error);
+      this.reconnectWithBackoff();
+    }
+  }
+
+  /**
+   * Start heartbeat timer to send periodic messages
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+
+    this.heartbeatTimer = setInterval(() => {
+      if (this.keepAlivePort) {
+        try {
+          this.keepAlivePort.postMessage({
+            type: 'OFFSCREEN_HEARTBEAT',
+            timestamp: Date.now(),
+          });
+          this.updateMetrics(true); // Track success
+          this.logger.debug?.('[OffscreenTTS] Heartbeat sent');
+
+          // Adaptive interval adjustment (if enabled)
+          if (this.config.adaptiveInterval) {
+            const optimalInterval = this.calculateOptimalInterval();
+            if (optimalInterval !== this.heartbeatIntervalMs) {
+              this.logger.info(
+                `[OffscreenTTS] Adjusting heartbeat interval: ${this.heartbeatIntervalMs}ms -> ${optimalInterval}ms`
+              );
+              this.heartbeatIntervalMs = optimalInterval;
+              this.stopHeartbeat();
+              this.startHeartbeat();
+            }
+          }
+        } catch (error) {
+          this.updateMetrics(false); // Track failure
+          this.logger.warn('[OffscreenTTS] Failed to send heartbeat', error);
+          this.handlePortDisconnect();
+        }
+      }
+    }, this.heartbeatIntervalMs);
+
+    this.logger.info(`[OffscreenTTS] Heartbeat started (${this.heartbeatIntervalMs}ms interval)`);
+  }
+
+  /**
+   * Stop heartbeat timer
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+      this.logger.debug?.('[OffscreenTTS] Heartbeat stopped');
+    }
+  }
+
+  /**
+   * Update performance metrics
+   */
+  private updateMetrics(success: boolean): void {
+    if (success) {
+      this.metrics.totalHeartbeatsSent++;
+      
+      // Track heartbeat gap
+      if (this.lastHeartbeatAt !== null) {
+        this.metrics.lastHeartbeatGap = Date.now() - this.lastHeartbeatAt;
+      }
+      this.lastHeartbeatAt = Date.now();
+    } else {
+      this.metrics.failedHeartbeats++;
+    }
+  }
+
+  /**
+   * Calculate optimal heartbeat interval based on metrics
+   */
+  private calculateOptimalInterval(): number {
+    if (!this.config.adaptiveInterval) {
+      return this.config.heartbeatIntervalMs;
+    }
+
+    const successRate =
+      this.metrics.totalHeartbeatsSent > 0
+        ? (this.metrics.totalHeartbeatsSent - this.metrics.failedHeartbeats) /
+          this.metrics.totalHeartbeatsSent
+        : 1;
+
+    let newInterval = this.heartbeatIntervalMs;
+
+    // High success rate (>95%): can increase interval slightly
+    if (successRate >= 0.95) {
+      newInterval = Math.min(
+        this.heartbeatIntervalMs + 2000,
+        this.config.maxIntervalMs
+      );
+    }
+    // Low success rate (<80%): decrease interval for reliability
+    else if (successRate < 0.8) {
+      newInterval = Math.max(
+        this.heartbeatIntervalMs - 2000,
+        this.config.minIntervalMs
+      );
+    }
+
+    // If gap is dangerously close to 30s timeout, decrease interval
+    if (this.metrics.lastHeartbeatGap > 28000) {
+      newInterval = Math.max(newInterval - 3000, this.config.minIntervalMs);
+    }
+
+    return newInterval;
+  }
+
+  /**
+   * Get current performance metrics (for debugging)
+   */
+  getMetrics(): KeepAliveMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Update configuration
+   */
+  updateConfig(config: Partial<KeepAliveConfig>): void {
+    this.config = { ...this.config, ...config };
+    
+    // If heartbeat interval changed, restart heartbeat
+    if (config.heartbeatIntervalMs !== undefined) {
+      this.heartbeatIntervalMs = config.heartbeatIntervalMs;
+      if (this.heartbeatTimer) {
+        this.stopHeartbeat();
+        this.startHeartbeat();
+      }
+    }
+  }
+
+  /**
+   * Handle port disconnection
+   */
+  private handlePortDisconnect(): void {
+    this.logger.warn('[OffscreenTTS] Keep-alive port disconnected');
+    this.stopHeartbeat();
+    this.keepAlivePort = null;
+
+    // Update disconnect metrics
+    this.metrics.totalDisconnects++;
+
+    // Attempt to reconnect
+    this.reconnectWithBackoff();
+  }
+
+  /**
+   * Reconnect with exponential backoff
+   */
+  private reconnectWithBackoff(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.logger.error('[OffscreenTTS] Max reconnect attempts reached, giving up');
+      return;
+    }
+
+    // Clear existing reconnect timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    // Update reconnection metrics
+    this.metrics.reconnectionAttempts++;
+
+    // Exponential backoff: 500ms, 1s, 2s, 4s, 5s (max)
+    const delay = Math.min(500 * Math.pow(2, this.reconnectAttempts), 5000);
+    this.reconnectAttempts++;
+
+    this.logger.info(`[OffscreenTTS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.setupKeepAlivePort();
+    }, delay);
+  }
+
+  /**
+   * Cleanup resources
+   */
+  private cleanup(): void {
+    this.stopHeartbeat();
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    if (this.keepAlivePort) {
+      try {
+        this.keepAlivePort.disconnect();
+      } catch (error) {
+        this.logger.warn('[OffscreenTTS] Error disconnecting port during cleanup', error);
+      }
+      this.keepAlivePort = null;
+    }
+
+    this.logger.debug?.('[OffscreenTTS] Cleanup completed');
   }
 }
 

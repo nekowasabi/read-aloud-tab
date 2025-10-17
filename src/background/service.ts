@@ -100,6 +100,7 @@ export class BackgroundOrchestrator {
     lastFallbackAt: null,
     fallbackCount: 0,
   };
+  private lastOffscreenHeartbeatAt: number | null = null;
 
   constructor(options: BackgroundOrchestratorOptions) {
     this.tabManager = options.tabManager;
@@ -523,6 +524,43 @@ export class BackgroundOrchestrator {
   };
 
   private handleRuntimePort(port: ChromeRuntimePort): void {
+    // Handle keep-alive port from Offscreen Document
+    if (port.name === 'offscreen-keepalive') {
+      this.logger.info('[BackgroundOrchestrator] Offscreen keep-alive port connected');
+      
+      port.onMessage.addListener((message: unknown) => {
+        if (typeof message === 'object' && message !== null && 'type' in message) {
+          const msg = message as { type: string; timestamp?: number };
+          if (msg.type === 'OFFSCREEN_HEARTBEAT') {
+            const now = Date.now();
+            const timestamp = msg.timestamp || now;
+
+            // Check for heartbeat gap (>30s indicates potential issue)
+            if (this.lastOffscreenHeartbeatAt !== null) {
+              const gap = now - this.lastOffscreenHeartbeatAt;
+              if (gap > 30000) {
+                this.logger.warn(`[BackgroundOrchestrator] Heartbeat gap detected: ${gap}ms (>30s threshold)`);
+              } else {
+                this.logger.debug?.(`[BackgroundOrchestrator] Heartbeat received (gap: ${gap}ms, timestamp: ${timestamp})`);
+              }
+            } else {
+              this.logger.info(`[BackgroundOrchestrator] First heartbeat received (timestamp: ${timestamp})`);
+            }
+
+            this.lastOffscreenHeartbeatAt = now;
+          }
+        }
+      });
+
+      port.onDisconnect.addListener(() => {
+        this.logger.warn('[BackgroundOrchestrator] Offscreen keep-alive port disconnected');
+        this.lastOffscreenHeartbeatAt = null;
+      });
+
+      return;
+    }
+
+    // Handle regular ports (popup, options, etc.)
     this.ports.add(port);
 
     const handlePortMessage = async (message: QueueCommandMessage | PrefetchCommandMessage | unknown) => {

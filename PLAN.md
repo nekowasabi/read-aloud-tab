@@ -1,474 +1,222 @@
-# title: TTSチャンク間の音切れ（プツッという音）の完全解消 - RxJS Observable化による根本的改善
+# title: プリフェッチ機能の重複処理問題の修正
 
 ## 概要
-- read-aloudの実装を調査した結果、RxJS Observableによる宣言的なアーキテクチャが音切れ解消の鍵であることが判明
-- 現在のイベントドリブンアーキテクチャでは、`onend`内の処理が重く、状態管理が分散し、競合状態が発生
-- チャンク切り替え部分をObservable化することで、read-aloudと同等の完全なギャップレス再生を実現する
+- 次のタブの読み上げ準備（要約・翻訳のプリフェッチ）が実装されているが、2重のAI処理により効果が発揮されていない問題を修正する
+- 修正により、読み上げ中に次のタブのAI処理が先行実行され、タブ切り替え時の待機時間がゼロになる
 
 ### goal
-- ユーザーが長文を読み上げる際、チャンク切り替え時に音切れ（プツッという音）が一切聞こえない、スムーズで自然な読み上げ体験を提供する
+- ユーザーが複数タブを連続読み上げする際、タブ切り替え時に待たされることなくスムーズに次のタブの読み上げが開始される
+- AI要約・翻訳が有効な場合でも、先行処理により即座に読み上げが継続される
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- read-aloud (https://github.com/ken107/read-aloud) と同等の完全なギャップレス音声再生を実現する
-- チャンク切り替え時の音切れを完全に解消する
-- Web Speech APIの15秒タイムアウト制約を守りつつ、最適なチャンクサイズを実現する
-
-## read-aloudの調査結果
-
-### 重要な発見
-
-#### 1. WebSpeechEngineにはprefetchメソッドが存在しない
-- 事前準備は一切していない
-- 毎回`new SpeechSynthesisUtterance()`を作成
-- オーバーラップキューイングもしていない
-- **結論**: process1-3（prefetch）とprocess6（オーバーラップキューイング）は不要、むしろ有害な可能性
-
-#### 2. RxJS Observableによる宣言的アーキテクチャ
-read-aloudが音切れを解消できている理由は以下の通り：
-
-##### a. onend内の処理が最小限
-```javascript
-utterance.onend = onEvent.bind(null, {type: 'end', charIndex: text.length});
-```
-- イベントを通知するだけ（同期的）
-- 重い処理は一切ない
-
-##### b. Observable連鎖による即座の遷移
-```javascript
-// イベント受信後の処理
-if (event.type == "end") {
-  if (!piperState) {
-    cmd$.next({name: "forward"})  // ← 同期的にストリームへ通知
-  }
-}
-```
-- `cmd$`（Subject）に即座に通知
-- パイプラインが自動的に次を処理
-
-##### c. switchMapによる競合状態の排除
-```javascript
-cmd$.pipe(
-  scan((current, cmd) => { /* 状態管理 */ }),
-  switchMap(x => x.playback$)  // ← 前のObservableを自動キャンセル
-)
-```
-- 新しいチャンク開始時に前のObservableを自動キャンセル
-- 前のチャンクのイベントが次のチャンクと干渉しない
-
-##### d. 自動再生時はdebounceをスキップ
-```javascript
-debounce(x => x.delay ? rxjs.timer(x.delay) : rxjs.of(0))
-```
-- `cmd$.next({name: "forward"})`時に`delay`プロパティを指定しない
-- `rxjs.of(0)`により即座に次へ遷移
-- **ほぼ同期的な処理**
-
-#### 3. 単一utteranceのみ保持
-```javascript
-this.speak = function(text, options, onEvent) {
-  utter = new SpeechSynthesisUtterance();
-  // ... 設定 ...
-  speechSynthesis.speak(utter);
-}
-```
-- 複数のutteranceを保持しない
-- `speak()`呼び出しごとに新規作成
-- シンプルで予測可能
-
-### 現在の実装（process1-7）の根本的な問題
-
-#### ❌ process1-3（Prefetch）の問題
-- **問題1**: utteranceを事前作成してもWeb Speech APIは初期化しない
-- **問題2**: `speak()`が呼ばれた時点で初期化開始
-- **問題3**: イベントを事前バインドすることで予期しない動作を引き起こす可能性
-- **結論**: prefetchしても初期化遅延は避けられず、逆に複雑化
-
-#### ❌ process6（オーバーラップキューイング）の問題
-- **問題1**: 50%時点で既にイベントバインド済みのutteranceをキューに入れる
-- **問題2**: Web Speech APIがこれを正しく処理できない可能性
-- **問題3**: `onstart`, `onboundary`が予期しないタイミングで発火
-- **問題4**: 状態の不整合、重複再生、音切れが発生
-- **結論**: Web Speech APIの自然な動作に反する
-
-#### ❌ イベントドリブンアーキテクチャの限界
-1. **状態が分散**: `isPaused`, `nextChunkInfo`, `nextChunkQueued`等が各所に散在
-2. **非同期処理の遅延**: `onend`内の`playNextChunk()`が遅い
-3. **競合状態**: 前のチャンクのイベントと次のチャンクが干渉
-4. **複雑な制御フロー**: prefetch→キューイング→フォールバックの分岐が多い
+- プリフェッチ機能の2重処理問題を解決し、次のタブへの切り替え待機時間を解消する
+- Observable構造（ギャップレス再生）に影響を与えない安全な修正を行う
+- 型安全性を向上させ、`@ts-expect-error`を排除する
 
 ## 実装仕様
 
-### Phase 1: 最小限のObservable導入（推奨アプローチ）
+### 現状の問題点
 
-#### 目標
-イベントドリブンを保ちつつ、チャンク切り替え部分だけをObservable化することで、小さな変更で大きな効果を得る。
-
-#### 主要な変更点
-
-##### 1. チャンク切り替え用のSubjectを導入
+#### 1. 2重のAI処理が発生
 ```typescript
-private chunkTransition$ = new Subject<'next' | 'complete'>();
-```
-
-##### 2. onend内を最小化（read-aloud方式）
-```typescript
-utterance.onend = () => {
-  this.lastChunkEndTime = Date.now();
-  if (hooks.onProgress) hooks.onProgress(100);
-
-  if (!this.isPaused) {
-    // 即座にSubjectへ通知（同期的）
-    this.chunkTransition$.next('next');
+// TabManager.ensureTabReady() (lines 968-1022)
+private async ensureTabReady(tab: TabInfo): Promise<boolean> {
+  // (1) まずresolveContentを呼び出し（プリフェッチ待機）
+  if (this.resolveContent) {
+    const result = await this.resolveContent(tab);  // 975-997行目
+    // プリフェッチ済みの要約/翻訳を取得
   }
-};
-```
 
-##### 3. Observable連鎖で次を処理
-```typescript
-this.chunkTransition$.pipe(
-  // 状態更新（同期的）
-  tap(() => {
-    this.currentChunkIndex++;
-  }),
-  // 次のチャンクが存在するか確認
-  filter(() => this.currentChunkIndex < this.chunks.length),
-  // 新しいutteranceを作成・再生（前の処理を自動キャンセル）
-  switchMap(() => {
-    const chunk = this.chunks[this.currentChunkIndex];
-    const utterance = this.createUtteranceFn();
-    utterance.text = chunk.text;
-    this.applySettings(utterance);
-    this.bindUtteranceEvents(utterance, hooks, chunk);
-
-    // speak()を即座に呼ぶ
-    this.speech.speak(utterance);
-
-    return of(utterance);
-  }),
-  // エラーハンドリング
-  catchError((error) => {
-    this.logger.error('[TTSEngine] Chunk transition failed', error);
-    hooks.onError(error);
-    return EMPTY;
-  })
-).subscribe();
-```
-
-##### 4. 削除するもの
-- ❌ `nextChunkInfo`構造体
-- ❌ `nextChunkQueued`フラグ
-- ❌ `prepareNextChunk()`メソッド
-- ❌ `bindUtteranceEventsForPrefetchedChunk()`メソッド
-- ❌ `onstart`でのprefetch呼び出し
-- ❌ `onboundary`内の50%キューイング
-- ❌ `onend`内の複雑な分岐（キュー済み/未キュー/フォールバック）
-
-##### 5. 保持するもの
-- ✅ チャンク分割ロジック（これは有効）
-- ✅ 動的チャンクサイズ計算（process4）
-- ✅ パフォーマンス計測（process7）
-- ✅ エラーハンドリングとリトライ
-- ✅ `bindUtteranceEvents()`（シンプル版）
-
-#### 利点
-- ✅ `onend`内が軽量化（ギャップ削減）
-- ✅ `switchMap`で競合状態を排除
-- ✅ 既存コードの大部分を保持
-- ✅ 段階的な移行が可能
-- ✅ read-aloudの実績ある方式に近づく
-
-### Phase 2: read-aloud完全移行（将来的な選択肢）
-
-#### 目標
-read-aloudと同じRxJS中心のアーキテクチャに完全移行し、状態管理を完全に一元化する。
-
-#### 実装内容
-
-##### 1. コマンドストリーム導入
-```typescript
-private cmd$ = new Subject<Command>();
-
-type Command =
-  | { name: 'start'; text: string }
-  | { name: 'pause' }
-  | { name: 'resume' }
-  | { name: 'stop' }
-  | { name: 'forward' }
-  | { name: 'backward' };
-```
-
-##### 2. 状態管理をscan()で一元化
-```typescript
-cmd$.pipe(
-  scan((state, cmd) => {
-    // 全ての状態遷移をここで管理
-    switch (cmd.name) {
-      case 'start':
-        return { ...state, status: 'playing', chunkIndex: 0 };
-      case 'forward':
-        return { ...state, chunkIndex: state.chunkIndex + 1 };
-      // ...
+  // (2) その後、またAiProcessorで処理！
+  try {
+    const aiSettings = await StorageManager.getAiSettings();
+    if (this.aiProcessor.isEnabled(aiSettings)) {
+      const processed = await this.aiProcessor.processContent(tab, aiSettings);  // 1003-1017行目
+      // プリフェッチ結果を上書き
     }
-  }, initialState),
-  switchMap(state => this.createPlayback(state)),
-  subscribe(/* ... */)
-)
+  }
+}
 ```
 
-##### 3. prefetch/キューイングを削除
-- シンプルな方式に戻す
-- Observableの連鎖で十分高速
+**問題**: プリフェッチで取得した`summary`/`translation`を無視して再処理している
 
-#### 利点
-- ✅ read-aloudの実績ある方式
-- ✅ 状態管理が完全に一元化
-- ✅ 宣言的で保守しやすい
-- ✅ テストが書きやすい
+#### 2. resolveContentの設定方法が不適切
+```typescript
+// service.ts:117-119
+// @ts-expect-error - resolveContent is private but we need to set it
+this.tabManager['resolveContent'] = this.createContentResolver;
+```
 
-#### デメリット
-- ❌ 大規模なリファクタリングが必要
-- ❌ 既存のテストを大幅に書き換える必要がある
-- ❌ RxJSの依存関係追加
+- `resolveContent`は`private readonly`プロパティ
+- 型チェックを無理やり回避
+- コンストラクタで渡すべき設計を後から代入
+
+#### 3. Observable構造への影響
+- **影響なし**: TTSEngineは最終的なテキストのみを受け取る
+- データ準備レイヤーと再生レイヤーが完全に分離されている
 
 ## 生成AIの学習用コンテキスト
 
-### 実装ファイル
-- src/background/ttsEngine.ts
-  - TTSEngineクラス：Web Speech APIを使用した音声合成エンジン
-  - 現在の実装: イベントドリブン + prefetch + オーバーラップキューイング
-  - 変更予定: Observable化によるシンプルな実装
+### 背景仕様
+- `.kiro/specs/queue-prefetch-summary/requirements.md`
+  - プリフェッチ機能の要件定義
+- `.kiro/specs/queue-prefetch-summary/design.md`
+  - プリフェッチのアーキテクチャ設計
+- `CLAUDE.md`
+  - プロジェクト全体のアーキテクチャとkeep-alive戦略
 
-### テストファイル
-- src/background/__tests__/ttsEngine.test.ts
-  - TTSEngineの単体テスト
-  - 現在: 31テスト（process1-7の実装をテスト）
-  - 変更予定: Observable連鎖のテスト追加
+### 修正対象ファイル
+- `src/background/tabManager.ts`
+  - ensureTabReady()メソッドの修正（AiProcessor呼び出し削除）
+  - setContentResolver()メソッドの追加
+- `src/background/service.ts`
+  - resolveContentの設定方法を改善
 
-### 参考実装
-- https://github.com/ken107/read-aloud
-  - js/speech.js: RxJSベースの状態管理とチャンク切り替え
-    - `cmd$`, `playbackState$`, `scan()`, `switchMap()`, `debounce()`の使い方
-    - `onend` → `cmd$.next({name: "forward"})` → 即座の遷移
-  - js/tts-engines.js: WebSpeechEngineの実装
-    - prefetchメソッドが存在しないこと
-    - 単一utteranceのシンプルな管理
-    - イベントハンドラーが最小限
+### 参照ファイル
+- `src/background/aiPrefetcher.ts`
+  - プリフェッチのコーディネーター
+- `src/background/prefetch/scheduler.ts`
+  - プリフェッチのスケジューリング
+- `src/background/prefetch/worker.ts`
+  - 要約・翻訳のパイプライン
+- `src/background/ttsEngine.ts`
+  - Observable構造（影響確認用）
 
 ## Process
 
-### process1 チャンク切り替えObservable化の準備
-@target: src/background/ttsEngine.ts
-@ref: https://github.com/ken107/read-aloud/blob/master/js/speech.js
+### process1 AiProcessorの重複処理を削除
+#### sub1 TabManager.ensureTabReady()内のAI処理を削除
+@target: `src/background/tabManager.ts`
+@ref: `src/background/aiProcessor.ts`
 
-- [ ] RxJS依存関係の追加
-  - `package.json`に`rxjs`を追加
-  - 必要な型定義のインポート
-- [ ] `chunkTransition$: Subject<'next' | 'complete'>`フィールドを追加
-- [ ] `subscription: Subscription | null`フィールドを追加（購読管理用）
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [x] 調査: ensureTabReady()でAiProcessorが呼ばれる箇所を特定（lines 1003-1017）
+- [ ] TabManager.ensureTabReady()内のAI処理ブロックを削除
+  - lines 1003-1017の`aiProcessor.processContent()`呼び出しを削除
+  - プリフェッチ結果（`tab.summary`, `tab.translation`）をそのまま使用
+- [ ] selectPlaybackContent()の優先順位が正しく機能することを確認
+  - `translation` → `summary` → `content` の優先順位
+- [ ] AiProcessorインスタンスの保持が不要になったか確認
+  - constructor内の`this.aiProcessor`初期化を削除検討
 
-### process2 onendハンドラーの最小化（read-aloud方式）
-@target: src/background/ttsEngine.ts
+#### sub2 resolveContentの結果を正しく反映
+@target: `src/background/tabManager.ts:968-1001`
+@ref: `src/background/service.ts:126-171`
 
-- [ ] `bindUtteranceEvents()`メソッドの`onend`を最小化
-  ```typescript
-  utterance.onend = () => {
-    this.lastChunkEndTime = Date.now();
-    if (hooks.onProgress) hooks.onProgress(100);
+- [ ] resolveContentから返却されたsummary/translationをTabInfoに反映
+  - 既存のコード（lines 980-988）が正しく動作していることを確認
+- [ ] プリフェッチ結果がない場合のフォールバック処理を確認
+  - `resolveContent`がnullを返した場合の処理（lines 989-996）
 
-    if (!this.isPaused) {
-      // 即座にSubjectへ通知（同期的）
-      if (this.currentChunkIndex + 1 < this.chunks.length) {
-        this.chunkTransition$.next('next');
-      } else {
-        this.chunkTransition$.next('complete');
-      }
-    }
-  };
-  ```
-- [ ] 既存の複雑な分岐（キュー済み/未キュー/フォールバック）を削除
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+### process2 resolveContentの設計を改善
+#### sub1 TabManagerにsetContentResolver()を追加
+@target: `src/background/tabManager.ts`
 
-### process3 Observable連鎖による次チャンク再生
-@target: src/background/ttsEngine.ts
+- [ ] publicメソッド`setContentResolver(resolver: ContentResolver)`を追加
+  - `resolveContent`を`private`から設定可能にする
+  - 型安全な設定方法を提供
+- [ ] constructorのoptionsから`resolveContent`を受け取る既存実装を維持
+  - 下位互換性を保つ
 
-- [ ] `setupChunkTransitionPipeline()`メソッドを作成
-  ```typescript
-  private setupChunkTransitionPipeline(hooks: PlaybackHooks): void {
-    this.subscription = this.chunkTransition$.pipe(
-      tap((event) => {
-        if (event === 'next') {
-          this.currentChunkIndex++;
-          this.logger.info(`[TTSEngine] Transitioning to chunk ${this.currentChunkIndex + 1}/${this.chunks.length}`);
-        } else if (event === 'complete') {
-          this.logger.info('[TTSEngine] All chunks completed');
-          this.cleanup();
-          if (hooks.onComplete) hooks.onComplete();
-        }
-      }),
-      filter((event) => event === 'next'),
-      filter(() => this.currentChunkIndex < this.chunks.length),
-      switchMap(() => {
-        // 新しいutteranceを作成
-        const chunk = this.chunks[this.currentChunkIndex];
-        const utterance = this.createUtteranceFn();
-        utterance.text = chunk.text;
-        this.applySettings(utterance);
-        this.bindUtteranceEvents(utterance, hooks, chunk);
+#### sub2 BackgroundOrchestratorから正式に設定
+@target: `src/background/service.ts:117-119`
 
-        // 状態更新
-        this.utterance = utterance;
-        this.currentText = chunk.text;
-        this.chunkRetryCount = 0;
+- [ ] `@ts-expect-error`を削除
+- [ ] constructorで`resolveContent`をTabManagerに渡す
+  - BackgroundOrchestratorのconstructor内でTabManagerを初期化する際に渡す
+  - または、TabManager初期化後に`setContentResolver()`を呼び出す
+- [ ] 型エラーが発生しないことを確認
 
-        // speak()を即座に呼ぶ
-        this.speech.speak(utterance);
+### process3 プリフェッチログの追加
+#### sub1 スケジューリングログ
+@target: `src/background/prefetch/scheduler.ts`
 
-        return of(utterance);
-      }),
-      catchError((error) => {
-        this.logger.error('[TTSEngine] Chunk transition failed', error);
-        hooks.onError(error instanceof Error ? error : new Error(String(error)));
-        return EMPTY;
-      })
-    ).subscribe();
-  }
-  ```
-- [ ] `start()`メソッドで`setupChunkTransitionPipeline()`を呼び出す
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [ ] PrefetchScheduler.handleStatusUpdate()にジョブ投入ログを追加
+  - スケジューリングされたタブIDと優先度を出力
+- [ ] reconcileSchedule()でキャンセルされたジョブのログを追加
 
-### process4 不要なコードの削除
-@target: src/background/ttsEngine.ts
+#### sub2 ワーカーログ
+@target: `src/background/prefetch/worker.ts`
 
-- [ ] `nextChunkInfo`フィールドを削除
-- [ ] `nextChunkQueued`フィールドを削除
-- [ ] `prepareNextChunk()`メソッドを削除
-- [ ] `bindUtteranceEventsForPrefetchedChunk()`メソッドを削除
-- [ ] `onstart`内のprefetch呼び出しを削除
-- [ ] `onboundary`内の50%キューイングロジックを削除
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [ ] PrefetchWorker.runJob()の処理開始時にログ追加
+  - 要約/翻訳の有効/無効状態を出力
+- [ ] 要約生成完了時、翻訳生成完了時のログを追加
+  - 生成されたテキストの長さとプレビューを出力
 
-### process5 cleanup処理の更新
-@target: src/background/ttsEngine.ts
+#### sub3 resolveContent待機ログ
+@target: `src/background/service.ts:140-156`
 
-- [ ] `cleanup()`メソッドで`chunkTransition$`の購読を解除
-  ```typescript
-  cleanup(): void {
-    // Observableの購読を解除
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      this.subscription = null;
-    }
-
-    // 既存のcleanup処理
-    // ...
-  }
-  ```
-- [ ] `pause()`メソッドでも購読を解除（必要に応じて）
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
-
-### process6 動的チャンクサイズの保持
-@target: src/background/ttsEngine.ts
-
-- [ ] process4で実装した動的チャンクサイズ計算を維持
-  ```typescript
-  const safeReadingTime = 12; // 安全マージン
-  const charsPerSecond = 5;
-  const maxChunkSize = Math.floor(safeReadingTime * charsPerSecond * settings.rate);
-  ```
-- [ ] これはread-aloudにも存在する有効な最適化
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
-
-### process7 パフォーマンス計測の保持
-@target: src/background/ttsEngine.ts
-
-- [ ] `lastChunkEndTime`を使ったギャップ時間計測を維持
-- [ ] `onstart`内でのログ出力を維持
-  ```typescript
-  utterance.onstart = () => {
-    if (this.lastChunkEndTime > 0) {
-      const gap = Date.now() - this.lastChunkEndTime;
-      this.logger.info(`[TTSEngine] Chunk transition gap: ${gap}ms`);
-    }
-    // ...
-  };
-  ```
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [ ] 既存のログが適切か確認
+  - "Waiting for AI prefetch"
+  - "AI prefetch completed"
+  - "AI prefetch timeout"
+- [ ] プリフェッチ結果の有無をログに追加
+  - summary/translationが実際に取得できたかを出力
 
 ### process10 ユニットテスト
 
-@target: src/background/__tests__/ttsEngine.test.ts
+#### sub1 TabManager.ensureTabReady()のテスト
+@target: `src/background/__tests__/tabManager.test.ts`
 
-- [ ] Observable連鎖のテスト
-  - `chunkTransition$.next('next')`が呼ばれることを確認
-  - `switchMap`により次のチャンクが再生されることを確認
-  - 前のチャンクの処理が自動キャンセルされることを確認
-- [ ] `onend`の最小化テスト
-  - `onend`内で重い処理が実行されないことを確認
-  - Subjectへの通知のみが実行されることを確認
-- [ ] cleanup処理のテスト
-  - 購読が正しく解除されることを確認
-- [ ] 既存のテストの修正
-  - process1-3（prefetch）のテストを削除
-  - process6（オーバーラップキューイング）のテストを削除
-  - 動的チャンクサイズ（process4）のテストは維持
-  - パフォーマンス計測（process7）のテストは維持
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [ ] プリフェッチ結果がある場合のテスト
+  - resolveContentがsummary/translationを返す場合
+  - TabInfoに正しく反映されることを確認
+- [ ] プリフェッチ結果がない場合のテスト
+  - resolveContentがnullを返す場合
+  - コンテンツリクエストが発行されることを確認
+- [ ] AiProcessorが呼ばれないことを確認
+  - aiProcessor.processContent()がモックされていないことを確認
+
+#### sub2 プリフェッチ統合テスト
+@target: `src/background/__tests__/aiPrefetcher.test.ts`
+
+- [ ] 既存のテストが全てパスすることを確認
+- [ ] プリフェッチ → 待機 → 読み上げのフロー全体をテスト
+  - PrefetchWorkerが要約/翻訳を生成
+  - resolveContentが待機して結果を取得
+  - TabManagerが結果を使用して読み上げ
 
 ### process50 フォローアップ
 
-#### Phase 2への移行検討
-- [ ] Phase 1の効果を測定
-  - ギャップ時間が50ms以下になったか確認
-  - 音切れが解消されたか確認
-- [ ] Phase 1で不十分な場合のみPhase 2を検討
-  - 完全なRxJS中心アーキテクチャへの移行
-  - `cmd$`, `scan()`, `debounce()`の導入
+#### sub1 パフォーマンス検証
+- [ ] プリフェッチが実際に動作することを確認
+  - 開発者ツールでログを確認
+  - タブ切り替え時の待機時間を測定
+- [ ] Observable構造（ギャップレス再生）に影響がないことを確認
+  - チャンク遷移が正常に動作することを確認
 
-#### 追加最適化の検討
-- [ ] read-aloudの他の最適化手法を調査
-  - タイミング計算による予測（`nextStartTime = Date.now() + 650 / options.rate`）
-  - より高度なObservableパターン
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+#### sub2 エッジケース対応
+- [ ] AI設定が無効な場合のテスト
+  - enableAiSummary=false, enableAiTranslation=false
+  - プリフェッチがスキップされることを確認
+- [ ] APIキーが未設定の場合のテスト
+  - プリフェッチが失敗しても読み上げが継続することを確認
 
 ### process100 リファクタリング
 
-- [ ] `bindUtteranceEvents()`のシンプル化
-  - prefetch関連のロジックを削除したシンプル版に戻す
-- [ ] 状態管理の整理
-  - 不要になったフィールドの完全削除
-  - Observable連鎖に関連する状態のみを保持
-- [ ] ログ出力の整理
-  - Observable連鎖に関連するログを追加
-  - 不要になったprefetch関連のログを削除
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+#### sub1 AiProcessorの役割整理
+@target: `src/background/aiProcessor.ts`
+
+- [ ] AiProcessorの使用箇所を確認
+  - TabManagerから完全に削除できるか検討
+  - 他に使用している箇所がないか確認
+- [ ] 不要になった場合は削除を検討
+
+#### sub2 型定義の整理
+@target: `src/shared/types.ts`
+
+- [ ] TabInfoのprocessedContentフィールドが不要になったか確認
+- [ ] ContentResolverの型定義が適切か確認
 
 ### process200 ドキュメンテーション
 
-- [ ] CLAUDE.mdに音切れ対策の実装方針を追記
-  - RxJS Observable化の理由と利点
-  - read-aloudのアーキテクチャ分析結果
-  - Phase 1とPhase 2の違い
-- [ ] ttsEngine.tsのコメントを更新
-  - Observable連鎖の詳細な説明
-  - `chunkTransition$`の役割を明記
-  - `switchMap`による競合状態排除の説明
-- [ ] PLAN.mdの更新
-  - 実装完了後の結果を記録
-  - ギャップ時間の測定結果を記録
-  - 今後の改善案を記録
-- [ ] 型チェック実施: `npm run typecheck`
-- [ ] テスト実施: `npm test`
+- [ ] CLAUDE.mdにプリフェッチ機能の動作を追記
+  - AiPrefetcherによる先行処理の仕組み
+  - resolveContentによる待機ロジック
+  - 2重処理問題の解決について
+- [ ] .kiro/specs/queue-prefetch-summary/design.mdを更新
+  - 実装状況を反映
+  - 既知の問題を削除
+

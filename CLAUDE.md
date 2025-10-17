@@ -409,3 +409,215 @@ interface TTSStatus {
 - Web Speech APIの音声はブラウザ/OSに依存するため、利用可能な音声リストの動的取得が必要
 - OpenRouter APIのレート制限に注意（要約リクエストのキューイングとリトライ機構の実装）
 - 読み上げ時のチャンクは15秒の制限があるため、読み上げ速度など考慮する必要がある
+## Keep-Alive戦略（Chrome 30秒タイムアウト問題の解決）
+
+### 問題の背景
+
+Chrome Manifest V3のService Workerは約30秒でアイドル状態になり自動停止します。これにより、読み上げ速度2.5倍〜3倍の長時間コンテンツで読み上げが50%付近で停止する問題が発生していました。
+
+- 3分コンテンツ × 2.5倍速 = 約72秒
+- 3分コンテンツ × 3倍速 = 約60秒
+- Service Workerが30秒でタイムアウト → 読み上げの約42〜50%で停止
+
+### 解決策: Offscreen Documentによるkeep-alive
+
+Offscreen Document ↔ Service Worker間の永続ポート接続により、20秒間隔のハートビートを送信してService Workerをアクティブに保ちます。
+
+```typescript
+// Offscreen Document (src/background/offscreen/offscreen.ts)
+class OffscreenTTSController {
+  private keepAlivePort: chrome.runtime.Port | null = null;
+  private heartbeatIntervalMs = 20000; // 20秒間隔
+  
+  // ポート接続の確立
+  private setupKeepAlivePort(): void {
+    this.keepAlivePort = chrome.runtime.connect({ 
+      name: 'offscreen-keepalive' 
+    });
+    
+    this.keepAlivePort.onDisconnect.addListener(() => {
+      this.handlePortDisconnect();
+    });
+    
+    this.startHeartbeat();
+  }
+  
+  // ハートビート送信
+  private startHeartbeat(): void {
+    setInterval(() => {
+      if (this.keepAlivePort) {
+        this.keepAlivePort.postMessage({
+          type: 'OFFSCREEN_HEARTBEAT',
+          timestamp: Date.now(),
+        });
+        this.updateMetrics(true); // メトリクス更新
+      }
+    }, this.heartbeatIntervalMs);
+  }
+  
+  // 指数バックオフ再接続
+  private reconnectWithBackoff(): void {
+    const delay = Math.min(500 * Math.pow(2, this.reconnectAttempts), 5000);
+    this.reconnectAttempts++;
+    
+    setTimeout(() => {
+      this.setupKeepAlivePort();
+    }, delay);
+  }
+}
+```
+
+### パフォーマンス監視機能
+
+```typescript
+interface KeepAliveMetrics {
+  totalHeartbeatsSent: number;
+  failedHeartbeats: number;
+  reconnectionAttempts: number;
+  lastHeartbeatGap: number;
+  connectionStartedAt: number;
+  totalDisconnects: number;
+}
+
+// 成功率に基づいたアダプティブ間隔調整（オプション）
+private calculateOptimalInterval(): number {
+  const successRate = 
+    (this.metrics.totalHeartbeatsSent - this.metrics.failedHeartbeats) 
+    / this.metrics.totalHeartbeatsSent;
+  
+  if (successRate >= 0.95) {
+    // 高成功率: 間隔を増やす（最大25秒）
+    return Math.min(this.heartbeatIntervalMs + 2000, 25000);
+  } else if (successRate < 0.8) {
+    // 低成功率: 間隔を減らす（最小15秒）
+    return Math.max(this.heartbeatIntervalMs - 2000, 15000);
+  }
+  
+  return this.heartbeatIntervalMs;
+}
+```
+
+### Service Worker側の実装
+
+```typescript
+// Service Worker (src/background/service.ts)
+private handleRuntimePort(port: ChromeRuntimePort): void {
+  if (port.name === 'offscreen-keepalive') {
+    port.onMessage.addListener((message) => {
+      if (message.type === 'OFFSCREEN_HEARTBEAT') {
+        const now = Date.now();
+        const gap = now - this.lastOffscreenHeartbeatAt;
+        
+        // 30秒以上のギャップを検知して警告
+        if (gap > 30000) {
+          this.logger.warn(
+            `[KeepAlive] Heartbeat gap: ${gap}ms (>30s threshold)`
+          );
+        }
+        
+        this.lastOffscreenHeartbeatAt = now;
+      }
+    });
+    
+    port.onDisconnect.addListener(() => {
+      this.logger.warn('[KeepAlive] Port disconnected');
+      this.lastOffscreenHeartbeatAt = null;
+    });
+  }
+}
+```
+
+### Firefox互換性
+
+Firefoxでは`"persistent": true`により永続的なバックグラウンドスクリプトが動作するため、特別なkeep-alive処理は不要です。
+
+```typescript
+// BrowserAdapterでの分岐処理
+if (BrowserAdapter.getBrowserType() === 'chrome') {
+  await this.setupOffscreenKeepAlive();
+} else {
+  // Firefox: persistent scriptのため不要
+  this.logger.info('[KeepAlive] Firefox persistent script mode');
+}
+```
+
+### エラーハンドリング
+
+カスタムエラークラスで型安全なエラー処理を実現：
+
+```typescript
+// src/shared/messages.ts
+export class KeepAliveError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly details?: unknown
+  ) {
+    super(message);
+    this.name = 'KeepAliveError';
+  }
+}
+
+export class PortConnectionError extends KeepAliveError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'PORT_CONNECTION_FAILED', details);
+  }
+}
+
+export class HeartbeatError extends KeepAliveError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'HEARTBEAT_FAILED', details);
+  }
+}
+```
+
+### 主要な設計判断
+
+1. **ハートビート間隔: 20秒**
+   - Service Workerの30秒タイムアウトより短く、10秒の安全マージンを確保
+   - 3倍速読み上げでも60秒のコンテンツに対して3回のハートビート送信
+
+2. **再接続戦略**
+   - 指数バックオフ（500ms〜5秒）で最大10回リトライ
+   - ポート切断時に自動再接続を試行
+
+3. **ブラウザ別対応**
+   - Chrome: Offscreenポート接続が主要なkeep-alive手段
+   - Firefox: Persistent scriptのため基本的にkeep-alive不要
+
+### トラブルシューティング
+
+#### ハートビートが届かない場合
+
+```bash
+# Chrome DevTools Console
+# Service Workerでハートビート受信を確認
+[KeepAlive] Offscreen heartbeat received (gap: 20000ms, timestamp: 1234567890)
+
+# 異常なギャップが検出された場合
+[KeepAlive] Heartbeat gap detected: 35000ms (>30s threshold)
+```
+
+#### ポート接続が失敗する場合
+
+```bash
+# Offscreen Document Console
+[OffscreenTTS] Failed to setup keep-alive port: Error: ...
+[OffscreenTTS] Reconnecting in 500ms (attempt 1/10)
+```
+
+#### メトリクスの確認
+
+```typescript
+// Offscreen Document Consoleで実行
+const metrics = controller.getMetrics();
+console.log('Keep-Alive Metrics:', metrics);
+// {
+//   totalHeartbeatsSent: 120,
+//   failedHeartbeats: 2,
+//   reconnectionAttempts: 1,
+//   lastHeartbeatGap: 20050,
+//   connectionStartedAt: 1234567890,
+//   totalDisconnects: 1
+// }
+```

@@ -271,3 +271,69 @@ export function isOffscreenBroadcastMessage(message: unknown): message is Offscr
       return false;
   }
 }
+
+/**
+ * Heartbeat message sent from Offscreen Document to Service Worker
+ * Used to keep Service Worker alive in Chrome Manifest V3
+ */
+export interface OffscreenHeartbeatMessage {
+  type: 'OFFSCREEN_HEARTBEAT';
+  timestamp: number;
+}
+
+export function isOffscreenHeartbeatMessage(message: unknown): message is OffscreenHeartbeatMessage {
+  if (typeof message !== 'object' || message === null) {
+    return false;
+  }
+  const candidate = message as { type?: unknown; timestamp?: unknown };
+  return candidate.type === 'OFFSCREEN_HEARTBEAT' && typeof candidate.timestamp === 'number';
+}
+
+
+// ============================================================================
+// Keep-Alive Error Classes
+// ============================================================================
+
+/**
+ * Base error class for keep-alive related failures
+ */
+export class KeepAliveError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly details?: unknown
+  ) {
+    super(message);
+    this.name = 'KeepAliveError';
+  }
+}
+
+/**
+ * Error thrown when port connection fails
+ */
+export class PortConnectionError extends KeepAliveError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'PORT_CONNECTION_FAILED', details);
+    this.name = 'PortConnectionError';
+  }
+}
+
+/**
+ * Error thrown when heartbeat sending fails
+ */
+export class HeartbeatError extends KeepAliveError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'HEARTBEAT_FAILED', details);
+    this.name = 'HeartbeatError';
+  }
+}
+
+/**
+ * Error thrown when reconnection fails after max attempts
+ */
+export class ReconnectionFailedError extends KeepAliveError {
+  constructor(message: string, public readonly attempts: number) {
+    super(message, 'RECONNECTION_FAILED', { attempts });
+    this.name = 'ReconnectionFailedError';
+  }
+}
