@@ -212,11 +212,12 @@ this.tabManager['resolveContent'] = this.createContentResolver;
 
 ### process200 ドキュメンテーション
 
-- [ ] CLAUDE.mdにプリフェッチ機能の動作を追記
-  - AiPrefetcherによる先行処理の仕組み
-  - resolveContentによる待機ロジック
-  - 2重処理問題の解決について
-- [ ] .kiro/specs/queue-prefetch-summary/design.mdを更新
-  - 実装状況を反映
-  - 既知の問題を削除
+- [x] CLAUDE.mdにプリフェッチ機能の動作を追記
+  - AiPrefetcherによる先行処理の仕組み（セクション5に追加）
+  - resolveContentによる待機ロジック（コード例付きで説明）
+  - 2重処理問題の解決について（修正内容を記載）
+- [x] .kiro/specs/queue-prefetch-summary/design.mdを更新
+  - 実装状況を反映（✅マークで完了状態を表示）
+  - 既知の問題を削除（Migration Strategy の完了フェーズを表記）
+  - Requirements Traceability に R4（2重処理問題の解決）を追加
 
