@@ -64,6 +64,7 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
     // Mock TabManager
     tabManager = {
       initialize: jest.fn().mockResolvedValue(undefined),
+      setContentResolver: jest.fn(),
       addStatusListener: jest.fn().mockReturnValue(() => {}),
       addProgressListener: jest.fn().mockReturnValue(() => {}),
       addErrorListener: jest.fn().mockReturnValue(() => {}),

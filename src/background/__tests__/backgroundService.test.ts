@@ -23,6 +23,7 @@ describe('BackgroundOrchestrator', () => {
 
     const stub = {
       initialize: jest.fn().mockResolvedValue(undefined),
+      setContentResolver: jest.fn(),
       addStatusListener: jest.fn((listener: (payload: QueueStatusPayload) => void) => {
         listeners.status = listener;
         return () => delete listeners.status;

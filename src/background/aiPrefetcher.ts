@@ -98,6 +98,7 @@ export class AiPrefetcher {
       enqueue: (job) => worker.enqueue(job),
       cancel: (tabId) => worker.cancel(tabId),
       maxPrefetchAhead: this.maxPrefetchAhead,
+      logger: this.logger,
     });
 
     this.worker = worker;

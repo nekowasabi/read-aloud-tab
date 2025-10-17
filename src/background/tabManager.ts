@@ -23,7 +23,6 @@ import {
   QUEUE_CONTENT_RESERVE_ACTIVE,
 } from '../shared/constants';
 import { createExtensionError, formatErrorLog } from '../shared/errors';
-import { AiProcessor } from './aiProcessor';
 
 export interface PlaybackHooks {
   onEnd: () => void;
@@ -90,10 +89,9 @@ export class TabManager {
   private readonly playback: PlaybackController;
   private readonly storage: QueueStorageAdapter;
   private readonly fetchIgnoredDomains?: () => Promise<string[]>;
-  private readonly resolveContent?: ContentResolver;
+  private resolveContent?: ContentResolver;
   private readonly logger: LoggerLike;
   private readonly now: () => number;
-  private readonly aiProcessor: AiProcessor;
 
   private ignoredDomains: Set<string> = new Set();
 
@@ -124,10 +122,16 @@ export class TabManager {
     this.resolveContent = options.resolveContent;
     this.logger = options.logger || console;
     this.now = options.now || (() => Date.now());
-    this.aiProcessor = new AiProcessor({
-      maxSummaryTokens: 1500,
-      maxTranslationTokens: 2000,
-    });
+    // aiProcessorはenableTabReadyで不要になった
+    // (プリフェッチからのsummary/translationを使用するため)
+  }
+
+  /**
+   * Set or update the content resolver function
+   * This allows BackgroundOrchestrator to configure the resolver after construction
+   */
+  setContentResolver(resolver: ContentResolver): void {
+    this.resolveContent = resolver;
   }
 
   async initialize(): Promise<void> {
@@ -172,13 +176,8 @@ export class TabManager {
       }
     }
 
-    // AI設定を読み込み、AiProcessorを初期化
-    try {
-      const aiSettings = await StorageManager.getAiSettings();
-      this.aiProcessor.updateSettings(aiSettings);
-    } catch (error) {
-      this.logger.warn('TabManager: failed to load AI settings', error);
-    }
+    // AI設定の読み込みはAiPrefetcherが行う
+    // (TabManagerはプリフェッチ結果を使用するのみ)
 
     this.refreshIgnoredFlags();
     this.enforceContentBudget();
@@ -649,17 +648,12 @@ export class TabManager {
       this.playback.updateSettings(validated);
     }
 
-    // AI設定を更新し、既存タブのprocessedContentをクリア
-    try {
-      const aiSettings = await StorageManager.getAiSettings();
-      this.aiProcessor.updateSettings(aiSettings);
-
-      // 既存タブのprocessedContentをクリア
-      for (const tab of this.queue.tabs) {
-        tab.processedContent = undefined;
-      }
-    } catch (error) {
-      this.logger.warn('TabManager: failed to update AI settings', error);
+    // 既存タブのプリフェッチ結果をクリア
+    // (AI設定が変更されたため、再プリフェッチが必要)
+    for (const tab of this.queue.tabs) {
+      tab.summary = undefined;
+      tab.translation = undefined;
+      tab.processedContent = undefined;
     }
 
     await Promise.all([
@@ -1000,21 +994,8 @@ export class TabManager {
       return false;
     }
 
-    // AI処理ブロック: 要約・翻訳が有効な場合に適用
-    // タイムアウト30秒、5000文字制限でAPI呼び出し
-    // エラー時は元のcontentで動作を継続（フォールバック）
-    try {
-      const aiSettings = await StorageManager.getAiSettings();
-      if (this.aiProcessor.isEnabled(aiSettings)) {
-        const processed = await this.aiProcessor.processContent(tab, aiSettings);
-        if (processed) {
-          tab.processedContent = processed;
-        }
-      }
-    } catch (error) {
-      this.logError('AI_PROCESSING_FAILED', 'TabManager: AI processing failed', error);
-      // エラー時もフローを継続（元のcontentで動作）
-    }
+    // prependフェッチにより、content, summary, translationが既に設定されているため、
+    // ここではAI処理は不要。selectPlaybackContent()で優先順位に従って使用される。
 
     this.enforceContentBudget();
     await this.persistQueue();

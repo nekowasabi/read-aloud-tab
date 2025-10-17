@@ -52,6 +52,7 @@ describe('Service Worker Port Handling', () => {
 
     mockTabManager = {
       initialize: jest.fn(() => Promise.resolve()),
+      setContentResolver: jest.fn(),
       getSnapshot: jest.fn(() => ({
         status: 'idle',
         currentIndex: 0,

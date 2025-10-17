@@ -5,10 +5,17 @@ export interface PrefetchJob {
   priority: number;
 }
 
+interface LoggerLike {
+  debug?: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+}
+
 interface PrefetchSchedulerOptions {
   enqueue: (job: PrefetchJob) => void;
   cancel: (tabId: number) => void;
   maxPrefetchAhead?: number;
+  logger?: LoggerLike;
 }
 
 const DEFAULT_PREFETCH_AHEAD = 1;
@@ -18,11 +25,13 @@ export class PrefetchScheduler {
   private readonly cancelJob: (tabId: number) => void;
   private readonly maxPrefetchAhead: number;
   private readonly scheduled = new Set<number>();
+  private readonly logger: LoggerLike;
 
   constructor(options: PrefetchSchedulerOptions) {
     this.enqueueJob = options.enqueue;
     this.cancelJob = options.cancel;
     this.maxPrefetchAhead = options.maxPrefetchAhead ?? DEFAULT_PREFETCH_AHEAD;
+    this.logger = options.logger || console;
   }
 
   handleStatusUpdate(payload: QueueStatusPayload): void {
@@ -40,6 +49,7 @@ export class PrefetchScheduler {
     targets.forEach((tab, index) => {
       // Only enqueue if not already scheduled to prevent duplicate jobs
       if (!this.scheduled.has(tab.tabId)) {
+        this.logger.debug?.(`[Prefetch] Scheduled job for tab ${tab.tabId} with priority ${index}`);
         this.enqueueJob({ tabId: tab.tabId, priority: index });
         this.scheduled.add(tab.tabId);
       }
@@ -79,6 +89,7 @@ export class PrefetchScheduler {
     const nextSet = new Set(nextIds);
     for (const tabId of Array.from(this.scheduled)) {
       if (!nextSet.has(tabId)) {
+        this.logger.debug?.(`[Prefetch] Cancelled job for tab ${tabId}`);
         this.cancelJob(tabId);
         this.scheduled.delete(tabId);
       }

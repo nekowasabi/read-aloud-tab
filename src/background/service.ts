@@ -115,8 +115,7 @@ export class BackgroundOrchestrator {
     }
 
     // Set content resolver for TabManager to enable AI prefetch waiting
-    // @ts-expect-error - resolveContent is private but we need to set it
-    this.tabManager['resolveContent'] = this.createContentResolver;
+    this.tabManager.setContentResolver(this.createContentResolver);
   }
 
   /**
@@ -145,6 +144,9 @@ export class BackgroundOrchestrator {
             // Get updated tab info with summary/translation
             const updatedTab = this.tabManager.getTabById(tab.tabId);
             if (updatedTab) {
+              const hasSummary = !!updatedTab.summary;
+              const hasTranslation = !!updatedTab.translation;
+              this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
               return {
                 content: updatedTab.content,
                 summary: updatedTab.summary,
@@ -162,6 +164,9 @@ export class BackgroundOrchestrator {
     }
 
     // Return current content (fallback or AI disabled)
+    const hasSummary = !!tab.summary;
+    const hasTranslation = !!tab.translation;
+    this.logger.debug?.(`[BackgroundOrchestrator] Resolved content for tab ${tab.tabId}: summary=${hasSummary}, translation=${hasTranslation}`);
     return {
       content: tab.content,
       summary: tab.summary,
