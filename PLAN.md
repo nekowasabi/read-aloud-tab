@@ -1,223 +1,338 @@
-# title: プリフェッチ機能の重複処理問題の修正
+# title: Firefox AMO版での音声・読み上げ停止問題の修正
 
 ## 概要
-- 次のタブの読み上げ準備（要約・翻訳のプリフェッチ）が実装されているが、2重のAI処理により効果が発揮されていない問題を修正する
-- 修正により、読み上げ中に次のタブのAI処理が先行実行され、タブ切り替え時の待機時間がゼロになる
+- Firefox版拡張機能をMozilla Add-ons（AMO）経由でインストールした際に、音声が男性になる問題と読み上げが途中で停止する問題を修正し、安定した読み上げ機能を提供する
 
 ### goal
-- ユーザーが複数タブを連続読み上げする際、タブ切り替え時に待たされることなくスムーズに次のタブの読み上げが開始される
-- AI要約・翻訳が有効な場合でも、先行処理により即座に読み上げが継続される
+- ユーザーがAMOからインストールした拡張機能で、設定した音声（日本語女性音声等）で長文コンテンツを最後まで読み上げられる
 
 ## 必須のルール
 - 必ず `CLAUDE.md` を参照し、ルールを守ること
 
 ## 開発のゴール
-- プリフェッチ機能の2重処理問題を解決し、次のタブへの切り替え待機時間を解消する
-- Observable構造（ギャップレス再生）に影響を与えない安全な修正を行う
-- 型安全性を向上させ、`@ts-expect-error`を排除する
+- AMO配布版でもabout:debugging版と同等の読み上げ品質を実現する
+- Firefoxでの音声リスト取得タイミング問題を解決する
+- チャンクサイズの最適化により長文コンテンツの安定読み上げを実現する
+- エラーハンドリングを強化し、途中停止を防止する
 
 ## 実装仕様
 
-### 現状の問題点
+### 問題1: 音声が男性になる
+**原因**:
+- デフォルト設定が `voice: null` （`src/shared/utils/storage.ts:5-10`）
+- Firefoxでの `speechSynthesis.getVoices()` が初回呼び出し時に空配列を返すことがある
+- バックグラウンドスクリプト（`src/background/ttsEngine.ts:656-676`）での音声リスト取得タイムアウトが3秒で短い
+- AMO版では署名検証等でスクリプト起動が遅延し、音声リスト取得が間に合わない
+- AMO版とabout:debugging版は異なる拡張機能IDを持つため、ストレージが完全に分離される
 
-#### 1. 2重のAI処理が発生
-```typescript
-// TabManager.ensureTabReady() (lines 968-1022)
-private async ensureTabReady(tab: TabInfo): Promise<boolean> {
-  // (1) まずresolveContentを呼び出し（プリフェッチ待機）
-  if (this.resolveContent) {
-    const result = await this.resolveContent(tab);  // 975-997行目
-    // プリフェッチ済みの要約/翻訳を取得
-  }
+**修正方針**:
+- 音声リスト取得タイムアウトを3秒→10秒に延長
+- 日本語音声を優先的に選択する初期化ロジックを追加
+- 音声リスト取得失敗時のリトライ機構（最大3回）を実装
 
-  // (2) その後、またAiProcessorで処理！
-  try {
-    const aiSettings = await StorageManager.getAiSettings();
-    if (this.aiProcessor.isEnabled(aiSettings)) {
-      const processed = await this.aiProcessor.processContent(tab, aiSettings);  // 1003-1017行目
-      // プリフェッチ結果を上書き
-    }
-  }
-}
-```
+### 問題2: 読み上げが途中で止まる
+**原因**:
+- チャンクサイズが小さすぎる（`src/background/ttsEngine.ts:101-107`）
+  ```typescript
+  const charsPerSecond = 4; // 保守的な読み上げ速度
+  const maxChunkSize = Math.floor(8 * 4 * settings.rate);
+  // rate 2.5の場合: maxChunkSize = 80文字
+  // rate 3.0の場合: maxChunkSize = 96文字
+  ```
+  - 日本語では80-96文字は2〜3文程度と非常に短い
+  - 長いコンテンツで数十〜数百のチャンクが生成され、チャンク遷移でエラーが発生しやすい
+- Firefoxでの `speechSynthesis` API動作がChromeと異なる（pause/resume/cancelの動作）
+- Observable-basedチャンク遷移（`src/background/ttsEngine.ts:192-196`）で `catchError` が `EMPTY` を返し、エラー発生時に処理が完全停止する
+- Web Speech APIの約15秒タイムアウト制限（チャンク計算は8秒で保守的だが、Firefoxでの実際の動作で超過する可能性）
 
-**問題**: プリフェッチで取得した`summary`/`translation`を無視して再処理している
+**修正方針**:
+- Firefoxでのチャンクサイズを200-300文字に増加（ブラウザ別設定の導入）
+- チャンク数の上限設定（最大80チャンク）
+- チャンク遷移失敗時のリトライ回数を増加（2回→5回）
+- `catchError` で処理停止ではなく次チャンクへスキップする仕組み
+- タイムアウト検知と自動リカバリー機能
 
-#### 2. resolveContentの設定方法が不適切
-```typescript
-// service.ts:117-119
-// @ts-expect-error - resolveContent is private but we need to set it
-this.tabManager['resolveContent'] = this.createContentResolver;
-```
-
-- `resolveContent`は`private readonly`プロパティ
-- 型チェックを無理やり回避
-- コンストラクタで渡すべき設計を後から代入
-
-#### 3. Observable構造への影響
-- **影響なし**: TTSEngineは最終的なテキストのみを受け取る
-- データ準備レイヤーと再生レイヤーが完全に分離されている
+### AMO配布版とabout:debugging版の違い
+| 項目 | about:debugging（開発版） | AMO配布版 |
+|------|-------------------------|----------|
+| 拡張機能ID | 一時的なID | 固定ID（manifest.jsonで指定） |
+| ストレージ | 分離 | 分離 |
+| 署名 | 不要 | Mozilla署名あり |
+| 起動タイミング | 即座 | 署名検証後（やや遅延） |
+| 権限チェック | 緩い | 厳格 |
 
 ## 生成AIの学習用コンテキスト
 
-### 背景仕様
-- `.kiro/specs/queue-prefetch-summary/requirements.md`
-  - プリフェッチ機能の要件定義
-- `.kiro/specs/queue-prefetch-summary/design.md`
-  - プリフェッチのアーキテクチャ設計
-- `CLAUDE.md`
-  - プロジェクト全体のアーキテクチャとkeep-alive戦略
-
-### 修正対象ファイル
-- `src/background/tabManager.ts`
-  - ensureTabReady()メソッドの修正（AiProcessor呼び出し削除）
-  - setContentResolver()メソッドの追加
-- `src/background/service.ts`
-  - resolveContentの設定方法を改善
-
-### 参照ファイル
-- `src/background/aiPrefetcher.ts`
-  - プリフェッチのコーディネーター
-- `src/background/prefetch/scheduler.ts`
-  - プリフェッチのスケジューリング
-- `src/background/prefetch/worker.ts`
-  - 要約・翻訳のパイプライン
+### コア実装ファイル
 - `src/background/ttsEngine.ts`
-  - Observable構造（影響確認用）
+  - TTSエンジンのメイン実装
+  - 音声リスト取得ロジック（656-676行目）
+  - チャンクサイズ計算ロジック（101-107行目）
+  - Observable-basedチャンク遷移（153-198行目）
+
+- `src/shared/utils/browser.ts`
+  - ブラウザ判定ロジック（getBrowserType: 177-184行目）
+  - 機能サポート判定（isFeatureSupported: 187-199行目）
+
+- `src/shared/utils/storage.ts`
+  - デフォルト設定定義（5-10行目）
+  - 設定の読み込み・保存処理
+
+- `src/shared/utils/textChunker.ts`
+  - テキストチャンク化ユーティリティ
+  - チャンク設定のデフォルト値（48-49行目）
+
+### 設定ファイル
+- `src/manifest/manifest.firefox.json`
+  - Firefox用manifest設定（persistent: true）
 
 ## Process
 
-### process1 AiProcessorの重複処理を削除
-#### sub1 TabManager.ensureTabReady()内のAI処理を削除
-@target: `src/background/tabManager.ts`
-@ref: `src/background/aiProcessor.ts`
+### process1 音声設定の初期化改善
 
-- [x] 調査: ensureTabReady()でAiProcessorが呼ばれる箇所を特定（lines 1003-1017）
-- [ ] TabManager.ensureTabReady()内のAI処理ブロックを削除
-  - lines 1003-1017の`aiProcessor.processContent()`呼び出しを削除
-  - プリフェッチ結果（`tab.summary`, `tab.translation`）をそのまま使用
-- [ ] selectPlaybackContent()の優先順位が正しく機能することを確認
-  - `translation` → `summary` → `content` の優先順位
-- [ ] AiProcessorインスタンスの保持が不要になったか確認
-  - constructor内の`this.aiProcessor`初期化を削除検討
+#### sub1 音声リスト取得タイムアウトの延長
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] `getVoices()` メソッドのタイムアウトを3秒→10秒に変更（671行目）
+- [ ] Firefox向けの追加タイムアウト設定を導入
 
-#### sub2 resolveContentの結果を正しく反映
-@target: `src/background/tabManager.ts:968-1001`
-@ref: `src/background/service.ts:126-171`
+#### sub2 日本語音声優先選択ロジックの追加
+@target: `src/background/ttsEngine.ts`
+@ref: `src/popup/components/SettingsPanel.tsx` (63-70行目の日本語音声フィルタリングロジック)
+- [ ] `applyVoice()` メソッドで音声が見つからない場合に日本語音声を自動選択
+- [ ] 日本語音声のフィルタリングロジックを共通化
 
-- [ ] resolveContentから返却されたsummary/translationをTabInfoに反映
-  - 既存のコード（lines 980-988）が正しく動作していることを確認
-- [ ] プリフェッチ結果がない場合のフォールバック処理を確認
-  - `resolveContent`がnullを返した場合の処理（lines 989-996）
+#### sub3 音声リスト取得リトライ機構の実装
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] `getVoices()` メソッドに失敗時のリトライロジックを追加（最大3回）
+- [ ] exponential backoff（500ms, 1s, 2s）を実装
+- [ ] リトライ状況のログ出力
 
-### process2 resolveContentの設計を改善
-#### sub1 TabManagerにsetContentResolver()を追加
-@target: `src/background/tabManager.ts`
+### process2 チャンクサイズの最適化
 
-- [ ] publicメソッド`setContentResolver(resolver: ContentResolver)`を追加
-  - `resolveContent`を`private`から設定可能にする
-  - 型安全な設定方法を提供
-- [ ] constructorのoptionsから`resolveContent`を受け取る既存実装を維持
-  - 下位互換性を保つ
+#### sub1 ブラウザ別チャンクサイズ設定の導入
+@target: `src/background/ttsEngine.ts`
+@ref: `src/shared/utils/browser.ts`
+- [ ] Firefox判定時にチャンクサイズを大きくする（200-300文字）
+- [ ] Chrome向けは現状維持（動的計算）
+- [ ] チャンクサイズ計算ロジックをリファクタリング（101-112行目）
 
-#### sub2 BackgroundOrchestratorから正式に設定
-@target: `src/background/service.ts:117-119`
+#### sub2 チャンク数の上限設定
+@target: `src/background/ttsEngine.ts`, `src/shared/utils/textChunker.ts`
+@ref: なし
+- [ ] チャンク数が50を超える場合に警告ログを出力
+- [ ] チャンクサイズを自動調整してチャンク数を削減するロジック
+- [ ] 長文コンテンツ用の特別処理を実装
 
-- [ ] `@ts-expect-error`を削除
-- [ ] constructorで`resolveContent`をTabManagerに渡す
-  - BackgroundOrchestratorのconstructor内でTabManagerを初期化する際に渡す
-  - または、TabManager初期化後に`setContentResolver()`を呼び出す
-- [ ] 型エラーが発生しないことを確認
+#### sub3 速度別チャンクサイズの調整
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] rate 2.5-3.0でのチャンクサイズを最低150文字に設定
+- [ ] 保守的な係数（charsPerSecond）をFirefox向けに緩和
 
-### process3 プリフェッチログの追加
-#### sub1 スケジューリングログ
-@target: `src/background/prefetch/scheduler.ts`
+### process3 エラーハンドリング強化
 
-- [ ] PrefetchScheduler.handleStatusUpdate()にジョブ投入ログを追加
-  - スケジューリングされたタブIDと優先度を出力
-- [ ] reconcileSchedule()でキャンセルされたジョブのログを追加
+#### sub1 チャンク遷移リトライ回数の増加
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] `maxChunkRetries` を2→5に変更（32行目）
+- [ ] リトライ時の待機時間を調整（434行目）
 
-#### sub2 ワーカーログ
-@target: `src/background/prefetch/worker.ts`
+#### sub2 catchErrorでの処理改善
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] Observable-basedチャンク遷移（192-196行目）の `catchError` を修正
+- [ ] エラー発生時に `EMPTY` ではなく次チャンクへスキップ
+- [ ] エラー内容を詳細にログ出力
 
-- [ ] PrefetchWorker.runJob()の処理開始時にログ追加
-  - 要約/翻訳の有効/無効状態を出力
-- [ ] 要約生成完了時、翻訳生成完了時のログを追加
-  - 生成されたテキストの長さとプレビューを出力
+#### sub3 タイムアウト検知と自動リカバリー
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] 各チャンクの読み上げ開始時刻を記録
+- [ ] 20秒経過しても次チャンクに進まない場合、強制スキップ
+- [ ] タイムアウト検知時のユーザー通知機能（オプション）
 
-#### sub3 resolveContent待機ログ
-@target: `src/background/service.ts:140-156`
+### process4 デバッグ機能追加
 
-- [ ] 既存のログが適切か確認
-  - "Waiting for AI prefetch"
-  - "AI prefetch completed"
-  - "AI prefetch timeout"
-- [ ] プリフェッチ結果の有無をログに追加
-  - summary/translationが実際に取得できたかを出力
+#### sub1 Firefox版詳細ログ出力
+@target: `src/background/ttsEngine.ts`, `src/background/index.ts`
+@ref: `src/shared/utils/browser.ts`
+- [ ] Firefox判定時にログレベルを詳細モードに変更
+- [ ] チャンク処理の各段階でログ出力
+- [ ] 音声リスト取得状況のログ出力
+
+#### sub2 チャンク処理進捗の可視化
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] チャンク処理進捗をコンソールに出力（X/Y chunks completed）
+- [ ] 各チャンクの実際の読み上げ時間を記録（467-474行目を拡張）
+- [ ] 異常に長いチャンク処理時間を検出
+
+#### sub3 エラー発生時の詳細情報収集
+@target: `src/background/ttsEngine.ts`
+@ref: なし
+- [ ] エラー発生時にチャンク内容、設定、ブラウザ情報を記録
+- [ ] エラー統計情報の収集（エラー種別ごとのカウント）
+
+### process5 音声の性別選択機能の実装（ハイブリッド方式）
+
+#### sub1 voiceSelectorユーティリティの作成（パターンマッチング実装）
+@target: `src/shared/utils/voiceSelector.ts` (新規作成)
+@ref: `src/popup/components/SettingsPanel.tsx` (63-70行目の日本語音声フィルタリングロジック)
+- [ ] `VoiceFilter` インターフェースの定義（gender, language, quality）
+- [ ] `filterVoices()` 関数の実装（音声リストのフィルタリング）
+- [ ] `isFemaleVoice()` 関数の実装（音声名からの性別推測）
+  - 女性キーワードリスト: 'female', 'woman', 'girl', '女性', 'kyoko', 'samantha', 'siri', etc.
+  - 男性キーワードリスト: 'male', 'man', 'boy', '男性', 'hattori', 'daniel', 'thomas', etc.
+  - デフォルト判定ロジック（日本語音声は女性を優先）
+- [ ] `isMaleVoice()` 関数の実装（音声名からの男性判定）
+
+#### sub2 音声メタデータJSONの作成
+@target: `src/shared/data/voiceMetadata.json` (新規作成)
+@ref: なし
+- [ ] JSON構造の定義（言語コード → 音声リスト）
+- [ ] 日本語音声（ja-JP）のメタデータ定義
+  - Kyoko (macOS/iOS): female, premium
+  - Google 日本語 (Chrome/Edge): female, standard
+  - Microsoft Ayumi (Windows/Edge): female, premium
+  - Microsoft Ichiro (Windows): male, standard
+- [ ] 英語音声（en-US）の主要音声を定義（オプション）
+- [ ] メタデータのバリデーション（TypeScript型定義）
+
+#### sub3 ハイブリッド方式のgetVoiceGender実装
+@target: `src/shared/utils/voiceSelector.ts`
+@ref: `src/shared/data/voiceMetadata.json`
+- [ ] `VoiceMetadata` 型定義の作成
+- [ ] `getVoiceGenderFromMetadata()` 関数の実装（JSON定義から検索）
+  - 言語コードによる検索
+  - 音声名の部分一致判定
+- [ ] `getVoiceGender()` 関数の実装（ハイブリッド方式）
+  - ステップ1: JSON定義から検索
+  - ステップ2: 見つからなければパターンマッチング
+  - ステップ3: デフォルト値（female）を返す
+- [ ] `getVoiceQuality()` 関数の実装（音声品質の取得）
+
+#### sub4 UI改善（設定パネルに性別フィルター追加）
+@target: `src/popup/components/SettingsPanel.tsx`
+@ref: `src/shared/utils/voiceSelector.ts`, `src/shared/types/tts.ts`
+- [ ] TTSSettings型に `preferredGender` フィールドを追加（'any' | 'female' | 'male'）
+- [ ] 性別フィルタードロップダウンの追加（音声選択の上部）
+  - オプション: "すべて" (any) / "女性優先" (female) / "男性優先" (male)
+- [ ] `filterVoices()` を使用して音声リストを動的にフィルタリング
+- [ ] フィルタリング後の音声を optgroup で表示
+  - "推奨音声（性別一致）" グループ
+  - "その他の音声" グループ
+- [ ] 性別フィルター変更時にストレージへ保存
+
+#### sub5 デフォルト音声選択ロジックの改善
+@target: `src/background/ttsEngine.ts`
+@ref: `src/shared/utils/voiceSelector.ts`, `src/shared/utils/storage.ts`
+- [ ] `applyVoice()` メソッドにフォールバックロジックを追加
+  - voice指定あり → 指定音声を検索
+  - voice指定なし、または見つからない → 性別優先選択
+- [ ] `selectBestVoice()` メソッドの新規作成
+  - 言語フィルタリング（日本語優先）
+  - 性別フィルタリング（設定から取得）
+  - 品質優先順位（premium > standard）
+  - プラットフォーム判定（ローカル音声を優先）
+- [ ] 選択した音声の情報をログ出力
+- [ ] 自動選択した音声をストレージに保存
+
+#### sub6 ストレージへの音声性別設定の保存
+@target: `src/shared/utils/storage.ts`
+@ref: `src/shared/types/tts.ts`
+- [ ] DEFAULT_SETTINGSに `preferredGender: 'female'` を追加
+- [ ] `validateSettings()` で `preferredGender` のバリデーション
+- [ ] 設定の読み込み・保存処理の確認
+
+#### sub7 既存の日本語音声フィルタリングロジックの共通化
+@target: `src/popup/components/SettingsPanel.tsx`
+@ref: `src/shared/utils/voiceSelector.ts`
+- [ ] `getJapaneseVoices()` を `voiceSelector.ts` に移行
+- [ ] `getAllVoices()` を削除し、`filterVoices()` を使用
+- [ ] SettingsPanelでの音声リスト取得を `voiceSelector` 経由に変更
 
 ### process10 ユニットテスト
 
-#### sub1 TabManager.ensureTabReady()のテスト
-@target: `src/background/__tests__/tabManager.test.ts`
+#### sub1 音声リスト取得テスト
+@target: `src/background/__tests__/ttsEngine.test.ts`
+@ref: `src/background/ttsEngine.ts`
+- [ ] `getVoices()` メソッドのタイムアウト動作をテスト
+- [ ] リトライ機構のテスト
+- [ ] 日本語音声優先選択ロジックのテスト
 
-- [ ] プリフェッチ結果がある場合のテスト
-  - resolveContentがsummary/translationを返す場合
-  - TabInfoに正しく反映されることを確認
-- [ ] プリフェッチ結果がない場合のテスト
-  - resolveContentがnullを返す場合
-  - コンテンツリクエストが発行されることを確認
-- [ ] AiProcessorが呼ばれないことを確認
-  - aiProcessor.processContent()がモックされていないことを確認
+#### sub2 チャンクサイズ計算テスト
+@target: `src/background/__tests__/ttsEngine.test.ts`
+@ref: `src/background/ttsEngine.ts`
+- [ ] Firefox向けチャンクサイズ計算のテスト
+- [ ] Chrome向けチャンクサイズ計算のテスト（既存動作の維持確認）
+- [ ] 速度別チャンクサイズのテスト
 
-#### sub2 プリフェッチ統合テスト
-@target: `src/background/__tests__/aiPrefetcher.test.ts`
+#### sub3 エラーハンドリングテスト
+@target: `src/background/__tests__/ttsEngine.test.ts`
+@ref: `src/background/ttsEngine.ts`
+- [ ] チャンク遷移失敗時のリトライテスト
+- [ ] `catchError` での次チャンクスキップテスト
+- [ ] タイムアウト検知のテスト
 
-- [ ] 既存のテストが全てパスすることを確認
-- [ ] プリフェッチ → 待機 → 読み上げのフロー全体をテスト
-  - PrefetchWorkerが要約/翻訳を生成
-  - resolveContentが待機して結果を取得
-  - TabManagerが結果を使用して読み上げ
+#### sub4 voiceSelectorユーティリティテスト
+@target: `src/shared/utils/__tests__/voiceSelector.test.ts` (新規作成)
+@ref: `src/shared/utils/voiceSelector.ts`
+- [ ] `isFemaleVoice()` 関数のテスト
+  - 明示的な女性キーワードを含む音声名（'female', 'Kyoko', 'Samantha'等）
+  - 明示的な男性キーワードを含む音声名（'male', 'Daniel', 'Thomas'等）
+  - キーワードなしの音声名（デフォルトでfemale判定）
+- [ ] `isMaleVoice()` 関数のテスト
+- [ ] `filterVoices()` 関数のテスト
+  - gender='female'フィルター
+  - gender='male'フィルター
+  - language='ja'フィルター
+  - 複合フィルター（gender + language）
+- [ ] `getVoiceGenderFromMetadata()` 関数のテスト
+  - JSON定義に存在する音声（正確な性別を返す）
+  - JSON定義に存在しない音声（'unknown'を返す）
+- [ ] `getVoiceGender()` 関数のテスト（ハイブリッド方式）
+  - JSON定義がある場合（メタデータから取得）
+  - JSON定義がない場合（パターンマッチングへフォールバック）
+- [ ] `selectBestVoice()` 関数のテスト
+  - 日本語音声の優先選択
+  - 性別優先選択
+  - 品質優先選択（premium > standard）
 
 ### process50 フォローアップ
-
-#### sub1 パフォーマンス検証
-- [ ] プリフェッチが実際に動作することを確認
-  - 開発者ツールでログを確認
-  - タブ切り替え時の待機時間を測定
-- [ ] Observable構造（ギャップレス再生）に影響がないことを確認
-  - チャンク遷移が正常に動作することを確認
-
-#### sub2 エッジケース対応
-- [ ] AI設定が無効な場合のテスト
-  - enableAiSummary=false, enableAiTranslation=false
-  - プリフェッチがスキップされることを確認
-- [ ] APIキーが未設定の場合のテスト
-  - プリフェッチが失敗しても読み上げが継続することを確認
+<!-- 実装後に仕様変更などが発生した場合は、ここにProcessを追加する -->
 
 ### process100 リファクタリング
 
-#### sub1 AiProcessorの役割整理
-@target: `src/background/aiProcessor.ts`
+#### sub1 ブラウザ別設定の共通化
+@target: `src/shared/constants.ts` (新規作成)
+@ref: `src/background/ttsEngine.ts`, `src/shared/utils/browser.ts`
+- [ ] ブラウザ別のTTS設定を定数として定義
+- [ ] チャンクサイズ、タイムアウト、リトライ回数等を一元管理
+- [ ] 既存コードを新しい定数定義を使用するように修正
 
-- [ ] AiProcessorの使用箇所を確認
-  - TabManagerから完全に削除できるか検討
-  - 他に使用している箇所がないか確認
-- [ ] 不要になった場合は削除を検討
-
-#### sub2 型定義の整理
-@target: `src/shared/types.ts`
-
-- [ ] TabInfoのprocessedContentフィールドが不要になったか確認
-- [ ] ContentResolverの型定義が適切か確認
+#### sub2 音声選択ロジックの共通化
+@target: `src/shared/utils/voiceSelector.ts` (新規作成)
+@ref: `src/background/ttsEngine.ts`, `src/popup/components/SettingsPanel.tsx`
+- [ ] 日本語音声フィルタリングロジックを共通ユーティリティに抽出
+- [ ] 音声選択の優先順位ロジックを実装
+- [ ] ポップアップとバックグラウンドで共通コードを使用
 
 ### process200 ドキュメンテーション
 
-- [x] CLAUDE.mdにプリフェッチ機能の動作を追記
-  - AiPrefetcherによる先行処理の仕組み（セクション5に追加）
-  - resolveContentによる待機ロジック（コード例付きで説明）
-  - 2重処理問題の解決について（修正内容を記載）
-- [x] .kiro/specs/queue-prefetch-summary/design.mdを更新
-  - 実装状況を反映（✅マークで完了状態を表示）
-  - 既知の問題を削除（Migration Strategy の完了フェーズを表記）
-  - Requirements Traceability に R4（2重処理問題の解決）を追加
-
+- [ ] `CLAUDE.md` のトラブルシューティングセクションに本問題と解決策を追記
+- [ ] Firefox特有の制約事項を記載
+- [ ] AMO配布版とabout:debugging版の違いを明記
+- [ ] チャンクサイズ設定の推奨値をドキュメント化
+- [ ] エラーログの読み方ガイドを作成
+- [ ] 音声選択機能の使い方ガイドを作成
+  - 性別フィルターの使用方法
+  - 推奨音声の説明
+  - 各プラットフォームで利用可能な音声リスト
+  - 音声品質の違い（premium vs standard）
+- [ ] `src/shared/data/voiceMetadata.json` の構造とメンテナンス方法をドキュメント化
+  - 新しい音声の追加方法
+  - メタデータのフィールド説明
+  - 音声名の命名規則
+- [ ] `README.md` に音声選択機能のスクリーンショット追加（オプション）
