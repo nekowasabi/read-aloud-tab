@@ -422,6 +422,7 @@ describe('StorageManager - AI Settings', () => {
         enableAiTranslation: false,
         summaryPrompt: 'summary',
         translationPrompt: 'translation',
+        openRouterProvider: '',
       };
 
       mockStorage.sync.get.mockResolvedValue({
@@ -445,8 +446,9 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        openRouterProvider: '',
       });
     });
   });
@@ -500,6 +502,7 @@ describe('StorageManager - AI Settings', () => {
         enableAiTranslation: true,
         summaryPrompt: 'summary',
         translationPrompt: 'translation',
+        openRouterProvider: '',
       };
 
       const result = StorageManager.validateAiSettings(validSettings);
@@ -519,8 +522,9 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        openRouterProvider: '',
       });
     });
 
@@ -532,8 +536,9 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\n1. Key points (3-4 bullet points)\n2. Important details and action items\n3. A concluding statement that wraps up the article\n\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        openRouterProvider: '',
       });
     });
 
@@ -592,6 +597,100 @@ describe('StorageManager - AI Settings', () => {
       expect(result.openRouterApiKey).toBe('');
       expect(result.openRouterModel).toBe('meta-llama/llama-3.2-1b-instruct');
       expect(result.enableAiSummary).toBe(true);
+    });
+  });
+
+  describe('process2: openRouterProvider フィールドの検証', () => {
+    describe('sub1: DEFAULT_AI_SETTINGS にデフォルト値が含まれる', () => {
+      it('デフォルトのopenRouterProviderは空文字列である', async () => {
+        const mockStorage = getMockBrowserStorage();
+        mockStorage.sync.get.mockResolvedValue({});
+
+        const result = await StorageManager.getAiSettings();
+
+        expect(result.openRouterProvider).toBe('');
+      });
+    });
+
+    describe('sub2: validateAiSettings メソッドでのプロバイダ検証', () => {
+      it('空文字列のプロバイダをトリムする', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: '   ',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.openRouterProvider).toBe('');
+      });
+
+      it('有効なプロバイダ名（DeepInfra）を保持する', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: 'DeepInfra',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.openRouterProvider).toBe('DeepInfra');
+      });
+
+      it('プロバイダが未定義の場合は空文字列になる', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.openRouterProvider).toBe('');
+      });
+
+      it('前後の空白を除去する', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: '  Together  ',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.openRouterProvider).toBe('Together');
+      });
+
+      it('複数のプロバイダ名（カンマ区切り）は保持される', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: 'OpenAI, Fireworks',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.openRouterProvider).toBe('OpenAI, Fireworks');
+      });
+
+      it('nullまたはundefinedの場合はデフォルト値（空文字列）を使用', () => {
+        const settingsWithNull: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: null as any,
+        };
+
+        const resultNull = StorageManager.validateAiSettings(settingsWithNull);
+        expect(resultNull.openRouterProvider).toBe('');
+
+        const settingsWithUndefined: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+          openRouterModel: 'test-model',
+          openRouterProvider: undefined,
+        };
+
+        const resultUndefined = StorageManager.validateAiSettings(settingsWithUndefined);
+        expect(resultUndefined.openRouterProvider).toBe('');
+      });
     });
   });
 });

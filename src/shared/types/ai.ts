@@ -14,6 +14,8 @@ export interface AiSettings {
   summaryPrompt: string;
   /** 翻訳用システムプロンプト */
   translationPrompt: string;
+  /** 特定のプロバイダを優先する場合に指定（例: DeepInfra, Together） */
+  openRouterProvider?: string;
 }
 
 /**
@@ -41,6 +43,10 @@ export interface OpenRouterRequest {
   }>;
   /** 最大トークン数（オプション） */
   max_tokens?: number;
+  /** プロバイダルーティング設定 */
+  provider?: {
+    order: string[];
+  };
 }
 
 /**

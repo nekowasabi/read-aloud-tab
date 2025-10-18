@@ -220,11 +220,11 @@ export class AiPrefetcher {
   }
 
   private async getClient(settings: AiSettings): Promise<OpenRouterClient> {
-    const cacheKey = `${settings.openRouterApiKey}|${settings.openRouterModel}`;
+    const cacheKey = `${settings.openRouterApiKey}|${settings.openRouterModel}|${settings.openRouterProvider || ''}`;
     if (this.clientInstance && this.clientCacheKey === cacheKey) {
       return this.clientInstance;
     }
-    const client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel);
+    const client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel, settings.openRouterProvider);
     this.clientInstance = client;
     this.clientCacheKey = cacheKey;
     return client;

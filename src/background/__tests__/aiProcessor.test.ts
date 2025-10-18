@@ -63,13 +63,14 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
 
       // Act
       processor.updateSettings(settings);
 
       // Assert
-      expect(MockedOpenRouterClient).toHaveBeenCalledWith('test-key', 'test-model');
+      expect(MockedOpenRouterClient).toHaveBeenCalledWith('test-key', 'test-model', '');
     });
 
     test('APIキー未設定時にclientがnullになる', () => {
@@ -81,6 +82,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settingsWithKey);
       expect(MockedOpenRouterClient).toHaveBeenCalledTimes(1);
@@ -92,6 +94,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
 
       // Act
@@ -113,6 +116,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -129,6 +133,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: true,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -145,6 +150,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -161,6 +167,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -262,6 +269,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -283,6 +291,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -302,6 +311,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -326,6 +336,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -347,6 +358,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -373,6 +385,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'default summary',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 
@@ -434,6 +447,7 @@ describe('AiProcessor', () => {
         enableAiTranslation: false,
         summaryPrompt: 'Custom summary prompt for testing',
         translationPrompt: 'default translation',
+        openRouterProvider: '',
       };
       processor.updateSettings(settings);
 

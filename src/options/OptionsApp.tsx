@@ -166,7 +166,7 @@ export default function OptionsApp() {
     setConnectionTestResult(null);
 
     try {
-      const client = new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel);
+      const client = new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel, aiSettings.openRouterProvider);
       const result = await client.testConnection();
       setConnectionTestResult(result);
     } catch (error) {
@@ -346,6 +346,18 @@ export default function OptionsApp() {
             placeholder="meta-llama/llama-3.2-1b-instruct"
             aria-label="OpenRouterモデル名"
           />
+        </div>
+        <div className="setting-item">
+          <label htmlFor="openRouterProvider">プロバイダ指定（オプション）</label>
+          <input
+            id="openRouterProvider"
+            type="text"
+            value={aiSettings.openRouterProvider || ''}
+            onChange={(event) => handleAiSettingChange('openRouterProvider', event.target.value)}
+            placeholder="例: DeepInfra, Together, OpenAI"
+            aria-label="OpenRouterプロバイダ"
+          />
+          <p className="setting-hint">特定のプロバイダを優先したい場合に指定してください。空欄の場合は自動選択されます。</p>
         </div>
         <div className="setting-item">
           <button

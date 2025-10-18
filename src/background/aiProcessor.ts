@@ -47,7 +47,7 @@ export class AiProcessor {
    */
   updateSettings(settings: AiSettings): void {
     if (settings.openRouterApiKey && settings.openRouterModel) {
-      this.client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel);
+      this.client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel, settings.openRouterProvider);
     } else {
       this.client = null;
     }

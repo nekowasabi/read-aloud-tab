@@ -215,4 +215,179 @@ describe('OpenRouterClient', () => {
       await expect(client.translate('test', 'ja', 400)).rejects.toThrow('APIキーが無効');
     });
   });
+
+  describe('process3: プロバイダルーティング機能', () => {
+    describe('sub1: コンストラクタにプロバイダパラメータを追加', () => {
+      test('プロバイダなしでクライアントを初期化できる', () => {
+        const clientWithoutProvider = new OpenRouterClient(testApiKey, testModel);
+        expect(clientWithoutProvider).toBeDefined();
+      });
+
+      test('プロバイダありでクライアントを初期化できる', () => {
+        const clientWithProvider = new OpenRouterClient(testApiKey, testModel, 'DeepInfra');
+        expect(clientWithProvider).toBeDefined();
+      });
+
+      test('空文字列のプロバイダでクライアントを初期化できる', () => {
+        const clientWithEmptyProvider = new OpenRouterClient(testApiKey, testModel, '');
+        expect(clientWithEmptyProvider).toBeDefined();
+      });
+    });
+
+    describe('sub2-4: リクエスト生成ロジックの更新', () => {
+      test('testConnection: プロバイダが指定されている場合、リクエストボディに provider.order を含める', async () => {
+        const clientWithProvider = new OpenRouterClient(testApiKey, testModel, 'DeepInfra');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithProvider.testConnection();
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toEqual({ order: ['DeepInfra'] });
+      });
+
+      test('testConnection: プロバイダが空の場合、provider フィールドを含めない', async () => {
+        const clientWithoutProvider = new OpenRouterClient(testApiKey, testModel, '');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithoutProvider.testConnection();
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toBeUndefined();
+      });
+
+      test('testConnection: プロバイダが未指定の場合、provider フィールドを含めない', async () => {
+        const clientWithoutProvider = new OpenRouterClient(testApiKey, testModel);
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithoutProvider.testConnection();
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toBeUndefined();
+      });
+
+      test('summarize: プロバイダが指定されている場合、リクエストボディに provider.order を含める', async () => {
+        const clientWithProvider = new OpenRouterClient(testApiKey, testModel, 'Together');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'Summary' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithProvider.summarize('test content', 100);
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toEqual({ order: ['Together'] });
+      });
+
+      test('summarize: プロバイダが空の場合、provider フィールドを含めない', async () => {
+        const clientWithEmptyProvider = new OpenRouterClient(testApiKey, testModel, '');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'Summary' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithEmptyProvider.summarize('test content', 100);
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toBeUndefined();
+      });
+
+      test('translate: プロバイダが指定されている場合、リクエストボディに provider.order を含める', async () => {
+        const clientWithProvider = new OpenRouterClient(testApiKey, testModel, 'OpenAI');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: '翻訳' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithProvider.translate('test content', 'ja', 400);
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toEqual({ order: ['OpenAI'] });
+      });
+
+      test('translate: プロバイダが空の場合、provider フィールドを含めない', async () => {
+        const clientWithEmptyProvider = new OpenRouterClient(testApiKey, testModel, '');
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'test-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: testModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: '翻訳' }, finish_reason: 'stop' }],
+          }),
+        });
+
+        await clientWithEmptyProvider.translate('test content', 'ja', 400);
+
+        const callArgs = mockFetch.mock.calls[0];
+        const requestBody = JSON.parse(callArgs[1].body);
+        expect(requestBody.provider).toBeUndefined();
+      });
+    });
+  });
 });

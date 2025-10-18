@@ -72,25 +72,25 @@
 #### sub1 AiSettings インターフェースにプロバイダフィールドを追加
 @target: `src/shared/types/ai.ts`
 @ref: なし
-- [ ] `AiSettings` インターフェースに `openRouterProvider?: string` フィールドを追加
+- [x] `AiSettings` インターフェースに `openRouterProvider?: string` フィールドを追加
   - 省略可能（オプショナル）な文字列型
   - JSDocコメントで「特定のプロバイダを優先する場合に指定（例: DeepInfra, Together）」と説明
 
 #### sub2 OpenRouterRequest インターフェースにプロバイダフィールドを追加
 @target: `src/shared/types/ai.ts`
 @ref: OpenRouter API仕様（https://openrouter.ai/docs/features/provider-routing）
-- [ ] `OpenRouterRequest` インターフェースに `provider?: { order: string[] }` フィールドを追加
+- [x] `OpenRouterRequest` インターフェースに `provider?: { order: string[] }` フィールドを追加
   - 省略可能なオブジェクト型
   - JSDocコメントで「プロバイダルーティング設定」と説明
 
 #### sub3 型定義のユニットテスト作成
 @target: `src/shared/types/__tests__/ai.test.ts`（新規作成）
 @ref: `src/shared/types/ai.ts`
-- [ ] テストファイルを新規作成
-- [ ] AiSettings インターフェースのプロパティ検証テスト
+- [x] テストファイルを新規作成
+- [x] AiSettings インターフェースのプロパティ検証テスト
   - プロバイダフィールドが存在することを確認
   - 省略可能であることを確認
-- [ ] OpenRouterRequest インターフェースのプロパティ検証テスト
+- [x] OpenRouterRequest インターフェースのプロパティ検証テスト
   - provider フィールドが存在することを確認
   - provider.order が文字列配列であることを確認
 
@@ -98,20 +98,20 @@
 #### sub1 DEFAULT_AI_SETTINGS にプロバイダのデフォルト値を追加
 @target: `src/shared/utils/storage.ts`
 @ref: なし
-- [ ] `DEFAULT_AI_SETTINGS` オブジェクトに `openRouterProvider: ''` を追加
+- [x] `DEFAULT_AI_SETTINGS` オブジェクトに `openRouterProvider: ''` を追加
   - デフォルトは空文字列（プロバイダ指定なし）
 
 #### sub2 validateAiSettings メソッドにプロバイダ検証ロジックを追加
 @target: `src/shared/utils/storage.ts`
 @ref: なし
-- [ ] `validateAiSettings()` メソッド内でプロバイダのトリム処理を追加
+- [x] `validateAiSettings()` メソッド内でプロバイダのトリム処理を追加
   - `openRouterProvider: (settings.openRouterProvider ?? this.DEFAULT_AI_SETTINGS.openRouterProvider).trim()`
   - 空白文字を除去し、未定義の場合は空文字列にする
 
 #### sub3 ストレージ層のユニットテスト拡張
 @target: `src/shared/utils/__tests__/storage.test.ts`
 @ref: `src/shared/utils/storage.ts`
-- [ ] `validateAiSettings` のテストケースを追加
+- [x] `validateAiSettings` のテストケースを追加
   - 空文字列のプロバイダをトリムするテスト
   - 有効なプロバイダ名（`DeepInfra`など）を保持するテスト
   - プロバイダが未定義の場合は空文字列になるテスト
@@ -121,77 +121,77 @@
 #### sub1 コンストラクタにプロバイダパラメータを追加
 @target: `src/shared/services/openrouter.ts`
 @ref: なし
-- [ ] コンストラクタのシグネチャを更新
+- [x] コンストラクタのシグネチャを更新
   - `constructor(apiKey: string, model: string, provider?: string)`
   - 第3引数としてプロバイダを追加（省略可能）
-- [ ] プライベートプロパティを追加
+- [x] プライベートプロパティを追加
   - `private readonly provider?: string;`
-- [ ] コンストラクタ内でプロバイダを初期化
+- [x] コンストラクタ内でプロバイダを初期化
   - `this.provider = provider;`
 
 #### sub2 リクエスト生成ロジックの更新（testConnection）
 @target: `src/shared/services/openrouter.ts`
 @ref: なし
-- [ ] `testConnection()` メソッド内のリクエストボディ生成を更新
+- [x] `testConnection()` メソッド内のリクエストボディ生成を更新
   - `this.provider` が空でない場合のみ `provider: { order: [this.provider] }` を追加
   - 条件分岐: `...(this.provider ? { provider: { order: [this.provider] } } : {})`
 
 #### sub3 リクエスト生成ロジックの更新（summarize）
 @target: `src/shared/services/openrouter.ts`
 @ref: なし
-- [ ] `summarize()` メソッド内のリクエストボディ生成を更新
+- [x] `summarize()` メソッド内のリクエストボディ生成を更新
   - testConnectionと同様の条件分岐を追加
 
 #### sub4 リクエスト生成ロジックの更新（translate）
 @target: `src/shared/services/openrouter.ts`
 @ref: なし
-- [ ] `translate()` メソッド内のリクエストボディ生成を更新
+- [x] `translate()` メソッド内のリクエストボディ生成を更新
   - testConnectionと同様の条件分岐を追加
 
 #### sub5 OpenRouterClient のユニットテスト拡張
 @target: `src/shared/services/__tests__/openrouter.test.ts`
 @ref: `src/shared/services/openrouter.ts`
-- [ ] プロバイダなしでクライアントを初期化できるテスト
+- [x] プロバイダなしでクライアントを初期化できるテスト
   - `new OpenRouterClient(apiKey, model)` が正常動作
-- [ ] プロバイダありでクライアントを初期化できるテスト
+- [x] プロバイダありでクライアントを初期化できるテスト
   - `new OpenRouterClient(apiKey, model, 'DeepInfra')` が正常動作
-- [ ] 空文字列のプロバイダは無視されるテスト
+- [x] 空文字列のプロバイダは無視されるテスト
   - `new OpenRouterClient(apiKey, model, '')` でproviderフィールドがリクエストに含まれない
-- [ ] プロバイダが指定されている場合、リクエストボディに provider.order を含めるテスト
+- [x] プロバイダが指定されている場合、リクエストボディに provider.order を含めるテスト
   - fetch モックを検証し、リクエストボディに `provider: { order: ['DeepInfra'] }` が含まれることを確認
-- [ ] プロバイダが空の場合、provider フィールドを含めないテスト
+- [x] プロバイダが空の場合、provider フィールドを含めないテスト
   - fetch モックを検証し、リクエストボディに `provider` フィールドが存在しないことを確認
-- [ ] testConnection でプロバイダが正しく送信されるテスト
-- [ ] summarize でプロバイダが正しく送信されるテスト
-- [ ] translate でプロバイダが正しく送信されるテスト
+- [x] testConnection でプロバイダが正しく送信されるテスト
+- [x] summarize でプロバイダが正しく送信されるテスト
+- [x] translate でプロバイダが正しく送信されるテスト
 
 ### process4 バックグラウンド処理の更新
 #### sub1 AiProcessor の更新
 @target: `src/background/aiProcessor.ts`
 @ref: `src/shared/services/openrouter.ts`
-- [ ] `ensureClient()` メソッド内の OpenRouterClient インスタンス化を更新
+- [x] `ensureClient()` メソッド内の OpenRouterClient インスタンス化を更新
   - `new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel, settings.openRouterProvider)`
   - 第3引数としてプロバイダを追加
 
 #### sub2 AiPrefetcher の更新
 @target: `src/background/aiPrefetcher.ts`
 @ref: `src/shared/services/openrouter.ts`
-- [ ] `getClient()` メソッド内の OpenRouterClient インスタンス化を更新
+- [x] `getClient()` メソッド内の OpenRouterClient インスタンス化を更新
   - `new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel, settings.openRouterProvider)`
   - 第3引数としてプロバイダを追加
 
 #### sub3 AiProcessor のユニットテスト拡張
 @target: `src/background/__tests__/aiProcessor.test.ts`
 @ref: `src/background/aiProcessor.ts`
-- [ ] プロバイダ設定が OpenRouterClient に渡されるテスト
+- [x] プロバイダ設定が OpenRouterClient に渡されるテスト
   - モックを検証し、`new OpenRouterClient('key', 'model', 'DeepInfra')` が呼ばれることを確認
-- [ ] プロバイダが空の場合は第3引数が空文字列であることを確認するテスト
+- [x] プロバイダが空の場合は第3引数が空文字列であることを確認するテスト
 
 ### process5 UI実装
 #### sub1 設定画面にプロバイダ入力フィールドを追加
 @target: `src/options/OptionsApp.tsx`
 @ref: なし
-- [ ] OpenRouterモデル名フィールドの直後に新規フィールドを追加
+- [x] OpenRouterモデル名フィールドの直後に新規フィールドを追加
   - ラベル: 「プロバイダ指定（オプション）」
   - input要素の属性:
     - `id="openRouterProvider"`
@@ -200,42 +200,52 @@
     - `onChange={(event) => handleAiSettingChange('openRouterProvider', event.target.value)}`
     - `placeholder="例: DeepInfra, Together, OpenAI"`
     - `aria-label="OpenRouterプロバイダ"`
-- [ ] ヒントテキストを追加
+- [x] ヒントテキストを追加
   - `<p className="setting-hint">特定のプロバイダを優先したい場合に指定してください。空欄の場合は自動選択されます。</p>`
 
 #### sub2 接続テストハンドラの更新
 @target: `src/options/OptionsApp.tsx`
 @ref: `src/shared/services/openrouter.ts`
-- [ ] `handleConnectionTest()` 関数内の OpenRouterClient インスタンス化を更新
+- [x] `handleConnectionTest()` 関数内の OpenRouterClient インスタンス化を更新
   - `new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel, aiSettings.openRouterProvider)`
   - 第3引数としてプロバイダを追加
 
 #### sub3 設定画面のUIテスト拡張
 @target: `src/options/__tests__/OptionsApp.test.tsx`
 @ref: `src/options/OptionsApp.tsx`
-- [ ] プロバイダ入力フィールドが表示されるテスト
+- [x] プロバイダ入力フィールドが表示されるテスト
   - `screen.getByLabelText('OpenRouterプロバイダ')` が存在することを確認
-- [ ] プロバイダの値を変更できるテスト
+- [x] プロバイダの値を変更できるテスト
   - `fireEvent.change()` でプロバイダ名を入力し、状態が更新されることを確認
-- [ ] プロバイダの値が保存されるテスト
+- [x] プロバイダの値が保存されるテスト
   - `StorageManager.saveAiSettings()` が正しいプロバイダ値で呼ばれることを確認
-- [ ] 接続テスト時にプロバイダが使用されるテスト
+- [x] 接続テスト時にプロバイダが使用されるテスト
   - `OpenRouterClient` モックがプロバイダ引数で呼ばれることを確認
 
 ### process10 ユニットテスト
 #### sub1 全ユニットテストの実行
 @target: すべてのテストファイル
 @ref: なし
-- [ ] `npm run test` を実行
-- [ ] すべてのテストがパスすることを確認
-- [ ] カバレッジが適切であることを確認
+- [x] `npm run test` を実行
+- [x] すべてのテストがパスすることを確認
+- [x] カバレッジが適切であることを確認
+  - Statements: 57.92% (1952/3370)
+  - Branches: 48.82% (704/1442)
+  - Functions: 55.71% (351/630)
+  - Lines: 58.3% (1907/3271)
+  - テスト結果: 37 passed, 414 tests passed
 
 #### sub2 テストの追加・修正
 @target: 各テストファイル
 @ref: 各実装ファイル
-- [ ] 必要に応じてテストケースを追加
-- [ ] エッジケース（null、undefined、空文字列など）のテスト
-- [ ] 既存テストが引き続きパスすることを確認
+- [x] 必要に応じてテストケースを追加
+- [x] エッジケース（null、undefined、空文字列など）のテスト
+  - 型定義テスト: `src/shared/types/__tests__/ai.test.ts`
+  - ストレージテスト: `src/shared/utils/__tests__/storage.test.ts`
+  - OpenRouterテスト: `src/shared/services/__tests__/openrouter.test.ts`
+  - AiProcessorテスト: `src/background/__tests__/aiProcessor.test.ts`
+  - OptionsAppテスト: `src/options/__tests__/OptionsApp.test.tsx`
+- [x] 既存テストが引き続きパスすることを確認
 
 ### process20 統合テスト
 #### sub1 統合テストの追加

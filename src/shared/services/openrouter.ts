@@ -13,16 +13,19 @@ import { OPENROUTER_ERROR_MESSAGES } from '../constants';
 export class OpenRouterClient {
   private readonly apiKey: string;
   private readonly model: string;
+  private readonly provider?: string;
   private readonly endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
   /**
    * コンストラクタ
    * @param apiKey OpenRouter APIキー
    * @param model 使用するモデル名
+   * @param provider プロバイダ名（オプション）
    */
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, provider?: string) {
     this.apiKey = apiKey;
     this.model = model;
+    this.provider = provider;
   }
 
   /**
@@ -44,6 +47,7 @@ export class OpenRouterClient {
           },
         ],
         max_tokens: 10,
+        ...(this.provider ? { provider: { order: [this.provider] } } : {}),
       };
 
       const response = await this._makeRequest(request);
@@ -87,6 +91,7 @@ export class OpenRouterClient {
           },
         ],
         max_tokens: maxTokens,
+        ...(this.provider ? { provider: { order: [this.provider] } } : {}),
       };
 
       const response = await this._makeRequest(request);
@@ -134,6 +139,7 @@ export class OpenRouterClient {
           },
         ],
         max_tokens: maxTokens,
+        ...(this.provider ? { provider: { order: [this.provider] } } : {}),
       };
 
       const response = await this._makeRequest(request);
