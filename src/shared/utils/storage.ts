@@ -7,6 +7,8 @@ export class StorageManager {
     pitch: 1.0,
     volume: 1.0,
     voice: null,
+    // === process5 sub6: ストレージへの音声性別設定の保存 ===
+    preferredGender: 'female',
   };
 
   private static readonly DEFAULT_QUEUE: ReadingQueue = {
@@ -18,6 +20,7 @@ export class StorageManager {
       pitch: 1.0,
       volume: 1.0,
       voice: null,
+      preferredGender: 'female',
     },
     progressByTab: {},
     persistedAt: 0,

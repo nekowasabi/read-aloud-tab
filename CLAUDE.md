@@ -713,3 +713,270 @@ console.log('Keep-Alive Metrics:', metrics);
 //   totalDisconnects: 1
 // }
 ```
+
+## トラブルシューティング: Firefox AMO版での音声・読み上げ停止問題
+
+### process10-200: 音声・読み上げ停止問題の根本原因と解決策
+
+#### 問題1: 音声が男性になる（デフォルト音声の問題）
+
+**原因**:
+- Firefox 拡張機能がバックグラウンドで `speechSynthesis.getVoices()` を呼び出しても、初期状態では空配列を返すことがある
+- AMO（Mozilla Add-ons）版では署名検証の処理がやや遅延し、拡張機能の起動が`about:debugging`版より遅れる
+- 3秒のタイムアウトでは `voiceschanged` イベントが間に合わず、デフォルト音声（男性音声）が使用される
+- AMO版と開発版は異なる拡張機能IDを持つため、ストレージが完全に分離される
+
+**解決策**:
+1. 音声リスト取得のタイムアウトを 3秒 → **10秒** に延長
+2. 失敗時にexponential backoffで最大3回リトライ
+3. 音声が見つからない場合は日本語音声を自動選択
+4. 日本語音声フィルタリングロジックを `voiceSelector.ts` に共通化
+
+**実装ファイル**: `src/background/ttsEngine.ts` (lines 656-752)
+**定数ファイル**: `src/shared/constants.ts` (VOICES_TIMEOUT_MS, MAX_VOICE_RETRIES, VOICE_RETRY_DELAYS)
+
+#### 問題2: 読み上げが途中で止まる（チャンク遷移エラー）
+
+**原因**:
+- チャンクサイズが小さすぎる: 80-96文字は日本語では2-3文程度で非常に短い
+- 長文コンテンツで数十〜数百のチャンク遷移が発生し、エラー率が上昇
+- Firefox での `pause/resume/cancel` の動作が Chrome と異なり、予期しないエラーが発生しやすい
+- Observable-basedチャンク遷移で `catchError` が `EMPTY` を返し、1回目のエラーで処理が完全停止
+
+**解決策**:
+
+##### 2-1: チャンクサイズの最適化
+
+```typescript
+// Firefox: 保守的な speed から緩和
+const charsPerSecond = BrowserAdapter.getBrowserType() === 'firefox' ? 3 : 4;
+const maxChunkSize = Math.max(
+  rate >= 2.5 ? 150 : 40,  // 高速度は最低150文字
+  SAFE_READING_TIME_SEC * charsPerSecond * rate
+);
+```
+
+- **Chrome**: `maxChunkSize = max(40, 8 * 4 * rate)` (保守的)
+- **Firefox**: `maxChunkSize = max(40, 8 * 3 * rate)` (緩和)
+- **高速度 (rate 2.5-3.0)**: 最低150文字に設定
+
+**実装ファイル**: `src/background/ttsEngine.ts` (lines 756-794)
+**定数ファイル**: `src/shared/constants.ts` (CHARS_PER_SECOND_FIREFOX, MIN_CHUNK_SIZE_HIGH_SPEED)
+
+##### 2-2: エラーハンドリングの強化
+
+```typescript
+// catchError での処理改善
+catchError((error) => {
+  if (this.chunkRetryCount >= this.maxChunkRetries) {
+    // 最大リトライ数に達した場合のみ停止
+    return EMPTY;
+  }
+  // リトライ中のエラーはスキップして次チャンクへ
+  return EMPTY;
+})
+```
+
+- リトライ回数: 2 → **5回** に増加
+- エラー発生時の詳細ログ出力（チャンク番号、リトライ数、エラーメッセージ）
+- 最大リトライ数に達した場合のみ処理停止、それまではスキップして継続
+
+**実装ファイル**: `src/background/ttsEngine.ts` (lines 210-246, 281-331)
+**定数ファイル**: `src/shared/constants.ts` (MAX_CHUNK_RETRIES, CHUNK_RETRY_WAIT_MS)
+
+##### 2-3: タイムアウト検知と自動リカバリー
+
+```typescript
+// onstart: 各チャンクの開始時刻を記録
+this._chunkStartTime = Date.now();
+
+// onend: チャンク間ギャップを検知
+if (gap > 20000) {  // 20秒以上
+  this.logger.warn(`Heartbeat gap: ${gap}ms (>20s threshold)`);
+}
+```
+
+- 各チャンク開始時に `_chunkStartTime` を記録
+- チャンク間ギャップが 20秒を超えた場合に警告ログ
+- 実際の読み上げ時間を計測してログ出力
+
+**実装ファイル**: `src/background/ttsEngine.ts` (lines 532-546, 559)
+**定数ファイル**: `src/shared/constants.ts` (CHUNK_GAP_WARNING_THRESHOLD_MS)
+
+#### AMO配布版とabout:debugging版の違い
+
+| 項目 | about:debugging版 | AMO配布版 |
+|------|------------------|----------|
+| 拡張機能ID | 一時的 (毎回変更) | 固定 (manifest.jsonで指定) |
+| ストレージ | 分離 | 分離 |
+| 署名 | 不要 | Mozilla署名必須 |
+| 起動タイミング | 即座 | 署名検証後 (数秒遅延) |
+| 権限チェック | 緩い | 厳格 |
+| 音声リスト初期化 | 高速 (< 1秒) | 遅延 (2-3秒) |
+
+**対応方法**:
+- 全ての音声取得タイムアウト値を増加（3秒 → 10秒）
+- リトライ機構で初期化遅延に対応
+- デフォルト音声の自動選択で、失敗時のフォールバック確保
+
+#### Firefox 特有の制約事項
+
+1. **persistent: true による影響**
+   - バックグラウンドスクリプトが永続化されるため、Service Workerの 30秒タイムアウト問題がない
+   - Web Speech API が安定して実行される
+   - Offscreen Document による keep-alive 処理は不要
+
+2. **pause/resume/cancel の動作**
+   - Chrome: `pause/resume` で再開位置を保持
+   - Firefox: `cancel` でのみ安定、`pause` の動作が不安定
+   - 本実装では `pause` で `cancel()` を呼び出し、resumed で再度チャンク開始
+
+3. **speechSynthesis.getVoices()**
+   - 初期状態では空配列を返す可能性が高い
+   - `voiceschanged` イベント発火まで待機が必要
+   - 本実装では Promise+タイムアウト+リトライで対応
+
+#### チャンクサイズ設定の推奨値
+
+| 再生速度 | Chrome 推奨 | Firefox 推奨 | 理由 |
+|----------|-----------|------------|------|
+| 1.0x | 32文字 | 32文字 | 保守的 |
+| 1.5x | 48文字 | 48文字 | 保守的 |
+| 2.0x | 64文字 | 64文字 | 標準 |
+| 2.5x | 150文字 | 150文字 | 高速優先 |
+| 3.0x | 150文字 | 150文字 | 高速優先 |
+
+**チャンク数上限**: 50チャンク以上で警告ログ出力
+**Web Speech API 制限**: 約 15秒のタイムアウト → 8秒の安全マージン設定
+
+#### エラーログの読み方ガイド
+
+**音声初期化エラー**:
+```
+[TTSEngine] Failed to get voices after 3 retries (exponential backoff)
+→ 対応: Firefox を再起動、about:addons で拡張機能を再有効化
+```
+
+**チャンク遷移エラー**:
+```
+[TTSEngine] Chunk transition failed - detailed error report {
+  chunkIndex: 5,
+  totalChunks: 20,
+  retryCount: 2,
+  maxRetries: 5,
+  errorMessage: "interrupted"
+}
+→ 対応: 読み上げ継続（自動リトライで対応）
+```
+
+**20秒以上のギャップ**:
+```
+[TTSEngine] Heartbeat gap: 25000ms (>20s threshold)
+→ 対応: システム負荷が高い可能性。プロセスマネージャーで CPU/メモリ確認
+```
+
+**長文コンテンツ警告**:
+```
+[TTSEngine] High chunk count detected (60 chunks)
+→ 対応: 要約機能の利用を検討、または読み上げ速度を上げる
+
+#### 音声選択機能の使い方ガイド
+
+##### 1. 性別フィルターの使用方法
+
+設定パネル → 「音声設定」 → 「音声の性別」で以下を選択:
+- **すべて (any)**: 利用可能な全音声から選択
+- **女性優先 (female)**: 女性音声を優先（デフォルト）
+- **男性優先 (male)**: 男性音声を優先
+
+**推奨音声（性別一致）**グループと**その他の音声**グループで表示
+
+##### 2. 推奨音声の説明
+
+各プラットフォームでの推奨音声:
+
+**macOS/iOS**:
+- Kyoko (女性、premium) ← 推奨（最も自然）
+- Daniel (男性、standard)
+
+**Chrome/Edge (Web Speech API)**:
+- Google 日本語 (女性、standard)
+- Google UK English (男性、standard)
+
+**Windows**:
+- Microsoft Ayumi (女性、premium) ← 推奨
+- Microsoft Ichiro (男性, standard)
+
+**Android**:
+- Google 日本語 (女性、standard)
+- Google US English (男性、standard)
+
+##### 3. 各プラットフォームで利用可能な音声リスト
+
+**ローカル音声 (localService: true)** - 高速・安定:
+- macOS/iOS/Windows: OS 提供の音声
+- インターネット接続不要
+
+**クラウド音声 (localService: false)** - 自然・高品質:
+- Chrome/Edge: Google Text-to-Speech
+- Firefox: Web Speech API の Cloud 音声
+- インターネット接続必須
+
+##### 4. 音声品質の違い（premium vs standard）
+
+| 品質 | 特性 | 対応プラットフォーム |
+|------|------|-------------------|
+| premium | 自然、人間らしい、高速対応 | macOS/iOS Kyoko、Windows Ayumi |
+| standard | 標準的、機械的やや、処理遅い | Chrome/Edge/Firefox Google 音声 |
+
+**推奨**: premium 品質が利用可能な場合はそちらを優先
+
+#### src/shared/data/voiceMetadata.json の構造とメンテナンス方法
+
+##### JSON構造
+
+```json
+{
+  "ja-JP": [
+    {
+      "name": "Kyoko",
+      "gender": "female",
+      "quality": "premium"
+    },
+    {
+      "name": "Google 日本語",
+      "gender": "female",
+      "quality": "standard"
+    }
+  ],
+  "en-US": [
+    {
+      "name": "Daniel",
+      "gender": "male",
+      "quality": "standard"
+    }
+  ]
+}
+```
+
+##### 新しい音声の追加方法
+
+1. 対象言語コードのエントリーに新規オブジェクトを追加
+2. `name`: 音声名（Web Speech API の `voice.name` 値）
+3. `gender`: `"female"` or `"male"` or `"unknown"`
+4. `quality`: `"premium"` or `"standard"`
+5. テスト: `src/shared/utils/__tests__/voiceSelector.test.ts` に新規テストケース追加
+
+##### メタデータのフィールド説明
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| name | string | 音声の正式名称（Web Speech API の `voice.name` と一致） |
+| gender | string | 音声の性別 |
+| quality | string | 音声品質（premium: 高品質・遅い、standard: 標準・高速） |
+
+##### 命名規則
+
+- 言語コード: ISO 639-1 + ISO 3166-1 (例: ja-JP, en-US, zh-CN)
+- 音声名: Web Speech API で使用されている正式名
+- 大文字・小文字を区別（完全一致）

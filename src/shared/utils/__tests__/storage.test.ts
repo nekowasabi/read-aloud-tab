@@ -394,6 +394,7 @@ describe('Storage Migration', () => {
             pitch: 1.0,
             volume: 1.0,
             voice: null,
+            preferredGender: 'female' as const,
           },
         },
         schemaVersion: 2,

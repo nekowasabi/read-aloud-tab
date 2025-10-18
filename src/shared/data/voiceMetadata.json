@@ -1,0 +1,73 @@
+{
+  "ja-JP": [
+    {
+      "name": "Kyoko",
+      "gender": "female",
+      "quality": "premium"
+    },
+    {
+      "name": "Google 日本語",
+      "gender": "female",
+      "quality": "standard"
+    },
+    {
+      "name": "Ayumi",
+      "gender": "female",
+      "quality": "premium"
+    },
+    {
+      "name": "Ichiro",
+      "gender": "male",
+      "quality": "standard"
+    },
+    {
+      "name": "Hattori",
+      "gender": "male",
+      "quality": "standard"
+    }
+  ],
+  "en-US": [
+    {
+      "name": "Samantha",
+      "gender": "female",
+      "quality": "premium"
+    },
+    {
+      "name": "Victoria",
+      "gender": "female",
+      "quality": "standard"
+    },
+    {
+      "name": "Moira",
+      "gender": "female",
+      "quality": "standard"
+    },
+    {
+      "name": "Daniel",
+      "gender": "male",
+      "quality": "premium"
+    },
+    {
+      "name": "Mark",
+      "gender": "male",
+      "quality": "standard"
+    },
+    {
+      "name": "Thomas",
+      "gender": "male",
+      "quality": "standard"
+    }
+  ],
+  "en-GB": [
+    {
+      "name": "Karen",
+      "gender": "female",
+      "quality": "standard"
+    },
+    {
+      "name": "Daniel",
+      "gender": "male",
+      "quality": "standard"
+    }
+  ]
+}

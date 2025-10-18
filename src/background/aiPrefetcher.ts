@@ -19,8 +19,8 @@ interface AiPrefetcherOptions {
   storage?: Pick<typeof chrome.storage, 'local'>;
 }
 
-const DEFAULT_SUMMARY_MAX_TOKENS = 480;
-const DEFAULT_TRANSLATION_MAX_TOKENS = 1200;
+const DEFAULT_SUMMARY_MAX_TOKENS = 4500;
+const DEFAULT_TRANSLATION_MAX_TOKENS = 6000;
 const DEFAULT_SETTINGS_TTL = 0;
 const STATUS_STORAGE_KEY = 'prefetch_status';
 

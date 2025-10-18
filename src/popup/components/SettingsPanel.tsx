@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TTSSettings } from '../../shared/types';
 import IgnoreListManager from './IgnoreListManager';
+// === process5 sub4: UI改善（設定パネルに性別フィルター追加）===
+import { filterVoices, getVoiceGender, VoiceFilter } from '../../shared/utils/voiceSelector';
 
 interface Props {
   settings: TTSSettings;
@@ -60,13 +62,9 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
     return value.toFixed(decimals);
   };
 
+  // === process5 sub4: UI改善（設定パネルに性別フィルター追加）===
   const getJapaneseVoices = (): SpeechSynthesisVoice[] => {
-    return voices.filter(voice =>
-      voice.lang.startsWith('ja') ||
-      voice.lang.includes('JP') ||
-      voice.name.includes('Japanese') ||
-      voice.name.includes('日本')
-    );
+    return filterVoices(voices, { language: 'ja' });
   };
 
   const getAllVoices = (): SpeechSynthesisVoice[] => {
@@ -147,6 +145,22 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
                 <span>普通</span>
                 <span>高い</span>
               </div>
+            </label>
+          </div>
+
+          {/* === process5 sub4: UI改善（設定パネルに性別フィルター追加）=== */}
+          <div className="setting-item">
+            <label>
+              <span className="setting-label">性別フィルター</span>
+              <select
+                value={localSettings.preferredGender || 'female'}
+                onChange={(e) => handleSettingChange('preferredGender', e.target.value)}
+                className="voice-select"
+              >
+                <option value="any">すべて</option>
+                <option value="female">女性優先</option>
+                <option value="male">男性優先</option>
+              </select>
             </label>
           </div>
 

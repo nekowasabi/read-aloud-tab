@@ -139,4 +139,29 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     expect((prefetcher as any).clientInstance).toBeNull();
     expect((prefetcher as any).clientCacheKey).toBeNull();
   });
+
+  it('uses default token counts of 4500 for summary and 6000 for translation', () => {
+    const prefetcher = new AiPrefetcher({
+      tabManager: tabManagerMock as TabManager,
+      broadcast: broadcastMock,
+      storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+    });
+
+    // Check private fields directly
+    expect((prefetcher as any).summaryMaxTokens).toBe(4500);
+    expect((prefetcher as any).translationMaxTokens).toBe(6000);
+  });
+
+  it('allows custom token counts to override defaults', () => {
+    const prefetcher = new AiPrefetcher({
+      tabManager: tabManagerMock as TabManager,
+      broadcast: broadcastMock,
+      storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      summaryMaxTokens: 999,
+      translationMaxTokens: 888,
+    });
+
+    expect((prefetcher as any).summaryMaxTokens).toBe(999);
+    expect((prefetcher as any).translationMaxTokens).toBe(888);
+  });
 });

@@ -34,6 +34,25 @@ describe('AiProcessor', () => {
     jest.restoreAllMocks();
   });
 
+  describe('constructor options', () => {
+    test('uses default token counts of 1500 for summary and 2000 for translation', () => {
+      const defaultProcessor = new AiProcessor();
+
+      expect((defaultProcessor as any).options.maxSummaryTokens).toBe(1500);
+      expect((defaultProcessor as any).options.maxTranslationTokens).toBe(2000);
+    });
+
+    test('allows custom token counts to override defaults', () => {
+      const customProcessor = new AiProcessor({
+        maxSummaryTokens: 999,
+        maxTranslationTokens: 888,
+      });
+
+      expect((customProcessor as any).options.maxSummaryTokens).toBe(999);
+      expect((customProcessor as any).options.maxTranslationTokens).toBe(888);
+    });
+  });
+
   describe('updateSettings', () => {
     test('APIキー設定時にclientが初期化される', () => {
       // Arrange

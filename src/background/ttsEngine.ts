@@ -3,6 +3,25 @@ import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
 import { Subject, Subscription, of, EMPTY, from } from 'rxjs';
 import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
+import { BrowserAdapter } from "../shared/utils/browser";
+// === process5 sub5: デフォルト音声選択ロジックの改善 ===
+import { selectBestVoice } from "../shared/utils/voiceSelector";
+
+// === process100 sub1: ブラウザ別設定の共通化 ===
+// 定数を共通化ファイルから導入
+import {
+  VOICES_TIMEOUT_MS,
+  MAX_VOICE_RETRIES,
+  VOICE_RETRY_DELAYS,
+  SAFE_READING_TIME_SEC,
+  CHARS_PER_SECOND_CONSERVATIVE,
+  CHARS_PER_SECOND_FIREFOX,
+  MIN_CHUNK_SIZE_GENERAL,
+  CHUNK_COUNT_WARNING_THRESHOLD,
+  MAX_CHUNK_RETRIES,
+  CHUNK_RETRY_WAIT_MS,
+  CHUNK_GAP_WARNING_THRESHOLD_MS,
+} from "../shared/constants";
 
 interface TTSEngineOptions {
   speech?: SpeechSynthesis;
@@ -29,7 +48,9 @@ export class TTSEngine implements PlaybackController {
   private chunks: TextChunk[] = [];
   private currentChunkIndex: number = 0;
   private chunkRetryCount: number = 0;
-  private readonly maxChunkRetries: number = 2;
+  // === process3 sub1: チャンク遷移リトライ回数の増加（2→5）===
+  // === process100 sub1: 定数参照に変更 ===
+  private readonly maxChunkRetries: number = MAX_CHUNK_RETRIES;
 
   // Observable-based chunk transition (process1-7)
   private chunkTransition$ = new Subject<'next' | 'complete'>();
@@ -37,6 +58,18 @@ export class TTSEngine implements PlaybackController {
 
   // Performance measurement (process7)
   private lastChunkEndTime: number = 0;
+
+  // === process4: デバッグ機能追加 ===
+  // sub1: Firefox向けログレベル設定
+  private isFirefox: boolean = false;
+  private debugLoggingEnabled: boolean = false;
+
+  // sub2: チャンク処理進捗のための時刻記録
+  private _chunkStartTime: number = 0;
+  private chunkProcessingTimes: Map<number, number> = new Map();
+
+  // sub3: エラー統計情報収集
+  public readonly errorStats: { [key: string]: number } = {};
 
   private readonly speech: SpeechSynthesis;
   private readonly createUtteranceFn: (
@@ -52,6 +85,14 @@ export class TTSEngine implements PlaybackController {
       ((text: string) => new SpeechSynthesisUtterance(text));
     this.logger = options.logger || console;
     this.defaultLang = options.defaultLang || "ja-JP";
+
+    // === process4 sub1: Firefox判定とログレベル設定 ===
+    this.isFirefox = BrowserAdapter.getBrowserType() === 'firefox';
+    this.debugLoggingEnabled = this.isFirefox;
+
+    if (this.debugLoggingEnabled) {
+      this.logger.debug('[TTSEngine] Detailed logging enabled (Firefox detected)');
+    }
 
     if (!this.speech) {
       throw new Error("Web Speech API is not supported in this environment");
@@ -80,6 +121,17 @@ export class TTSEngine implements PlaybackController {
       textSuffix: "..." + textToSpeak.substring(textToSpeak.length - 50),
     });
 
+    // === process50 sub1: AI処理により極端に短縮された場合の警告ログ ===
+    if (tab.processedContent && tab.content) {
+      const ratio = tab.processedContent.length / tab.content.length;
+      if (ratio < 0.1) {
+        this.logger.warn(
+          `[TTSEngine] AI処理により大幅に短縮されました: ${(ratio * 100).toFixed(1)}% ` +
+          `(元: ${tab.content.length}文字 → ${tab.processedContent.length}文字)`
+        );
+      }
+    }
+
     this.stop();
 
     // Store for pause/resume support
@@ -98,32 +150,52 @@ export class TTSEngine implements PlaybackController {
     // - Kanji: slower
     // - Punctuation: adds pauses
     // Using conservative estimates to ensure we stay well under 15s
-    const safeReadingTime = 8; // Conservative margin (seconds) before 15s timeout
-    const charsPerSecond = 4; // Conservative reading speed considering Kanji and punctuation
-    const maxChunkSize = Math.floor(safeReadingTime * charsPerSecond * settings.rate);
-    // Examples (more conservative):
-    // rate 1.0 → 32 chars (~8s reading time)
-    // rate 1.5 → 48 chars (~8s reading time)
-    // rate 2.0 → 64 chars (~8s reading time)
 
-    const chunkConfig: ChunkConfig = {
-      maxChunkSize: Math.max(40, maxChunkSize),  // Minimum 40 chars even at low rates
-      minChunkSize: 20,  // Avoid too small fragments
-    };
+    // === process2: Chunk Size Optimization ===
+    // Calculate chunk size based on browser type and playback rate
+    const chunkConfig = this.calculateChunkConfig(settings);
 
     const chunkResult = chunkText(textToSpeak, chunkConfig);
     this.chunks = chunkResult.chunks;
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
 
+    // === process2 sub2: Chunk count warning ===
+    if (chunkResult.totalChunks > CHUNK_COUNT_WARNING_THRESHOLD) {
+      this.logger.warn(
+        `[TTSEngine] High chunk count detected (${chunkResult.totalChunks} chunks). ` +
+        `Content is ${chunkResult.originalLength} characters. Consider using summarization.`,
+      );
+    }
+
     this.logger.info(
-      `[TTSEngine] Starting TTS with ${chunkResult.totalChunks} chunks`,
+      `[TTSEngine] Starting TTS with ${chunkResult.totalChunks} chunks (Browser: ${BrowserAdapter.getBrowserType()}, Rate: ${settings.rate})`,
       {
         originalLength: chunkResult.originalLength,
         chunks: chunkResult.totalChunks,
         totalLength: this.totalLength,
+        chunkSize: chunkConfig.maxChunkSize,
       },
     );
+
+    // === process4 sub1: Firefox向けの詳細ログ出力 ===
+    if (this.debugLoggingEnabled) {
+      this.logger.debug('[TTSEngine] [Firefox] Chunk initialization details', {
+        browserType: BrowserAdapter.getBrowserType(),
+        isChromeOffscreen: false,
+        totalChunks: chunkResult.totalChunks,
+        chunkSizeConfig: {
+          maxChunkSize: chunkConfig.maxChunkSize,
+          minChunkSize: chunkConfig.minChunkSize,
+        },
+        settings: {
+          rate: settings.rate,
+          pitch: settings.pitch,
+          volume: settings.volume,
+          voice: settings.voice,
+        },
+      });
+    }
 
     // Debug logging: chunk details
     this.chunks.forEach((chunk, index) => {
@@ -155,9 +227,27 @@ export class TTSEngine implements PlaybackController {
       tap((event) => {
         if (event === 'next') {
           this.currentChunkIndex++;
-          this.logger.info(`[TTSEngine] Transitioning to chunk ${this.currentChunkIndex + 1}/${this.chunks.length}`);
+          // === process4 sub2: チャンク処理進捗の可視化 ===
+          const progressStr = `[TTSEngine] Chunk progress: ${this.currentChunkIndex}/${this.chunks.length} chunks completed`;
+          this.logger.info(progressStr);
+
+          // Calculate and log timing information for the previous chunk
+          if (this.lastChunkEndTime > 0) {
+            const timeSinceLast = Date.now() - this.lastChunkEndTime;
+            if (this.debugLoggingEnabled && timeSinceLast > 100) {
+              this.logger.debug(`[TTSEngine] [Progress] Chunk ${this.currentChunkIndex - 1} completed in ${timeSinceLast}ms`);
+            }
+          }
         } else if (event === 'complete') {
           this.logger.info('[TTSEngine] All chunks completed');
+          // === process4 sub2: 最終進捗ログ ===
+          if (this.debugLoggingEnabled) {
+            this.logger.debug('[TTSEngine] [Progress] Playback completed with timing statistics', {
+              totalChunks: this.chunks.length,
+              averageChunkTime: this.calculateAverageChunkTime(),
+              longestChunk: this.findLongestChunkTime(),
+            });
+          }
           this.cleanup();
           hooks.onEnd();
         }
@@ -183,15 +273,73 @@ export class TTSEngine implements PlaybackController {
             this.currentText = chunk.text;
             this.chunkRetryCount = 0;
 
+            // === process4 sub2: チャンク処理開始時刻の記録 ===
+            this._chunkStartTime = Date.now();
+
+            // === process4 sub1: Firefox向けログ（各チャンクの開始時点） ===
+            if (this.debugLoggingEnabled) {
+              this.logger.debug(`[TTSEngine] [Firefox] Starting chunk ${this.currentChunkIndex + 1}/${this.chunks.length}`, {
+                chunkStartTime: this._chunkStartTime,
+                chunkLength: chunk.text.length,
+                textPreview: chunk.text.substring(0, 40),
+              });
+            }
+
             // Immediately speak
             this.speech.speak(utterance);
           }),
           map(() => utterance)
         );
       }),
+      // === process3 sub2: catchErrorでの処理改善 ===
+      // エラー発生時に処理停止ではなく、詳細なログを出力してスキップ
       catchError((error) => {
-        this.logger.error('[TTSEngine] Chunk transition failed', error);
-        hooks.onError(error instanceof Error ? error : new Error(String(error)));
+        // === process4 sub3: エラー詳細情報の収集 ===
+        const errorType = this.extractErrorType(error);
+        this.errorStats[errorType] = (this.errorStats[errorType] || 0) + 1;
+
+        const errorDetails = {
+          chunkIndex: this.currentChunkIndex,
+          totalChunks: this.chunks.length,
+          retryCount: this.chunkRetryCount,
+          maxRetries: this.maxChunkRetries,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          // === process4 sub3: ブラウザ情報とチャンク内容をエラーに含める ===
+          browserInfo: {
+            type: BrowserAdapter.getBrowserType(),
+            isFirefox: this.isFirefox,
+          },
+          chunkInfo: {
+            text: this.currentText.substring(0, 100),
+            length: this.currentText.length,
+          },
+          errorStats: { ...this.errorStats },
+        };
+
+        this.logger.error(
+          '[TTSEngine] Chunk transition failed - detailed error report',
+          errorDetails
+        );
+
+        // 最大リトライ数に達した場合のみ、ユーザーにエラーを通知して終了
+        // リトライ中のエラーはスキップして次チャンクへ
+        if (this.chunkRetryCount >= this.maxChunkRetries) {
+          this.logger.error(
+            `[TTSEngine] Max retries (${this.maxChunkRetries}) reached. Stopping playback.`,
+            errorDetails
+          );
+          hooks.onError(error instanceof Error ? error : new Error(String(error)));
+          return EMPTY;
+        }
+
+        // リトライ中のエラーは無視してスキップ
+        this.logger.warn(
+          `[TTSEngine] Skipping chunk due to error (retry attempt ${this.chunkRetryCount}/${this.maxChunkRetries})`,
+          { chunkIndex: this.currentChunkIndex }
+        );
+
+        // 次チャンクへスキップ
         return EMPTY;
       })
     ).subscribe();
@@ -352,22 +500,54 @@ export class TTSEngine implements PlaybackController {
     utterance.lang = this.defaultLang;
   }
 
+  // sub2: 日本語音声フィルタリングロジック（共通化用）
+  private isJapaneseVoice(voice: SpeechSynthesisVoice): boolean {
+    return (
+      voice.lang.startsWith('ja') ||
+      voice.lang.includes('JP') ||
+      voice.name.includes('Japanese') ||
+      voice.name.includes('日本')
+    );
+  }
+
+  // sub2: 日本語音声を優先的に選択
+  private selectBestJapaneseVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+    return voices.find((voice) => this.isJapaneseVoice(voice));
+  }
+
   private async applyVoice(
     utterance: SpeechSynthesisUtterance,
     voiceName: string | null | undefined,
   ): Promise<void> {
-    if (!voiceName) {
-      return;
-    }
-
     try {
       const voices = await this.getVoices();
-      const selectedVoice = voices.find((voice) => voice.name === voiceName);
-      if (selectedVoice) {
-        utterance.voice = selectedVoice;
+
+      // === process5 sub5: デフォルト音声選択ロジックの改善 ===
+      // 指定音声がある場合、それを検索
+      if (voiceName) {
+        const selectedVoice = voices.find((voice) => voice.name === voiceName);
+        if (selectedVoice) {
+          utterance.voice = selectedVoice;
+          return;
+        }
+        // 指定音声が見つからない場合、ログ出力
+        this.logger.warn(
+          `TTSEngine: voice "${voiceName}" not found. Attempting to use best voice.`,
+        );
+      }
+
+      // 指定音声がない場合、または見つからない場合は最適な音声を自動選択
+      const preferredGender = this.currentSettings?.preferredGender || 'female';
+      const bestVoice = selectBestVoice(voices, preferredGender, 'ja');
+
+      if (bestVoice) {
+        utterance.voice = bestVoice;
+        this.logger.info(
+          `TTSEngine: selected best voice "${bestVoice.name}" (lang: ${bestVoice.lang}, gender: ${preferredGender})`
+        );
       } else {
         this.logger.warn(
-          `TTSEngine: voice "${voiceName}" not found. Using default voice.`,
+          "TTSEngine: no suitable voice found. Using default voice."
         );
       }
     } catch (error) {
@@ -415,6 +595,10 @@ export class TTSEngine implements PlaybackController {
 
   /**
    * Retry current chunk on error
+   * === process3 sub1: チャンク遷移リトライ回数の増加 ===
+   * - maxChunkRetries: 2 → 5に増加
+   * - 待機時間: 100ms (process3 sub1で指定)
+   * - リトライ失敗時にエラーをスロー
    */
   private async retryCurrentChunk(): Promise<void> {
     if (this.chunkRetryCount >= this.maxChunkRetries) {
@@ -430,7 +614,7 @@ export class TTSEngine implements PlaybackController {
       `[TTSEngine] Retrying chunk ${this.currentChunkIndex} (attempt ${this.chunkRetryCount}/${this.maxChunkRetries})`,
     );
 
-    // Small delay before retry
+    // === process3 sub1: リトライ時の待機時間（100ms）===
     await new Promise((resolve) => setTimeout(resolve, 100));
     await this.playChunkAt(this.currentChunkIndex);
   }
@@ -444,7 +628,8 @@ export class TTSEngine implements PlaybackController {
     chunk: TextChunk
   ): void {
     utterance.onstart = () => {
-      // Record chunk start time for duration measurement
+      // === process3 sub3: タイムアウト検知と自動リカバリー ===
+      // 各チャンクの読み上げ開始時刻を記録
       const chunkStartTime = Date.now();
       (utterance as any)._chunkStartTime = chunkStartTime;
 
@@ -452,6 +637,15 @@ export class TTSEngine implements PlaybackController {
       if (this.lastChunkEndTime > 0) {
         const gap = chunkStartTime - this.lastChunkEndTime;
         this.logger.info(`[TTSEngine] Chunk transition gap: ${gap}ms`);
+
+        // === process3 sub3: 20秒以上のギャップを検知 ===
+        if (gap > 20000) {
+          this.logger.warn(
+            `[TTSEngine] Large chunk transition gap detected (${gap}ms > 20s). ` +
+            `This may indicate Service Worker timeout or other issues.`,
+            { chunkIndex: this.currentChunkIndex, gap }
+          );
+        }
       }
 
       // Reset pause state
@@ -463,7 +657,8 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onend = () => {
-      // Measure actual chunk duration
+      // === process3 sub3: チャンク実行時間の記録 ===
+      // 各チャンクの読み上げ実行時間を記録してログ出力
       const chunkStartTime = (utterance as any)._chunkStartTime;
       if (chunkStartTime) {
         const actualDuration = Date.now() - chunkStartTime;
@@ -491,6 +686,7 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onerror = (event: any) => {
+      // === process3 sub2: エラー発生時に詳細ログを出力 ===
       const errorType = typeof event?.error === "string" ? event.error : "unknown";
 
       // Log timeout errors specially (likely 15s timeout)
@@ -500,7 +696,19 @@ export class TTSEngine implements PlaybackController {
         );
       }
 
-      this.logger.error(`[TTSEngine] Chunk ${this.currentChunkIndex} error: ${errorType}`, event);
+      // === process3 sub2: エラー内容の詳細ログ出力 ===
+      this.logger.error(
+        `[TTSEngine] Chunk ${this.currentChunkIndex} error: ${errorType}`,
+        {
+          chunkIndex: this.currentChunkIndex,
+          errorType,
+          chunkLength: chunk.text.length,
+          chunkText: chunk.text.substring(0, 100),
+          totalChunks: this.chunks.length,
+          retryCount: this.chunkRetryCount,
+          maxRetries: this.maxChunkRetries,
+        }
+      );
 
       this.retryCurrentChunk().catch((error) => {
         this.logger.error("[TTSEngine] Retry failed", error);
@@ -654,24 +862,138 @@ export class TTSEngine implements PlaybackController {
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {
-    return new Promise((resolve) => {
-      const existing = this.speech.getVoices();
-      if (existing.length > 0) {
-        resolve(existing);
-        return;
+    // sub1: タイムアウトを3秒→10秒に延長
+    // sub3: リトライロジックを実装（exponential backoff）
+
+    const getVoicesOnce = (): Promise<SpeechSynthesisVoice[]> => {
+      return new Promise((resolve) => {
+        const existing = this.speech.getVoices();
+        if (existing.length > 0) {
+          resolve(existing);
+          return;
+        }
+
+        const listener = () => {
+          this.speech.removeEventListener?.("voiceschanged", listener as any);
+          resolve(this.speech.getVoices());
+        };
+
+        this.speech.addEventListener?.("voiceschanged", listener as any);
+
+        setTimeout(() => {
+          this.speech.removeEventListener?.("voiceschanged", listener as any);
+          resolve(this.speech.getVoices());
+        }, VOICES_TIMEOUT_MS);
+      });
+    };
+
+    let lastVoices: SpeechSynthesisVoice[] = [];
+
+    for (let attempt = 0; attempt < MAX_VOICE_RETRIES; attempt++) {
+      const voices = await getVoicesOnce();
+
+      if (voices.length > 0) {
+        return voices;
       }
 
-      const listener = () => {
-        this.speech.removeEventListener?.("voiceschanged", listener as any);
-        resolve(this.speech.getVoices());
-      };
+      lastVoices = voices;
 
-      this.speech.addEventListener?.("voiceschanged", listener as any);
+      // 最後の試行でない場合、指数バックオフで待機
+      if (attempt < MAX_VOICE_RETRIES - 1) {
+        const delay = VOICE_RETRY_DELAYS[attempt];
+        this.logger.warn(
+          `[TTSEngine] Failed to get voices (attempt ${attempt + 1}/${MAX_VOICE_RETRIES}), retrying in ${delay}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
 
-      setTimeout(() => {
-        this.speech.removeEventListener?.("voiceschanged", listener as any);
-        resolve(this.speech.getVoices());
-      }, 3000);
-    });
+    this.logger.warn(
+      `[TTSEngine] Failed to get voices after ${MAX_VOICE_RETRIES} retries`
+    );
+    return lastVoices;
+  }
+
+  // === process2: Chunk Size Optimization ===
+  // Calculate chunk size based on browser type and playback rate
+  private calculateChunkConfig(settings: TTSSettings): ChunkConfig {
+    const browserType = BrowserAdapter.getBrowserType();
+    const isFirefox = browserType === 'firefox';
+
+    // sub1: ブラウザ別チャンクサイズ設定
+    // Firefox: より保守的でない計算（persistent scriptなので安定性高い）
+    // Chrome: conservative calculation
+    const charsPerSecond = isFirefox ? CHARS_PER_SECOND_FIREFOX : CHARS_PER_SECOND_CONSERVATIVE;
+
+    // Calculate chunk size based on safe reading time (8 seconds)
+    // This ensures we stay well under the Web Speech API 15-second timeout
+    // Formula: maxChunkSize = SAFE_READING_TIME_SEC × charsPerSecond × rate
+    //
+    // Example (Firefox 2.5x speed):
+    // - maxChunkSize = 8 × 3 × 2.5 = 60 characters
+    // - Reading time = 60 ÷ (3 × 2.5) = 8 seconds ✅ Safe
+    let maxChunkSize = Math.floor(SAFE_READING_TIME_SEC * charsPerSecond * settings.rate);
+
+    // Apply minimum chunk size to avoid overly small chunks
+    // This prevents creating too many tiny chunks at low speeds
+    maxChunkSize = Math.max(MIN_CHUNK_SIZE_GENERAL, maxChunkSize);
+
+    // Set minimum chunk size (slightly relaxed for Firefox due to persistent script)
+    const minChunkSize = isFirefox ? 30 : 20;
+
+    // Calculate estimated reading time for debugging
+    const estimatedReadingTime = maxChunkSize / (charsPerSecond * settings.rate);
+
+    this.logger.debug(
+      `[TTSEngine] Chunk config calculated`,
+      {
+        browser: browserType,
+        rate: settings.rate,
+        charsPerSecond,
+        maxChunkSize,
+        minChunkSize,
+        estimatedReadingTime: `${estimatedReadingTime.toFixed(1)}s`,
+      },
+    );
+
+    return {
+      maxChunkSize,
+      minChunkSize,
+    };
+  }
+
+  // === process4: デバッグ機能ヘルパーメソッド ===
+
+  /**
+   * エラー種別を抽出（process4 sub3）
+   * @param error エラーオブジェクト
+   * @returns エラー種別のキー
+   */
+  private extractErrorType(error: unknown): string {
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('network')) return 'network_error';
+      if (msg.includes('timeout')) return 'timeout_error';
+      if (msg.includes('voice')) return 'voice_error';
+      if (msg.includes('audio')) return 'audio_error';
+    }
+    return 'unknown_error';
+  }
+
+  /**
+   * チャンク処理時間の平均値を計算（process4 sub2）
+   */
+  private calculateAverageChunkTime(): number {
+    if (this.chunkProcessingTimes.size === 0) return 0;
+    const total = Array.from(this.chunkProcessingTimes.values()).reduce((a, b) => a + b, 0);
+    return Math.round(total / this.chunkProcessingTimes.size);
+  }
+
+  /**
+   * 最も長いチャンク処理時間を検出（process4 sub2）
+   */
+  private findLongestChunkTime(): number {
+    if (this.chunkProcessingTimes.size === 0) return 0;
+    return Math.max(...Array.from(this.chunkProcessingTimes.values()));
   }
 }
