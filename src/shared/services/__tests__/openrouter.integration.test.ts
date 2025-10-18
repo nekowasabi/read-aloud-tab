@@ -7,16 +7,36 @@
  * 実行方法:
  *   OPENROUTER_API_KEY=your-api-key npm run test openrouter.integration.test.ts
  *
+ * プロバイダを指定する場合:
+ *   OPENROUTER_API_KEY=your-api-key OPENROUTER_PROVIDER=DeepInfra npm run test openrouter.integration.test.ts
+ *
  * 注意: このテストはNode.js環境でfetchが利用可能な場合のみ実行されます。
  */
 import { OpenRouterClient } from '../openrouter';
 
 const API_KEY = process.env.OPENROUTER_API_KEY;
 const TEST_MODEL = 'meta-llama/llama-3.2-1b-instruct';
+const TEST_PROVIDER = process.env.OPENROUTER_PROVIDER || 'DeepInfra';
+const INVALID_API_KEY = 'sk-or-invalid-key-12345';
+
+// テスト用の定数
+const TEST_CONTENT = {
+  SHORT_ENGLISH: 'The quick brown fox jumps over the lazy dog. This is a simple test sentence.',
+  JAPANESE: '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。',
+  SIMPLE: 'Test content',
+};
 
 // 環境変数が設定されている場合のみテストを実行
 // 注: 実際のテストはブラウザ拡張機能としてfetchが利用可能な環境で手動確認を推奨
 const describeIfApiKey = API_KEY ? describe : describe.skip;
+
+/**
+ * 要約結果が有効な文字列であることを検証するヘルパー
+ */
+function expectValidSummary(summary: string): void {
+  expect(typeof summary).toBe('string');
+  expect(summary.length).toBeGreaterThan(0);
+}
 
 describeIfApiKey('OpenRouterClient Integration Tests', () => {
   // タイムアウトを長めに設定（実APIへの通信があるため）
@@ -33,8 +53,7 @@ describeIfApiKey('OpenRouterClient Integration Tests', () => {
     });
 
     test('無効なAPIキーで接続テストが失敗する', async () => {
-      const invalidApiKey = 'sk-or-invalid-key-12345';
-      const client = new OpenRouterClient(invalidApiKey, TEST_MODEL);
+      const client = new OpenRouterClient(INVALID_API_KEY, TEST_MODEL);
       const result = await client.testConnection();
 
       expect(result.success).toBe(false);
@@ -46,30 +65,63 @@ describeIfApiKey('OpenRouterClient Integration Tests', () => {
   describe('summarize - 実API疎通', () => {
     test('短いテキストを要約できる', async () => {
       const client = new OpenRouterClient(API_KEY!, TEST_MODEL);
-      const testContent = 'The quick brown fox jumps over the lazy dog. This is a simple test sentence.';
 
-      const summary = await client.summarize(testContent, 50);
+      const summary = await client.summarize(TEST_CONTENT.SHORT_ENGLISH, 50);
 
-      expect(typeof summary).toBe('string');
-      expect(summary.length).toBeGreaterThan(0);
+      expectValidSummary(summary);
     });
 
     test('日本語テキストを要約できる', async () => {
       const client = new OpenRouterClient(API_KEY!, TEST_MODEL);
-      const testContent = '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。';
 
-      const summary = await client.summarize(testContent, 100);
+      const summary = await client.summarize(TEST_CONTENT.JAPANESE, 100);
 
-      expect(typeof summary).toBe('string');
-      expect(summary.length).toBeGreaterThan(0);
+      expectValidSummary(summary);
     });
 
     test('無効なAPIキーで要約リクエストが失敗する', async () => {
-      const invalidApiKey = 'sk-or-invalid-key-12345';
-      const client = new OpenRouterClient(invalidApiKey, TEST_MODEL);
-      const testContent = 'Test content';
+      const client = new OpenRouterClient(INVALID_API_KEY, TEST_MODEL);
 
-      await expect(client.summarize(testContent, 50)).rejects.toThrow('APIキーが無効です');
+      await expect(client.summarize(TEST_CONTENT.SIMPLE, 50)).rejects.toThrow('APIキーが無効です');
+    });
+  });
+
+  describe('プロバイダ指定での動作確認', () => {
+    test('プロバイダ指定で接続テストが成功する', async () => {
+      const client = new OpenRouterClient(API_KEY!, TEST_MODEL, TEST_PROVIDER);
+      const result = await client.testConnection();
+
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.message).toBeDefined();
+    });
+
+    test('プロバイダ指定で要約リクエストが成功する', async () => {
+      const client = new OpenRouterClient(API_KEY!, TEST_MODEL, TEST_PROVIDER);
+
+      const summary = await client.summarize(TEST_CONTENT.SHORT_ENGLISH, 50);
+
+      expectValidSummary(summary);
+    });
+
+    test('空文字列のプロバイダは無視される（プロバイダなしと同じ動作）', async () => {
+      const clientWithProvider = new OpenRouterClient(API_KEY!, TEST_MODEL, '');
+      const clientWithoutProvider = new OpenRouterClient(API_KEY!, TEST_MODEL);
+
+      const summaryWithProvider = await clientWithProvider.summarize(TEST_CONTENT.SIMPLE, 50);
+      const summaryWithoutProvider = await clientWithoutProvider.summarize(TEST_CONTENT.SIMPLE, 50);
+
+      // 両方とも正常に実行される
+      expectValidSummary(summaryWithProvider);
+      expectValidSummary(summaryWithoutProvider);
+    });
+
+    test('プロバイダなしでも引き続き正常に動作する', async () => {
+      const client = new OpenRouterClient(API_KEY!, TEST_MODEL);
+
+      const summary = await client.summarize(TEST_CONTENT.SHORT_ENGLISH, 50);
+
+      expectValidSummary(summary);
     });
   });
 });

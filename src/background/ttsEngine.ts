@@ -224,7 +224,7 @@ export class TTSEngine implements PlaybackController {
    */
   private setupChunkTransitionPipeline(hooks: PlaybackHooks): void {
     this.subscription = this.chunkTransition$.pipe(
-      tap((event) => {
+      tap((event: string) => {
         if (event === 'next') {
           this.currentChunkIndex++;
           // === process4 sub2: チャンク処理進捗の可視化 ===
@@ -252,7 +252,7 @@ export class TTSEngine implements PlaybackController {
           hooks.onEnd();
         }
       }),
-      filter((event) => event === 'next'),
+      filter((event: string) => event === 'next'),
       filter(() => this.currentChunkIndex < this.chunks.length),
       switchMap(() => {
         const chunk = this.chunks[this.currentChunkIndex];
@@ -293,7 +293,7 @@ export class TTSEngine implements PlaybackController {
       }),
       // === process3 sub2: catchErrorでの処理改善 ===
       // エラー発生時に処理停止ではなく、詳細なログを出力してスキップ
-      catchError((error) => {
+      catchError((error: unknown) => {
         // === process4 sub3: エラー詳細情報の収集 ===
         const errorType = this.extractErrorType(error);
         this.errorStats[errorType] = (this.errorStats[errorType] || 0) + 1;

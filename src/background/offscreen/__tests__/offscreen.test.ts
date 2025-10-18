@@ -69,6 +69,8 @@ describe('Offscreen Document', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    // Reset module cache to ensure clean state for each test
+    jest.resetModules();
   });
 
   describe('Message Handling', () => {
@@ -130,10 +132,13 @@ describe('Offscreen Document', () => {
 
       const message: OffscreenCommandMessage = { type: 'OFFSCREEN_TTS_PAUSE' };
       const listener = (chrome.runtime.onMessage.addListener as jest.Mock).mock.calls[0][0];
-      await listener(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      await listener(message, {}, sendResponse);
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for async operations to complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
       expect(mockSpeechSynthesis.cancel).toHaveBeenCalled();
       expect(sentMessages).toContainEqual(
         expect.objectContaining({
@@ -151,10 +156,13 @@ describe('Offscreen Document', () => {
 
       const message: OffscreenCommandMessage = { type: 'OFFSCREEN_TTS_RESUME' };
       const listener = (chrome.runtime.onMessage.addListener as jest.Mock).mock.calls[0][0];
-      await listener(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      await listener(message, {}, sendResponse);
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for async operations to complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
       // Resume should trigger speaking status
       expect(sentMessages).toContainEqual(
         expect.objectContaining({
@@ -174,10 +182,13 @@ describe('Offscreen Document', () => {
 
       const message: OffscreenCommandMessage = { type: 'OFFSCREEN_TTS_STOP' };
       const listener = (chrome.runtime.onMessage.addListener as jest.Mock).mock.calls[0][0];
-      await listener(message, {}, jest.fn());
+      const sendResponse = jest.fn();
+      await listener(message, {}, sendResponse);
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for async operations to complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
       expect(mockSpeechSynthesis.cancel).toHaveBeenCalled();
       expect(sentMessages).toContainEqual(
         expect.objectContaining({
@@ -208,7 +219,8 @@ describe('Offscreen Document', () => {
       const sendResponse = jest.fn();
       await listener(message, {}, sendResponse);
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for async operations to complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Should complete without error
       expect(sendResponse).toHaveBeenCalledWith({ success: true });
