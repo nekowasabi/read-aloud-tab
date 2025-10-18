@@ -1,6 +1,7 @@
 const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
 const HtmlPlugin = require('html-webpack-plugin');
+const packageJson = require('./package.json');
 
 module.exports = (env, argv) => {
   const browser = env.browser || 'chrome';
@@ -52,6 +53,12 @@ module.exports = (env, argv) => {
           {
             from: `src/manifest/manifest.${browser}.json`,
             to: 'manifest.json',
+            transform(content) {
+              // package.jsonのバージョンをmanifest.jsonに自動同期
+              const manifest = JSON.parse(content.toString());
+              manifest.version = packageJson.version;
+              return JSON.stringify(manifest, null, 2);
+            },
           },
           {
             from: 'public/icons',
