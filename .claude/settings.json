@@ -24,7 +24,6 @@
       "Bash(brew install:*)",
       "Bash(chmod 777:*)",
       "Bash(gh repo delete:*)",
-      "Bash(git push:*)",
       "Read(.env.*)",
       "Write(.env*)",
       "Bash(curl:*)",
