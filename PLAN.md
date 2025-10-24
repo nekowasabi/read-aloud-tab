@@ -316,3 +316,396 @@
 - [ ] 各テストケースの説明を明確化
 - [ ] エッジケースのテストに注釈を追加
 
+---
+
+# title: AI設定状態表示機能の実装
+
+## 概要
+ポップアップウィンドウの再生ボタン付近に、AI要約とAI翻訳の設定状態（ON/OFF）を視覚的に表示する機能を追加します。
+
+### goal
+- ユーザーがポップアップを開いた際に、AI要約・翻訳が有効かどうか一目で分かるようにする
+- 設定ページを開かずに、現在のAI機能の状態を確認できるようにする
+- リアルタイムで設定変更が反映されるようにする
+
+## 必須のルール
+- 必ず `CLAUDE.md` を参照し、ルールを守ること
+- TDD（テスト駆動開発）で実装すること：先にテストを書き、実装し、リファクタリングする
+- 既存のポップアップUI機能との互換性を維持する
+- TypeScript型安全性を維持する
+
+## 開発のゴール
+- AI設定状態表示コンポーネントをTDDで実装する
+- すべてのユニットテストがパスする
+- Chrome/Firefox両方で動作確認する
+- パフォーマンスに影響を与えない軽量な実装にする
+
+## 調査結果
+
+### 現在のコードベース構造
+
+#### 1. AI設定データ構造（`src/shared/types/ai.ts`）
+
+```typescript
+export interface AiSettings {
+  openRouterApiKey: string;
+  openRouterModel: string;
+  enableAiSummary: boolean;        // ← 要約機能のON/OFF
+  enableAiTranslation: boolean;    // ← 翻訳機能のON/OFF
+  summaryPrompt: string;
+  translationPrompt: string;
+  openRouterProvider?: string;
+}
+```
+
+#### 2. ストレージ管理（`src/shared/utils/storage.ts`）
+
+- `StorageManager.getAiSettings()`: AI設定の取得
+- `StorageManager.DEFAULT_AI_SETTINGS`: デフォルト値（両方OFF）
+- Storage変更リスナーでリアルタイム更新可能
+
+#### 3. 現在のポップアップ構成（`src/popup/components/App.tsx`）
+
+```
+App.tsx
+ ├─ DiagnosticsBanner (開発者モード時のみ)
+ ├─ エラーメッセージ
+ ├─ アクションボタン（キューに追加など）
+ ├─ StatusDisplay (タブ情報・進捗表示)
+ ├─ QuickControls (音声設定スライダー)
+ ├─ ControlButtons (再生/停止ボタン) ← この直後に追加
+ └─ TabQueueList (キュー一覧)
+```
+
+#### 4. 既存の状態管理
+
+- `settings` (TTSSettings): 音声設定は既に管理済み
+- `activeTab`: 現在のタブ情報
+- **AI設定の状態管理は未実装** ← 今回追加が必要
+
+## 実装仕様
+
+### 採用デザイン: 案1（詳細表示）
+
+```
+┌────────────────────────────────────┐
+│ [▶️ 再生]  [⏹️ 停止]              │
+├────────────────────────────────────┤
+│ 🤖 要約: ✓ ON  | 🌐 翻訳: ✗ OFF    │  ← 新規追加
+└────────────────────────────────────┘
+```
+
+**選定理由**:
+- 一目で状態が分かる高い視認性
+- アイコン + テキストで直感的
+- 色分けでON/OFF状態を明確に区別
+
+### データフロー図
+
+```
+┌─────────────────────────────────────────────────┐
+│ Chrome Storage (sync)                           │
+│ - STORAGE_KEYS.AI_SETTINGS                      │
+│   {                                             │
+│     enableAiSummary: boolean,                   │
+│     enableAiTranslation: boolean,               │
+│     ...                                         │
+│   }                                             │
+└─────────────────────────────────────────────────┘
+                    ↓
+                    ↓ StorageManager.getAiSettings()
+                    ↓
+┌─────────────────────────────────────────────────┐
+│ App.tsx                                         │
+│ - useState: aiSettings                          │
+│ - useEffect: 初回読み込み                       │
+│ - storage.onChanged: リアルタイム更新            │
+└─────────────────────────────────────────────────┘
+                    ↓
+                    ↓ props
+                    ↓
+┌─────────────────────────────────────────────────┐
+│ AiStatusIndicator.tsx                           │
+│ - enableAiSummary: boolean                      │
+│ - enableAiTranslation: boolean                  │
+│                                                 │
+│ 表示: "🤖 要約: ✓ ON | 🌐 翻訳: ✗ OFF"         │
+└─────────────────────────────────────────────────┘
+```
+
+## Process
+
+### process1 新規コンポーネント作成
+#### sub1 AiStatusIndicator コンポーネントの実装
+@target: `src/popup/components/AiStatusIndicator.tsx`（新規作成）
+@ref: `src/shared/types/ai.ts`
+- [ ] 新規ファイルを作成
+- [ ] Props インターフェースを定義
+  - `enableAiSummary: boolean`
+  - `enableAiTranslation: boolean`
+  - `compact?: boolean` (将来の拡張用)
+- [ ] コンポーネント実装
+  - 要約状態の表示（アイコン + ラベル + ON/OFF）
+  - 翻訳状態の表示（アイコン + ラベル + ON/OFF）
+  - ON/OFF に応じたクラス名の切り替え（enabled/disabled）
+- [ ] `React.memo` でメモ化してパフォーマンス最適化
+
+### process2 App.tsx の拡張
+#### sub1 AI設定の状態管理追加
+@target: `src/popup/components/App.tsx`
+@ref: `src/shared/utils/storage.ts`
+- [ ] Import文の追加
+  - `import { AiSettings } from '../../shared/types';`
+  - `import AiStatusIndicator from './AiStatusIndicator';`
+- [ ] State の追加（line 44付近）
+  - `const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);`
+
+#### sub2 初期化処理の拡張
+@target: `src/popup/components/App.tsx`
+@ref: `src/shared/utils/storage.ts`
+- [ ] useEffect内の初期化処理を更新（line 54-96付近）
+  - `Promise.all` に `StorageManager.getAiSettings()` を追加
+  - 取得したAI設定を `setAiSettings()` で保存
+  - エラーハンドリング（失敗時はデフォルト値を使用）
+
+#### sub3 Storage変更リスナーの拡張
+@target: `src/popup/components/App.tsx`
+@ref: `src/shared/types/index.ts` (STORAGE_KEYS)
+- [ ] handleStorageChange関数を更新（line 100-123付近）
+  - `STORAGE_KEYS.AI_SETTINGS` の変更を監視
+  - 変更時に `setAiSettings()` を実行
+
+#### sub4 コンポーネントの配置
+@target: `src/popup/components/App.tsx`
+@ref: なし
+- [ ] ControlButtons の直後に配置（line 405-411付近）
+  - 条件付きレンダリング: `{aiSettings && (<AiStatusIndicator ... />)}`
+  - Props として `enableAiSummary` と `enableAiTranslation` を渡す
+
+### process3 スタイリング
+#### sub1 CSS の追加
+@target: `src/popup/popup.css`
+@ref: なし
+- [ ] `.ai-status-indicator` スタイルの追加
+  - flexbox レイアウト
+  - 背景色、パディング、border-radius
+  - マージン設定
+- [ ] `.ai-status-item` スタイルの追加
+  - flexbox レイアウト
+  - gap設定
+- [ ] `.ai-status-item.enabled` スタイルの追加
+  - 緑色（#4caf50）
+  - font-weight: 500
+- [ ] `.ai-status-item.disabled` スタイルの追加
+  - グレー色（#999）
+- [ ] `.ai-status-icon`, `.ai-status-label`, `.ai-status-value` スタイルの追加
+  - フォントサイズ調整
+- [ ] `.ai-status-divider` スタイルの追加
+  - 区切り線の色設定
+
+### process4 テストの追加
+#### sub1 AiStatusIndicator のユニットテスト作成
+@target: `src/popup/components/__tests__/AiStatusIndicator.test.tsx`（新規作成）
+@ref: `src/popup/components/AiStatusIndicator.tsx`
+- [ ] テストファイルを新規作成
+- [ ] テストケース: 両方ONの場合の表示
+  - `enableAiSummary={true}`, `enableAiTranslation={true}`
+  - "✓ ON" が2つ表示されることを確認
+- [ ] テストケース: 両方OFFの場合の表示
+  - `enableAiSummary={false}`, `enableAiTranslation={false}`
+  - "✗ OFF" が2つ表示されることを確認
+- [ ] テストケース: 要約のみONの場合の表示
+  - `enableAiSummary={true}`, `enableAiTranslation={false}`
+  - 要約の要素が `enabled` クラスを持つことを確認
+- [ ] テストケース: 翻訳のみONの場合の表示
+  - `enableAiSummary={false}`, `enableAiTranslation={true}`
+  - 翻訳の要素が `enabled` クラスを持つことを確認
+
+#### sub2 App.tsx のテスト拡張
+@target: `src/popup/components/__tests__/App.test.tsx`
+@ref: `src/popup/components/App.tsx`
+- [ ] AI設定読み込みのテストケースを追加
+  - `StorageManager.getAiSettings()` がマウント時に呼ばれることを確認
+- [ ] AI設定変更のリスナーテストを追加
+  - storage変更イベント発火時に state が更新されることを確認
+- [ ] AiStatusIndicator が表示されることを確認するテスト
+  - AI設定がある場合、コンポーネントがレンダリングされることを確認
+
+### process10 ユニットテスト
+#### sub1 全ユニットテストの実行
+@target: すべてのテストファイル
+@ref: なし
+- [ ] `npm run test` を実行
+- [ ] すべてのテストがパスすることを確認
+- [ ] カバレッジが適切であることを確認
+
+### process20 手動テスト
+#### sub1 Chrome での動作確認
+@target: Chrome拡張機能
+@ref: なし
+- [ ] ポップアップを開いた際にAI設定状態が表示されるか
+  - 再生ボタンの下に "🤖 要約: ... | 🌐 翻訳: ..." が表示される
+- [ ] 設定ページでAI要約をONにしたときリアルタイム更新されるか
+  - 設定画面で「AI要約を有効化」をON → ポップアップで即座に反映
+- [ ] 設定ページでAI翻訳をONにしたときリアルタイム更新されるか
+  - 設定画面で「AI翻訳を有効化」をON → ポップアップで即座に反映
+- [ ] ON状態が緑色で表示されるか
+- [ ] OFF状態がグレー色で表示されるか
+
+#### sub2 Firefox での動作確認
+@target: Firefox拡張機能
+@ref: なし
+- [ ] Chromeと同様の動作確認を実施
+- [ ] スタイルが正しく適用されているか確認
+- [ ] storage API の互換性確認
+
+### process100 リファクタリング
+#### sub1 コードの整理
+@target: 全実装ファイル
+@ref: なし
+- [ ] 重複コードの削減
+- [ ] コメントの整理・追加
+- [ ] 型定義の最適化
+
+#### sub2 パフォーマンス確認
+@target: `src/popup/components/AiStatusIndicator.tsx`
+@ref: なし
+- [ ] 不要な再レンダリングがないことを確認
+- [ ] `React.memo` が適切に機能しているか確認
+- [ ] メモリリークがないことを確認
+
+### process200 ドキュメンテーション
+#### sub1 CLAUDE.md の更新
+@target: `/home/user/read-aloud-tab/CLAUDE.md`
+@ref: なし
+- [ ] AI設定状態表示機能の説明を追加
+  - 表示内容
+  - UI配置
+  - リアルタイム更新の仕組み
+
+## 実装後の動作フロー
+
+### 1. 初回表示
+
+```
+ユーザーがポップアップを開く
+  ↓
+App.tsx: useEffect が実行
+  ↓
+StorageManager.getAiSettings() でAI設定を取得
+  ↓
+aiSettings state を更新
+  ↓
+AiStatusIndicator がレンダリング
+  ↓
+「🤖 要約: ✓ ON | 🌐 翻訳: ✗ OFF」が表示される
+```
+
+### 2. 設定変更時のリアルタイム更新
+
+```
+ユーザーが設定ページでAI翻訳をONに変更
+  ↓
+StorageManager.saveAiSettings() が実行
+  ↓
+chrome.storage.sync.set() でストレージを更新
+  ↓
+chrome.storage.onChanged イベントが発火
+  ↓
+App.tsx: handleStorageChange が実行
+  ↓
+aiSettings state を更新
+  ↓
+AiStatusIndicator が再レンダリング
+  ↓
+「🤖 要約: ✓ ON | 🌐 翻訳: ✓ ON」に表示が変わる
+```
+
+### 3. エラー時の挙動
+
+```
+AI設定の読み込みに失敗
+  ↓
+console.error でエラーログを出力
+  ↓
+デフォルト値（両方OFF）を設定
+  ↓
+「🤖 要約: ✗ OFF | 🌐 翻訳: ✗ OFF」が表示される
+  ↓
+ポップアップは正常に動作継続
+```
+
+## 修正ファイル一覧
+
+| ファイル | 変更内容 | 行数 | 優先度 |
+|---------|---------|-----|-------|
+| `src/popup/components/AiStatusIndicator.tsx` | **新規作成** - AI設定状態表示コンポーネント | ~40行 | 高 |
+| `src/popup/components/App.tsx` | AI設定のstate追加・読み込み・配置 | +20行 | 高 |
+| `src/popup/popup.css` | スタイル追加 | +40行 | 高 |
+| `src/popup/components/__tests__/AiStatusIndicator.test.tsx` | **新規作成** - 単体テスト | ~60行 | 中 |
+| `src/popup/components/__tests__/App.test.tsx` | テスト拡張 | +20行 | 中 |
+
+## 期待される効果
+
+### ユーザビリティ向上
+
+- **視認性**: ポップアップを開いた瞬間にAI機能の状態が分かる
+- **効率性**: 設定ページを開かずに状態確認が可能
+- **安心感**: 意図せずAI機能が有効/無効になっていないか確認できる
+
+### 実装コスト
+
+- **開発時間**: 約2-3時間（実装 + テスト）
+- **コード量**: 約160行（コンポーネント + テスト + スタイル）
+- **保守性**: シンプルな実装で保守しやすい
+
+### テスト観点
+
+1. **機能テスト**: 4つの状態パターン（ON/ON, ON/OFF, OFF/ON, OFF/OFF）
+2. **統合テスト**: storage変更時のリアルタイム更新
+3. **視覚的テスト**: デザインの視認性確認
+4. **ブラウザ互換性**: Chrome/Firefox動作確認
+
+## 将来的な拡張案
+
+### 1. クリッカブル化
+
+インジケーターをクリックで設定ページへ遷移:
+
+```typescript
+<div
+  className="ai-status-indicator clickable"
+  onClick={() => {
+    BrowserAdapter.getInstance().runtime.openOptionsPage();
+  }}
+  title="クリックで設定を開く"
+>
+```
+
+### 2. トグル機能
+
+ポップアップから直接ON/OFF切り替え:
+
+```typescript
+const handleToggleSummary = async () => {
+  const newSettings = {
+    ...aiSettings,
+    enableAiSummary: !aiSettings.enableAiSummary
+  };
+  await StorageManager.saveAiSettings(newSettings);
+};
+```
+
+### 3. 詳細情報のツールチップ
+
+マウスホバーでAPIキー設定状況などを表示
+
+### 4. アニメーション
+
+状態変更時にフェードイン/アウトアニメーションを追加
+
+---
+
+**作成日**: 2025-10-24
+**担当**: Claude Code
+**対象ブランチ**: `claude/add-ai-settings-text-011CUSqaC5JoVYDPPzRKf92x`
