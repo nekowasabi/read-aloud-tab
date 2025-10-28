@@ -226,6 +226,11 @@ npm run test:watch
 
 詳細なアーキテクチャ情報は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
 
+**リファクタリング計画**: コードベースの保守性と品質向上のための段階的リファクタリング計画を策定しました。
+- 📋 [リファクタリング計画書](./REFACTORING_PLAN.md) - 詳細な実施計画
+- 📊 [エグゼクティブサマリー](./docs/REFACTORING_SUMMARY.md) - 概要と期待効果
+- ✅ [実施チェックリスト](./docs/REFACTORING_CHECKLIST.md) - 実務での実施ガイド
+
 **主要コンポーネント**:
 - `src/background/` - Service Worker (Chrome) / Background Script (Firefox)
   - `ttsEngine.ts` - 音声合成エンジン
