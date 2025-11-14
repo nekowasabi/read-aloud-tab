@@ -6,6 +6,7 @@
     "dev": "webpack --mode=development --env browser=chrome --watch",
     "build:chrome": "webpack --mode=production --env browser=chrome",
     "build:firefox": "webpack --mode=production --env browser=firefox",
+    "build:ext": "mkdir -p web-ext-artifacts && npx web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --overwrite-dest",
     "build:all": "npm run build:chrome && npm run build:firefox",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.{ts,tsx}",
@@ -14,7 +15,7 @@
     "test:watch": "jest --watch",
     "package:firefox": "npm run build:firefox && mkdir -p web-ext-artifacts && npx web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --overwrite-dest",
     "package:chrome": "npm run build:chrome && mkdir -p web-ext-artifacts && node -e \"const { version } = require('./package.json'); const { execSync } = require('child_process'); execSync('cd dist/chrome && zip -r ../../web-ext-artifacts/read-aloud-tab-chrome-v' + version + '.zip .', { stdio: 'inherit' });\"",
-    "package:source": "mkdir -p web-ext-artifacts && zip -r web-ext-artifacts/read-aloud-tab-source-v$npm_package_version.zip . -x '*.git*' 'node_modules/*' 'dist/*' 'web-ext-artifacts/*' 'coverage/*' 'tmp/*' '.DS_Store' '*.log' '*.zip'",
+    "package:source": "mkdir -p web-ext-artifacts && zip -r web-ext-artifacts/read-aloud-tab-source-v$npm_package_version.zip . -x '*.git*' 'node_modules/*' 'dist/*' 'dist-*/*' 'web-ext-artifacts/*' 'coverage/*' 'tmp/*' '.aider*' '.serena/*' '.kiro/*' '.DS_Store' '*.log' '*.zip' 'tests/*'",
     "package:all": "npm run package:firefox && npm run package:chrome && npm run package:source"
   },
   "devDependencies": {
