@@ -32,6 +32,37 @@ jest.mock('../../shared/services/openrouter', () => ({
 const storage = require('../../shared/utils/storage');
 const { OpenRouterClient } = require('../../shared/services/openrouter');
 
+const mockCreateObjectURL = jest.fn(() => 'blob:mock-url');
+const mockRevokeObjectURL = jest.fn();
+
+const getExportedBlob = (): Blob => {
+  const calls = mockCreateObjectURL.mock.calls as any[];
+  const call = calls[0];
+  if (!call) {
+    throw new Error('Blob was not generated');
+  }
+  return call[0] as Blob;
+};
+
+const readBlobText = async (blob: Blob): Promise<string> => {
+  const maybeText = (blob as any).text;
+  if (typeof maybeText === 'function') {
+    return maybeText.call(blob);
+  }
+
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+};
+
+beforeAll(() => {
+  (global as any).URL.createObjectURL = mockCreateObjectURL;
+  (global as any).URL.revokeObjectURL = mockRevokeObjectURL;
+});
+
 const baseAiSettings = {
   openRouterApiKey: '',
   openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
@@ -42,13 +73,22 @@ const baseAiSettings = {
 };
 
 describe('OptionsApp', () => {
+  let anchorClickSpy: jest.SpyInstance;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCreateObjectURL.mockClear();
+    mockRevokeObjectURL.mockClear();
+    anchorClickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     (chrome.storage.sync.get as jest.Mock).mockResolvedValue({});
     (chrome.storage.sync.set as jest.Mock).mockResolvedValue(undefined);
     storage.StorageManager.getAiSettings.mockResolvedValue(baseAiSettings);
     storage.StorageManager.getDeveloperMode.mockResolvedValue(false);
     storage.StorageManager.setDeveloperMode.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    anchorClickSpy?.mockRestore();
   });
 
   test('初期表示で設定値と無視リストをロードしてフォームに反映する', async () => {
@@ -62,7 +102,7 @@ describe('OptionsApp', () => {
     expect(screen.getByText('example.com')).toBeInTheDocument();
   });
 
-  test('エクスポートボタンで設定と無視リストをJSONとして表示する', async () => {
+  test('エクスポートボタンで設定と無視リストをJSONファイルとしてダウンロードする', async () => {
     storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
     storage.getIgnoredDomains.mockResolvedValue(['foo.com']);
 
@@ -71,35 +111,41 @@ describe('OptionsApp', () => {
     const exportButton = await screen.findByRole('button', { name: 'エクスポート' });
     fireEvent.click(exportButton);
 
-    await waitFor(() => {
-      const textarea = screen.getByLabelText('エクスポートデータ') as HTMLTextAreaElement;
-      const parsed = JSON.parse(textarea.value);
+    await waitFor(async () => {
+      expect(mockCreateObjectURL).toHaveBeenCalled();
+      expect(anchorClickSpy).toHaveBeenCalled();
+      const blob = getExportedBlob();
+      const parsed = JSON.parse(await readBlobText(blob));
       expect(parsed.ignoredDomains).toEqual(['foo.com']);
     });
   });
 
-  test('インポートボタンでJSONを読み込み、設定と無視リストを保存する', async () => {
+  test('インポートボタンでJSONファイルを読み込み、設定と無視リストを保存する', async () => {
     storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
     storage.getIgnoredDomains.mockResolvedValue([]);
 
     render(<OptionsApp />);
 
-    const textarea = await screen.findByLabelText('エクスポートデータ');
-    fireEvent.change(textarea, {
-      target: {
-        value: JSON.stringify({
-          version: 2,
-          settings: { rate: 1.5, pitch: 1.2, volume: 0.6, voice: 'Import Voice' },
-          ignoredDomains: ['imported.com'],
-        }),
-      },
-    });
+    const importButton = await screen.findByRole('button', { name: 'インポート' });
+    const hiddenInput = await screen.findByTestId('import-file-input');
+    const inputClickSpy = jest.spyOn(hiddenInput, 'click').mockImplementation(() => {});
 
-    fireEvent.click(screen.getByRole('button', { name: 'インポート' }));
+    fireEvent.click(importButton);
+    expect(inputClickSpy).toHaveBeenCalled();
+    inputClickSpy.mockRestore();
+
+    const payload = {
+      version: 2,
+      settings: { rate: 1.5, pitch: 1.2, volume: 0.6, voice: 'Import Voice' },
+      ignoredDomains: ['imported.com'],
+    };
+    const file = new File([JSON.stringify(payload)], 'settings.json', { type: 'application/json' });
+
+    fireEvent.change(hiddenInput, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(storage.StorageManager.saveSettings).toHaveBeenCalledWith({ rate: 1.5, pitch: 1.2, volume: 0.6, voice: 'Import Voice' });
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [STORAGE_KEYS.IGNORED_DOMAINS]: ['imported.com'] });
+      expect(storage.StorageManager.saveSettings).toHaveBeenCalledWith(payload.settings);
+      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [STORAGE_KEYS.IGNORED_DOMAINS]: payload.ignoredDomains });
     });
   });
 
@@ -183,11 +229,11 @@ describe('OptionsApp', () => {
     const exportButton = await screen.findByRole('button', { name: 'エクスポート' });
     fireEvent.click(exportButton);
 
-    await waitFor(() => {
-      const textarea = screen.getByLabelText('エクスポートデータ') as HTMLTextAreaElement;
-      const parsed = JSON.parse(textarea.value);
+    await waitFor(async () => {
+      const blob = getExportedBlob();
+      const parsed = JSON.parse(await readBlobText(blob));
       expect(parsed.aiSettings).toBeDefined();
-      expect(parsed.aiSettings.openRouterApiKey).toBe(''); // APIキーは除外
+      expect(parsed.aiSettings.openRouterApiKey).toBe('');
       expect(parsed.aiSettings.openRouterModel).toBe('test-model');
       expect(parsed.aiSettings.enableAiSummary).toBe(true);
       expect(parsed.aiSettings.summaryPrompt).toBe('export summary');
@@ -201,36 +247,26 @@ describe('OptionsApp', () => {
 
     render(<OptionsApp />);
 
-    const textarea = await screen.findByLabelText('エクスポートデータ');
-    fireEvent.change(textarea, {
-      target: {
-        value: JSON.stringify({
-          version: 2,
-          settings: { rate: 1, pitch: 1, volume: 1, voice: null },
-          ignoredDomains: [],
-          aiSettings: {
-            openRouterApiKey: '',
-            openRouterModel: 'imported-model',
-            enableAiSummary: true,
-            enableAiTranslation: true,
-            summaryPrompt: 'import summary',
-            translationPrompt: 'import translation',
-          },
-        }),
-      },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'インポート' }));
-
-    await waitFor(() => {
-      expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith({
+    const importInput = await screen.findByTestId('import-file-input');
+    const payload = {
+      version: 2,
+      settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+      ignoredDomains: [],
+      aiSettings: {
         openRouterApiKey: '',
         openRouterModel: 'imported-model',
         enableAiSummary: true,
         enableAiTranslation: true,
         summaryPrompt: 'import summary',
         translationPrompt: 'import translation',
-      });
+      },
+    };
+    const file = new File([JSON.stringify(payload)], 'settings.json', { type: 'application/json' });
+
+    fireEvent.change(importInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(storage.StorageManager.saveAiSettings).toHaveBeenCalledWith(payload.aiSettings);
     });
   });
 
