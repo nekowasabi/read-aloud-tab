@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const CopyPlugin = require('copy-webpack-plugin');
 const HtmlPlugin = require('html-webpack-plugin');
 const packageJson = require('./package.json');
@@ -76,6 +77,9 @@ module.exports = (env, argv) => {
         template: 'src/options/index.html',
         filename: 'options.html',
         chunks: ['options'],
+      }),
+      new webpack.DefinePlugin({
+        __APP_VERSION__: JSON.stringify(packageJson.version),
       }),
       // Add offscreen HTML only for Chrome
       ...(browser === 'chrome'

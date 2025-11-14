@@ -1,3 +1,9 @@
+# rule
+- 必ず出力結果やサマリを確認してください。
+
+# guardrails
+- 英語の出力を日本語に翻訳する
+
 # Repository Guidelines
 
 Guidelines for contributors to Read Aloud Tab.
