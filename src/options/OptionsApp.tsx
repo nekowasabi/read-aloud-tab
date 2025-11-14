@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import IgnoreListManager from '../popup/components/IgnoreListManager';
 import { StorageManager } from '../shared/utils/storage';
 import { getIgnoredDomains } from '../shared/utils/storage';
@@ -26,12 +26,13 @@ export default function OptionsApp() {
   const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
   const [ignoredDomains, setIgnoredDomains] = useState<string[]>([]);
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
-  const [exportData, setExportData] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [developerMode, setDeveloperMode] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -104,37 +105,73 @@ export default function OptionsApp() {
           openRouterApiKey: '', // セキュリティのためAPIキーは除外
         },
       };
-      setExportData(JSON.stringify(payload));
-      setMessage('エクスポートデータを生成しました');
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'read-aloud-tab-settings.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setMessage('設定ファイルをダウンロードしました');
     } catch (error) {
       console.error('OptionsApp: failed to export data', error);
       setMessage('エクスポートに失敗しました');
     }
   };
 
-  const handleImport = async () => {
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setIsImporting(true);
+
     try {
-      const parsed = JSON.parse(exportData) as ExportPayload;
-      if (!parsed || typeof parsed !== 'object') {
-        throw new Error('Invalid data');
-      }
-
-      await StorageManager.saveSettings(parsed.settings);
-      await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
-
-      if (parsed.aiSettings) {
-        const validatedAi = StorageManager.validateAiSettings(parsed.aiSettings);
-        await StorageManager.saveAiSettings(validatedAi);
-        setAiSettings(validatedAi);
-      }
-
-      setSettings(parsed.settings);
-      setIgnoredDomains(parsed.ignoredDomains);
-      setMessage('インポートが完了しました');
+      const content = await readFileAsText(file);
+      await importFromJson(content);
     } catch (error) {
       console.error('OptionsApp: failed to import data', error);
       setMessage('インポートに失敗しました。データ形式を確認してください');
+    } finally {
+      setIsImporting(false);
+      event.target.value = '';
     }
+  };
+
+  const importFromJson = async (raw: string) => {
+    const parsed = JSON.parse(raw) as ExportPayload;
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Invalid data');
+    }
+
+    if (!parsed.settings || typeof parsed.settings !== 'object') {
+      throw new Error('Invalid settings data');
+    }
+
+    if (!Array.isArray(parsed.ignoredDomains)) {
+      throw new Error('Invalid ignored domains');
+    }
+
+    await StorageManager.saveSettings(parsed.settings);
+    await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
+
+    if (parsed.aiSettings) {
+      const validatedAi = StorageManager.validateAiSettings(parsed.aiSettings);
+      await StorageManager.saveAiSettings(validatedAi);
+      setAiSettings(validatedAi);
+    }
+
+    setSettings(parsed.settings);
+    setIgnoredDomains(parsed.ignoredDomains);
+    setMessage('インポートが完了しました');
   };
 
   const handleIgnoreListChange = (domains: string[]) => {
@@ -402,22 +439,23 @@ export default function OptionsApp() {
           <button type="button" className="btn btn-secondary" onClick={handleExport}>
             エクスポート
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleImport}>
-            インポート
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleImportClick}
+            disabled={isImporting}
+          >
+            {isImporting ? 'インポート中…' : 'インポート'}
           </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json"
+            style={{ display: 'none' }}
+            onChange={handleFileImport}
+            data-testid="import-file-input"
+          />
         </div>
-        <label htmlFor="export-data" className="textarea-label">
-          エクスポートデータ
-        </label>
-        <textarea
-          id="export-data"
-          aria-label="エクスポートデータ"
-          value={exportData}
-          onChange={(event) => setExportData(event.target.value)}
-          placeholder='{"version":2,"settings":{...}}'
-          rows={8}
-          className="export-textarea"
-        />
       </section>
 
       <section className="options-section">
@@ -433,3 +471,12 @@ export default function OptionsApp() {
     </div>
   );
 }
+
+const readFileAsText = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+    reader.readAsText(file);
+  });
+};
