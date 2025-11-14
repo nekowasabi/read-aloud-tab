@@ -6,6 +6,7 @@ global.fetch = fetch;
 global.Headers = Headers;
 global.Request = Request;
 global.Response = Response;
+(global as any).__APP_VERSION__ = process.env.npm_package_version || 'test-version';
 
 // Mock chrome APIs for testing
 const mockChrome = {
@@ -41,6 +42,7 @@ const mockChrome = {
     sendMessage: jest.fn().mockResolvedValue({}),
   },
   runtime: {
+    getManifest: jest.fn(() => ({ version: (global as any).__APP_VERSION__ })),
     sendMessage: jest.fn((message: any, callback?: (response: any) => void) => {
       const response = {};
       if (typeof callback === 'function') {

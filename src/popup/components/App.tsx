@@ -47,6 +47,10 @@ export default function App() {
   const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { statuses: prefetchStatuses, diagnostics: prefetchDiagnostics } = usePrefetchStatus();
   const isConnected = connectionState === 'connected';
+  const manifestVersion = typeof chrome !== 'undefined' && chrome.runtime?.getManifest
+    ? chrome.runtime.getManifest().version
+    : undefined;
+  const appVersion = manifestVersion || __APP_VERSION__;
 
   useEffect(() => {
     let mounted = true;
@@ -439,7 +443,7 @@ export default function App() {
       />
 
       <footer className="footer">
-        <small>Version 1.0.0</small>
+        <small>Version {appVersion}</small>
       </footer>
     </div>
   );
