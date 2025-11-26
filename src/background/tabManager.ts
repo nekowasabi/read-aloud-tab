@@ -399,6 +399,7 @@ export class TabManager {
 
     if (!ready) {
       this.queue.status = 'paused';
+      this.queue.pausedByUser = false;  // コンテンツ抽出待ちのpause
       this.queue.currentIndex = targetIndex;
       await this.persistQueue();
       this.emitStatus();
@@ -414,6 +415,7 @@ export class TabManager {
         hasTranslation: Boolean(tab.translation),
       });
       this.queue.status = 'paused';
+      this.queue.pausedByUser = false;  // コンテンツ不足のpause
       this.queue.currentIndex = targetIndex;
       await this.persistQueue();
       this.emitStatus();
@@ -422,6 +424,7 @@ export class TabManager {
 
     this.queue.currentIndex = targetIndex;
     this.queue.status = 'reading';
+    this.queue.pausedByUser = false;  // 再生開始時にリセット
     await this.persistQueue();
     this.emitStatus();
 
@@ -451,6 +454,7 @@ export class TabManager {
     }
     this.playback.pause();
     this.queue.status = 'paused';
+    this.queue.pausedByUser = true;
     this.persistQueue().catch((error) => {
       this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after pause', error);
     });
@@ -463,6 +467,7 @@ export class TabManager {
     }
     this.playback.resume();
     this.queue.status = 'reading';
+    this.queue.pausedByUser = false;
     this.persistQueue().catch((error) => {
       this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after resume', error);
     });
@@ -567,7 +572,12 @@ export class TabManager {
     }
 
     // Auto-resume when content is added (both for reload and new tab)
-    const shouldAutoResume = update.content && index === this.queue.currentIndex && this.queue.status === 'paused';
+    // Do NOT auto-resume if user manually paused
+    const shouldAutoResume =
+      update.content &&
+      index === this.queue.currentIndex &&
+      this.queue.status === 'paused' &&
+      !this.queue.pausedByUser;
 
     this.logger.info('[TabManager] onTabUpdated auto-resume check', {
       tabId,
@@ -576,6 +586,7 @@ export class TabManager {
       isCurrentTab: index === this.queue.currentIndex,
       currentIndex: this.queue.currentIndex,
       queueStatus: this.queue.status,
+      pausedByUser: this.queue.pausedByUser,
       shouldAutoResume,
       isReloaded,
     });

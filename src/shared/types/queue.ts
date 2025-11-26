@@ -10,6 +10,7 @@ export interface ReadingQueue {
   settings: TTSSettings;
   progressByTab?: Record<number, number>;
   persistedAt?: number;
+  pausedByUser?: boolean;
 }
 
 export interface QueueSnapshot extends ReadingQueue {
