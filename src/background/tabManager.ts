@@ -858,7 +858,31 @@ export class TabManager {
       return;
     }
 
-    const nextIndex = this.findNextReadableIndex(this.queue.currentIndex + 1);
+    // 完了したタブをキューから除去
+    const completedIndex = this.queue.currentIndex;
+    if (completedIndex >= 0 && completedIndex < this.queue.tabs.length) {
+      this.queue.tabs.splice(completedIndex, 1);
+      this.pruneProgressByTabs();
+      // currentIndexは変更しない（要素が除去されたので実質的に次を指す）
+    }
+
+    // キューが空になった場合
+    if (this.queue.tabs.length === 0) {
+      this.queue.currentIndex = 0;
+      this.stopInternal(false)
+        .then(() => this.persistQueue())
+        .then(() => this.emitStatus())
+        .catch((error) => this.logError('QUEUE_STOP_FAILED', 'TabManager: failed to stop queue', error));
+      return;
+    }
+
+    // currentIndexが範囲外になった場合の調整
+    if (this.queue.currentIndex >= this.queue.tabs.length) {
+      this.queue.currentIndex = 0;
+    }
+
+    // 次の読み上げ可能なタブを検索
+    const nextIndex = this.findNextReadableIndex(this.queue.currentIndex);
     if (nextIndex === -1) {
       this.stopInternal(false)
         .then(() => this.persistQueue())
