@@ -164,4 +164,160 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     expect((prefetcher as any).summaryMaxTokens).toBe(999);
     expect((prefetcher as any).translationMaxTokens).toBe(888);
   });
+
+  describe('waitForPrefetch with scheduler check', () => {
+    it('should continue polling when scheduler.isScheduled returns true even if statusMap is empty', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      // Override scheduler with mock that reports tabId as scheduled
+      const mockScheduler = { isScheduled: jest.fn().mockReturnValue(true) };
+      (prefetcher as any).scheduler = mockScheduler;
+
+      // statusMap is empty initially, but scheduler says it's scheduled
+      // After 200ms, statusMap gets populated with completed state
+      setTimeout(() => {
+        (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'completed', updatedAt: Date.now() });
+        mockScheduler.isScheduled.mockReturnValue(false);
+      }, 200);
+
+      const result = await prefetcher.waitForPrefetch(42, 2000);
+      expect(result).toBe(true);
+      expect(mockScheduler.isScheduled).toHaveBeenCalledWith(42);
+    });
+
+    it('should return false immediately when neither scheduled nor in statusMap', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      const mockScheduler = { isScheduled: jest.fn().mockReturnValue(false) };
+      (prefetcher as any).scheduler = mockScheduler;
+
+      // statusMap is empty, scheduler says not scheduled → should return false (not scheduled, not completed)
+      const start = Date.now();
+      const result = await prefetcher.waitForPrefetch(42, 2000);
+      const elapsed = Date.now() - start;
+
+      expect(result).toBe(false);
+      // Should return quickly, not wait for timeout
+      expect(elapsed).toBeLessThan(500);
+    });
+  });
+
+  describe('pruneStatusMap skip condition', () => {
+    it('should NOT clear statusMap when payload.tabs is empty', () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      // Pre-populate statusMap with entries
+      (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(2, { tabId: 2, state: 'processing', updatedAt: Date.now() });
+
+      // Simulate queue status update with empty tabs
+      (prefetcher as any).pruneStatusMap({ ...baseStatus(), tabs: [] });
+
+      // Entries should be preserved
+      expect((prefetcher as any).statusMap.size).toBe(2);
+      expect((prefetcher as any).statusMap.has(1)).toBe(true);
+      expect((prefetcher as any).statusMap.has(2)).toBe(true);
+    });
+
+    it('should prune entries not in queue when tabs is non-empty', () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(2, { tabId: 2, state: 'processing', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(3, { tabId: 3, state: 'scheduled', updatedAt: Date.now() });
+
+      const tabs = [
+        { tabId: 1, url: 'https://a.com', title: 'A', isIgnored: false },
+        { tabId: 3, url: 'https://c.com', title: 'C', isIgnored: false },
+      ];
+
+      (prefetcher as any).pruneStatusMap({ ...baseStatus(), tabs });
+
+      // tabId 2 should be pruned, 1 and 3 remain
+      expect((prefetcher as any).statusMap.size).toBe(2);
+      expect((prefetcher as any).statusMap.has(1)).toBe(true);
+      expect((prefetcher as any).statusMap.has(2)).toBe(false);
+      expect((prefetcher as any).statusMap.has(3)).toBe(true);
+    });
+  });
+
+  describe('getResultFromStore', () => {
+    it('should return cached result when available', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      // Mock the resultStore.get to return a cached entry
+      const mockResult = { summary: 'cached summary', translation: 'cached translation' };
+      (prefetcher as any).resultStore = {
+        get: jest.fn().mockResolvedValue(mockResult),
+      };
+
+      const result = await prefetcher.getResultFromStore(42);
+
+      expect(result).toEqual({ summary: 'cached summary', translation: 'cached translation' });
+    });
+
+    it('should return null when resultStore is not initialized', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      // Do NOT call initialize() — resultStore remains null
+      (prefetcher as any).resultStore = null;
+
+      const result = await prefetcher.getResultFromStore(42);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when no entry exists in store', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      (prefetcher as any).resultStore = {
+        get: jest.fn().mockResolvedValue(null),
+      };
+
+      const result = await prefetcher.getResultFromStore(42);
+
+      expect(result).toBeNull();
+    });
+  });
+
 });
