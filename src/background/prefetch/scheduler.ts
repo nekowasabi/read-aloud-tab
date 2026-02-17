@@ -25,7 +25,10 @@ export class PrefetchScheduler {
   private readonly cancelJob: (tabId: number) => void;
   private readonly maxPrefetchAhead: number;
   private readonly scheduled = new Set<number>();
+  private readonly cooldownMap = new Map<number, number>();
+  private readonly COOLDOWN_MS = 5000;
   private readonly logger: LoggerLike;
+  private onEnqueue?: (tabId: number) => void;
 
   constructor(options: PrefetchSchedulerOptions) {
     this.enqueueJob = options.enqueue;
@@ -34,12 +37,16 @@ export class PrefetchScheduler {
     this.logger = options.logger || console;
   }
 
+  setOnEnqueue(callback: (tabId: number) => void): void {
+    this.onEnqueue = callback;
+  }
+
   handleStatusUpdate(payload: QueueStatusPayload): void {
     if (!payload.tabs || payload.tabs.length === 0) {
       return;
     }
 
-    if (!['reading', 'paused'].includes(payload.status)) {
+    if (payload.status === 'error') {
       return;
     }
 
@@ -47,11 +54,12 @@ export class PrefetchScheduler {
     this.reconcileSchedule(targets.map((tab) => tab.tabId));
 
     targets.forEach((tab, index) => {
-      // Only enqueue if not already scheduled to prevent duplicate jobs
-      if (!this.scheduled.has(tab.tabId)) {
+      // Only enqueue if not already scheduled and not in cooldown
+      if (!this.scheduled.has(tab.tabId) && !this.isInCooldown(tab.tabId)) {
         this.logger.debug?.(`[Prefetch] Scheduled job for tab ${tab.tabId} with priority ${index}`);
         this.enqueueJob({ tabId: tab.tabId, priority: index });
         this.scheduled.add(tab.tabId);
+        this.onEnqueue?.(tab.tabId);
       }
     });
   }
@@ -80,9 +88,26 @@ export class PrefetchScheduler {
 
   /**
    * Clear scheduled status for a tab (called when prefetch completes)
+   * Starts cooldown period to prevent immediate re-scheduling
    */
   clearScheduled(tabId: number): void {
     this.scheduled.delete(tabId);
+    this.cooldownMap.set(tabId, Date.now());
+  }
+
+  /**
+   * Check if a tab is in cooldown period after prefetch completion
+   */
+  private isInCooldown(tabId: number): boolean {
+    const cooldownStart = this.cooldownMap.get(tabId);
+    if (!cooldownStart) {
+      return false;
+    }
+    if (Date.now() - cooldownStart >= this.COOLDOWN_MS) {
+      this.cooldownMap.delete(tabId);
+      return false;
+    }
+    return true;
   }
 
   private reconcileSchedule(nextIds: number[]): void {
