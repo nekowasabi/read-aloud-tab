@@ -18,6 +18,7 @@ import {
   isKeepAliveDiagnosticsMessage,
 } from '../shared/messages';
 import { AiPrefetcher } from './aiPrefetcher';
+import { AiProcessor } from './aiProcessor';
 import { TabManager, LoggerLike } from './tabManager';
 import { KeepAliveController, KeepAliveConfig, KeepAliveEvent, RuntimePort } from './keepAliveController';
 import { StorageManager } from '../shared/utils/storage';
@@ -78,6 +79,7 @@ interface BackgroundOrchestratorOptions {
   chrome?: ChromeLike;
   logger?: LoggerLike;
   prefetcher?: AiPrefetcher | null;
+  aiProcessor?: AiProcessor | null;
   keepAliveController?: KeepAliveController;
   keepAliveConfig?: Partial<KeepAliveConfig>;
 }
@@ -87,6 +89,7 @@ export class BackgroundOrchestrator {
   private readonly chrome: ChromeLike;
   private readonly logger: LoggerLike;
   private readonly prefetcher: AiPrefetcher | null;
+  private readonly aiProcessor: AiProcessor | null;
   private initialized = false;
 
   private readonly ports = new Set<ChromeRuntimePort>();
@@ -108,6 +111,7 @@ export class BackgroundOrchestrator {
     this.chrome = options.chrome || (browserAPI as unknown as ChromeLike);
     this.logger = options.logger || console;
     this.prefetcher = options.prefetcher ?? null;
+    this.aiProcessor = options.aiProcessor ?? null;
     this.keepAliveController = options.keepAliveController || this.createKeepAliveController(options.keepAliveConfig);
 
     if (!this.chrome?.runtime) {
@@ -144,6 +148,31 @@ export class BackgroundOrchestrator {
             // Get updated tab info with summary/translation
             const updatedTab = this.tabManager.getTabById(tab.tabId);
             if (updatedTab) {
+              // On-demand fallback: if prefetch succeeded but summary is missing
+              if (!updatedTab.summary && settings.enableAiSummary) {
+                this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
+                // First, check result store for cached result (avoids duplicate AI calls)
+                const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId);
+                if (cachedResult?.summary) {
+                  this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
+                  updatedTab.summary = cachedResult.summary;
+                  if (cachedResult.translation) {
+                    updatedTab.translation = cachedResult.translation;
+                  }
+                } else if (this.aiProcessor) {
+                  // No cache found, run AiProcessor as last resort
+                  this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
+                  try {
+                    const processed = await this.aiProcessor.processContent(updatedTab, settings);
+                    if (processed) {
+                      updatedTab.summary = processed;
+                    }
+                  } catch (fallbackError) {
+                    this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
+                  }
+                }
+              }
+
               const hasSummary = !!updatedTab.summary;
               const hasTranslation = !!updatedTab.translation;
               this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
