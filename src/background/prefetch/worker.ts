@@ -16,7 +16,7 @@ export interface PrefetchResultStore {
   prune(): Promise<void>;
 }
 
-export type PrefetchState = 'pending' | 'processing' | 'completed' | 'failed';
+export type PrefetchState = 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface PrefetchStatusUpdate {
   tabId: number;

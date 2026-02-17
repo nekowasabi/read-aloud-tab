@@ -92,7 +92,7 @@ export type QueueBroadcastMessage =
 
 export interface PrefetchStatusPayload {
   tabId: number;
-  state: 'pending' | 'processing' | 'completed' | 'failed';
+  state: 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
   updatedAt: number;
   error?: string;
 }

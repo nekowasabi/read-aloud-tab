@@ -100,6 +100,44 @@ describe.skip('TabManager performance features', () => {
     expect(nonCurrentTrimmed).toBe(true);
   }, 20000);
 
+  test('preserves summary and translation when content is trimmed by budget', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const { manager } = await createManager({ save });
+
+    const large = 60_000;
+    // Create tabs with large content plus summary and translation
+    const tab1 = createTab(20, large);
+    tab1.summary = 'Summary for tab 20';
+    tab1.translation = 'Translation for tab 20';
+
+    const tab2 = createTab(21, large);
+    tab2.summary = 'Summary for tab 21';
+    tab2.translation = 'Translation for tab 21';
+
+    const tab3 = createTab(22, large);
+    tab3.summary = 'Summary for tab 22';
+    tab3.translation = 'Translation for tab 22';
+
+    await manager.addTab(tab1);
+    await manager.addTab(tab2);
+    await manager.addTab(tab3);
+
+    await manager.flushPersistence();
+
+    const snapshot = manager.getSnapshot();
+    // At least one tab should have its content trimmed (budget exceeded)
+    const trimmedTabs = snapshot.tabs.filter((tab) => !tab.content);
+    expect(trimmedTabs.length).toBeGreaterThanOrEqual(1);
+
+    // All tabs must preserve their summary and translation regardless of content trimming
+    for (const tab of snapshot.tabs) {
+      expect(tab.summary).toBeDefined();
+      expect(tab.summary).toMatch(/^Summary for tab \d+$/);
+      expect(tab.translation).toBeDefined();
+      expect(tab.translation).toMatch(/^Translation for tab \d+$/);
+    }
+  }, 20000);
+
   test(
     'continues playback during tab reload and restarts with new content',
     async () => {

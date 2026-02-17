@@ -1,6 +1,6 @@
 {
   "name": "read-aloud-tab",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Read web page content aloud using text-to-speech",
   "scripts": {
     "dev": "webpack --mode=development --env browser=chrome --watch",

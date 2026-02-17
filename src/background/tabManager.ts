@@ -1056,8 +1056,7 @@ export class TabManager {
       totalChars += contentLength;
       if (totalChars > QUEUE_CONTENT_CHAR_BUDGET) {
         tab.content = undefined;
-        tab.summary = undefined;
-        tab.translation = undefined;
+        // summary と translation は保持（再生に必要なため）
       }
     }
   }

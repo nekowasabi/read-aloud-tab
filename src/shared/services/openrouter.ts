@@ -59,7 +59,7 @@ export class OpenRouterClient {
         };
       }
 
-      return this._handleErrorResponse(response);
+      return await this._handleErrorResponse(response);
     } catch (error) {
       return {
         success: false,
@@ -97,7 +97,7 @@ export class OpenRouterClient {
       const response = await this._makeRequest(request);
 
       if (!response.ok) {
-        const errorResult = this._handleErrorResponse(response);
+        const errorResult = await this._handleErrorResponse(response);
         throw new Error(errorResult.error || 'リクエストに失敗しました');
       }
 
@@ -145,7 +145,7 @@ export class OpenRouterClient {
       const response = await this._makeRequest(request);
 
       if (!response.ok) {
-        const errorResult = this._handleErrorResponse(response);
+        const errorResult = await this._handleErrorResponse(response);
         throw new Error(errorResult.error || '翻訳リクエストに失敗しました');
       }
 
@@ -180,15 +180,32 @@ export class OpenRouterClient {
    * @param response レスポンス
    * @returns エラー結果
    */
-  private _handleErrorResponse(response: Response): ConnectionTestResult {
+  private async _handleErrorResponse(response: Response): Promise<ConnectionTestResult> {
     const { status } = response;
 
+    // Try to parse response body for more specific error info
+    let bodyError: string | undefined;
+    try {
+      const body = await response.json();
+      bodyError = body?.error?.message || body?.error?.code || undefined;
+    } catch {
+      // ignore parse errors
+    }
+
+    // Check if body indicates an auth error (even on 5xx)
+    const isAuthError =
+      status === 401 ||
+      status === 403 ||
+      (bodyError && /invalid.*key|auth|unauthorized|credential/i.test(bodyError));
+
+    if (isAuthError) {
+      return {
+        success: false,
+        error: OPENROUTER_ERROR_MESSAGES.INVALID_API_KEY,
+      };
+    }
+
     switch (status) {
-      case 401:
-        return {
-          success: false,
-          error: OPENROUTER_ERROR_MESSAGES.INVALID_API_KEY,
-        };
       case 429:
         return {
           success: false,
