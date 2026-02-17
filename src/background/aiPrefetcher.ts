@@ -42,6 +42,7 @@ export class AiPrefetcher {
 
   private scheduler: PrefetchScheduler | null = null;
   private worker: PrefetchWorker | null = null;
+  private resultStore: PrefetchResultStoreImpl | null = null;
   private unsubscribeStatus?: () => void;
   private statusMap = new Map<number, PrefetchStatusUpdate & { updatedAt: number }>();
   private keepAliveDiagnostics: KeepAliveDiagnostics | null = null;
@@ -103,6 +104,15 @@ export class AiPrefetcher {
 
     this.worker = worker;
     this.scheduler = scheduler;
+    this.resultStore = resultStore;
+
+    this.scheduler.setOnEnqueue((tabId: number) => {
+      this.statusMap.set(tabId, {
+        tabId,
+        state: 'scheduled',
+        updatedAt: Date.now(),
+      });
+    });
 
     this.unsubscribeStatus = this.tabManager.addStatusListener((payload: QueueStatusPayload) => {
       this.scheduler?.handleStatusUpdate(payload);
@@ -190,6 +200,31 @@ export class AiPrefetcher {
   }
 
   /**
+   * Retrieves cached prefetch result from the result store.
+   * Used as a fallback when prefetch completed but TabInfo wasn't updated in time.
+   */
+  async getResultFromStore(
+    tabId: number
+  ): Promise<{ summary?: string; translation?: string } | null> {
+    if (!this.resultStore) {
+      return null;
+    }
+    try {
+      const entry = await this.resultStore.get(tabId);
+      if (!entry) {
+        return null;
+      }
+      return {
+        summary: entry.summary,
+        translation: entry.translation,
+      };
+    } catch (error) {
+      this.logger.warn('[AiPrefetcher] Failed to get result from store', error);
+      return null;
+    }
+  }
+
+  /**
    * Wait for prefetch completion for a specific tab
    * Returns a promise that resolves when prefetch is complete or timeout occurs
    */
@@ -198,7 +233,9 @@ export class AiPrefetcher {
 
     // Poll status every 100ms
     while (Date.now() - startTime < timeoutMs) {
-      if (this.isPrefetchComplete(tabId)) {
+      // If scheduler reports this tab as scheduled, keep waiting even if statusMap is empty
+      const isScheduled = this.scheduler?.isScheduled(tabId) ?? false;
+      if (!isScheduled && this.isPrefetchComplete(tabId)) {
         const status = this.statusMap.get(tabId);
         return status?.state === 'completed';
       }
@@ -282,6 +319,12 @@ export class AiPrefetcher {
   }
 
   private pruneStatusMap(payload: QueueStatusPayload): void {
+    // Skip pruning when queue is empty to preserve statusMap entries for tab re-add scenario
+    // This prevents the "entry not found = completed" false positive in isPrefetchComplete
+    if (payload.tabs.length === 0) {
+      return;
+    }
+
     const validIds = new Set(payload.tabs.map((tab) => tab.tabId));
     for (const tabId of Array.from(this.statusMap.keys())) {
       if (!validIds.has(tabId)) {
