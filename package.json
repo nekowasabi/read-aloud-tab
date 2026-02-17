@@ -1,12 +1,12 @@
 {
   "name": "read-aloud-tab",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Read web page content aloud using text-to-speech",
   "scripts": {
     "dev": "webpack --mode=development --env browser=chrome --watch",
     "build:chrome": "webpack --mode=production --env browser=chrome",
     "build:firefox": "webpack --mode=production --env browser=firefox",
-    "build:ext": "mkdir -p web-ext-artifacts && npx web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --overwrite-dest",
+    "build:ext": "mkdir -p web-ext-artifacts && npx web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --overwrite-dest --filename=read-aloud-tab-firefox-v$npm_package_version.zip",
     "build:all": "npm run build:chrome && npm run build:firefox",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.{ts,tsx}",
