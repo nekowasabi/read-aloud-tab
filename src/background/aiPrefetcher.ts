@@ -29,6 +29,8 @@ export interface PrefetchStatusBroadcast {
   payload: PrefetchStatusSnapshot;
 }
 
+export type PrefetchWaitResult = 'completed' | 'failed' | 'timed_out';
+
 export class AiPrefetcher {
   private readonly tabManager: TabManager;
   private readonly logger: LoggerLike;
@@ -228,23 +230,24 @@ export class AiPrefetcher {
    * Wait for prefetch completion for a specific tab
    * Returns a promise that resolves when prefetch is complete or timeout occurs
    */
-  async waitForPrefetch(tabId: number, timeoutMs: number = 30000): Promise<boolean> {
+  async waitForPrefetch(tabId: number, timeoutMs: number = 30000): Promise<PrefetchWaitResult> {
     const startTime = Date.now();
 
     // Poll status every 100ms
     while (Date.now() - startTime < timeoutMs) {
-      // If scheduler reports this tab as scheduled, keep waiting even if statusMap is empty
-      const isScheduled = this.scheduler?.isScheduled(tabId) ?? false;
-      if (!isScheduled && this.isPrefetchComplete(tabId)) {
-        const status = this.statusMap.get(tabId);
-        return status?.state === 'completed';
+      const status = this.statusMap.get(tabId);
+      if (status?.state === 'completed') {
+        return 'completed';
+      }
+      if (status?.state === 'failed') {
+        return 'failed';
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     // Timeout
     this.logger.warn(`[AiPrefetcher] Timeout waiting for prefetch completion: tabId=${tabId}`);
-    return false;
+    return 'timed_out';
   }
 
   private async ensureSettings(): Promise<AiSettings> {

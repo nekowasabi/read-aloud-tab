@@ -137,55 +137,59 @@ export class BackgroundOrchestrator {
     if (this.prefetcher) {
       try {
         const settings = await import('../shared/utils/storage').then((m) => m.StorageManager.getAiSettings());
-        const needsAi = settings.enableAiSummary || settings.enableAiTranslation;
+        const needsAi = settings.enableAiSummary === true || settings.enableAiTranslation === true;
 
         if (needsAi) {
           this.logger.info(`[BackgroundOrchestrator] Waiting for AI prefetch for tab ${tab.tabId}...`);
-          const success = await this.prefetcher.waitForPrefetch(tab.tabId, 30000);
+          const waitResult = await this.prefetcher.waitForPrefetch(tab.tabId, 30000);
 
-          if (success) {
+          if (waitResult === 'completed') {
             this.logger.info(`[BackgroundOrchestrator] AI prefetch completed for tab ${tab.tabId}`);
-            // Get updated tab info with summary/translation
-            const updatedTab = this.tabManager.getTabById(tab.tabId);
-            if (updatedTab) {
-              // On-demand fallback: if prefetch succeeded but summary is missing
-              if (!updatedTab.summary && settings.enableAiSummary) {
-                this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
-                // First, check result store for cached result (avoids duplicate AI calls)
-                const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId);
-                if (cachedResult?.summary) {
-                  this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
-                  updatedTab.summary = cachedResult.summary;
-                  if (cachedResult.translation) {
-                    updatedTab.translation = cachedResult.translation;
-                  }
-                } else if (this.aiProcessor) {
-                  // No cache found, run AiProcessor as last resort
-                  this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
-                  try {
-                    const processed = await this.aiProcessor.processContent(updatedTab, settings);
-                    if (processed) {
-                      updatedTab.summary = processed;
-                    }
-                  } catch (fallbackError) {
-                    this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
-                  }
-                }
-              }
-
-              const hasSummary = !!updatedTab.summary;
-              const hasTranslation = !!updatedTab.translation;
-              this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
-              return {
-                content: updatedTab.content,
-                summary: updatedTab.summary,
-                translation: updatedTab.translation,
-                extractedAt: updatedTab.extractedAt,
-              };
-            }
+          } else if (waitResult === 'failed') {
+            this.logger.warn(`[BackgroundOrchestrator] AI prefetch failed for tab ${tab.tabId}, using best available content`);
           } else {
-            this.logger.warn(`[BackgroundOrchestrator] AI prefetch timeout for tab ${tab.tabId}, proceeding with original content`);
+            this.logger.warn(
+              `[BackgroundOrchestrator] AI prefetch timed out for tab ${tab.tabId}, attempting on-demand fallback`
+            );
           }
+
+          const updatedTab = this.tabManager.getTabById(tab.tabId) ?? tab;
+          const shouldFallbackToOnDemandSummary =
+            settings.enableAiSummary === true &&
+            !updatedTab.summary &&
+            waitResult !== 'failed';
+
+          if (shouldFallbackToOnDemandSummary) {
+            this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
+            const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId);
+            if (cachedResult?.summary) {
+              this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
+              updatedTab.summary = cachedResult.summary;
+              if (cachedResult.translation) {
+                updatedTab.translation = cachedResult.translation;
+              }
+            } else if (this.aiProcessor) {
+              this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
+              try {
+                const processed = await this.aiProcessor.processContent(updatedTab, settings);
+                if (processed) {
+                  updatedTab.summary = processed;
+                }
+              } catch (fallbackError) {
+                this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
+              }
+            }
+          }
+
+          const hasSummary = !!updatedTab.summary;
+          const hasTranslation = !!updatedTab.translation;
+          this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
+          return {
+            content: updatedTab.content,
+            summary: updatedTab.summary,
+            translation: updatedTab.translation,
+            extractedAt: updatedTab.extractedAt,
+          };
         }
       } catch (error) {
         this.logger.warn('[BackgroundOrchestrator] Failed to check AI settings or wait for prefetch', error);
