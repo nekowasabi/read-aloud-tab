@@ -165,8 +165,8 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     expect((prefetcher as any).translationMaxTokens).toBe(888);
   });
 
-  describe('waitForPrefetch with scheduler check', () => {
-    it('should continue polling when scheduler.isScheduled returns true even if statusMap is empty', async () => {
+  describe('waitForPrefetch', () => {
+    it('should continue polling until status becomes completed', async () => {
       const prefetcher = new AiPrefetcher({
         tabManager: tabManagerMock as TabManager,
         broadcast: broadcastMock,
@@ -175,23 +175,16 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       prefetcher.initialize();
 
-      // Override scheduler with mock that reports tabId as scheduled
-      const mockScheduler = { isScheduled: jest.fn().mockReturnValue(true) };
-      (prefetcher as any).scheduler = mockScheduler;
-
-      // statusMap is empty initially, but scheduler says it's scheduled
-      // After 200ms, statusMap gets populated with completed state
+      // statusMap is empty initially; after 200ms it becomes completed
       setTimeout(() => {
         (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'completed', updatedAt: Date.now() });
-        mockScheduler.isScheduled.mockReturnValue(false);
       }, 200);
 
       const result = await prefetcher.waitForPrefetch(42, 2000);
-      expect(result).toBe(true);
-      expect(mockScheduler.isScheduled).toHaveBeenCalledWith(42);
+      expect(result).toBe('completed');
     });
 
-    it('should return false immediately when neither scheduled nor in statusMap', async () => {
+    it('should wait until timeout when status is still unavailable', async () => {
       const prefetcher = new AiPrefetcher({
         tabManager: tabManagerMock as TabManager,
         broadcast: broadcastMock,
@@ -200,17 +193,31 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       prefetcher.initialize();
 
-      const mockScheduler = { isScheduled: jest.fn().mockReturnValue(false) };
-      (prefetcher as any).scheduler = mockScheduler;
-
-      // statusMap is empty, scheduler says not scheduled → should return false (not scheduled, not completed)
+      // statusMap is empty → should keep waiting until timeout
       const start = Date.now();
-      const result = await prefetcher.waitForPrefetch(42, 2000);
+      const result = await prefetcher.waitForPrefetch(42, 300);
       const elapsed = Date.now() - start;
 
-      expect(result).toBe(false);
-      // Should return quickly, not wait for timeout
-      expect(elapsed).toBeLessThan(500);
+      expect(result).toBe('timed_out');
+      expect(elapsed).toBeGreaterThanOrEqual(250);
+    });
+
+    it('should return failed when worker reports an explicit failure', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      setTimeout(() => {
+        (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'failed', updatedAt: Date.now() });
+      }, 100);
+
+      const result = await prefetcher.waitForPrefetch(42, 2000);
+
+      expect(result).toBe('failed');
     });
   });
 

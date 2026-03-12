@@ -118,7 +118,7 @@ describe('createContentResolver fallback', () => {
 
   it('should trigger on-demand summarization when prefetch returns no summary', async () => {
     // Setup: prefetch succeeds but tab has no summary
-    prefetcher.waitForPrefetch.mockResolvedValue(true);
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
     const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
     tabManager.addTab(tabNoSummary);
     StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
@@ -138,7 +138,7 @@ describe('createContentResolver fallback', () => {
 
   it('should not trigger fallback when summary already exists from prefetch', async () => {
     // Setup: prefetch succeeds and tab has summary
-    prefetcher.waitForPrefetch.mockResolvedValue(true);
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
     const tabWithSummary = { ...baseTab, summary: 'Prefetched summary' };
     tabManager.addTab(tabWithSummary);
     StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
@@ -153,7 +153,7 @@ describe('createContentResolver fallback', () => {
 
   it('should not trigger fallback when AI settings are disabled', async () => {
     // Setup: AI disabled → needsAi is false → no prefetch wait at all
-    prefetcher.waitForPrefetch.mockResolvedValue(true);
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
     const tabNoSummary = { ...baseTab, summary: undefined };
     tabManager.addTab(tabNoSummary);
     StorageManager.getAiSettings.mockResolvedValue(aiSettingsDisabled);
@@ -167,7 +167,7 @@ describe('createContentResolver fallback', () => {
 
   it('should handle AiProcessor failure gracefully', async () => {
     // Setup: prefetch succeeds, no summary, AiProcessor throws
-    prefetcher.waitForPrefetch.mockResolvedValue(true);
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
     const tabNoSummary = { ...baseTab, summary: undefined };
     tabManager.addTab(tabNoSummary);
     StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
@@ -178,6 +178,37 @@ describe('createContentResolver fallback', () => {
 
     // Assert: returns content without summary, no crash
     expect(result).toBeTruthy();
+    expect(result.content).toBe(baseTab.content);
+  });
+
+  it('should trigger on-demand summarization when prefetch times out', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('timed_out');
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    tabManager.addTab(tabNoSummary);
+    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+    aiProcessor.processContent.mockResolvedValue('Delayed summary from fallback');
+
+    const resolver = (orchestrator as any).createContentResolver;
+    const result = await resolver(tabNoSummary);
+
+    expect(aiProcessor.processContent).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 42 }),
+      aiSettingsEnabled
+    );
+    expect(result.summary).toBe('Delayed summary from fallback');
+  });
+
+  it('should not trigger on-demand summarization when prefetch fails explicitly', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('failed');
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    tabManager.addTab(tabNoSummary);
+    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+
+    const resolver = (orchestrator as any).createContentResolver;
+    const result = await resolver(tabNoSummary);
+
+    expect(aiProcessor.processContent).not.toHaveBeenCalled();
+    expect(result.summary).toBeUndefined();
     expect(result.content).toBe(baseTab.content);
   });
 });
