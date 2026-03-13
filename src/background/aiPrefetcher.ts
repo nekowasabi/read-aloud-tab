@@ -48,6 +48,7 @@ export class AiPrefetcher {
   private unsubscribeStatus?: () => void;
   private statusMap = new Map<number, PrefetchStatusUpdate & { updatedAt: number }>();
   private keepAliveDiagnostics: KeepAliveDiagnostics | null = null;
+  private waitAbortControllers = new Map<number, AbortController>();
 
   private cachedSettings: AiSettings | null = null;
   private cachedSettingsTimestamp = 0;
@@ -167,6 +168,11 @@ export class AiPrefetcher {
         this.cachedSettingsTimestamp = 0;
         this.clientInstance = null;
         this.clientCacheKey = null;
+
+        const newValue = changes[STORAGE_KEYS.AI_SETTINGS]?.newValue as { summaryWaitMode?: 'wait' | 'skip' } | undefined;
+        if (newValue?.summaryWaitMode === 'wait' || newValue?.summaryWaitMode === 'skip') {
+          this.scheduler?.setSummaryWaitMode(newValue.summaryWaitMode);
+        }
       }
     };
 
@@ -204,15 +210,17 @@ export class AiPrefetcher {
   /**
    * Retrieves cached prefetch result from the result store.
    * Used as a fallback when prefetch completed but TabInfo wasn't updated in time.
+   * Pass url to verify the cached result matches the current page.
    */
   async getResultFromStore(
-    tabId: number
+    tabId: number,
+    url?: string
   ): Promise<{ summary?: string; translation?: string } | null> {
     if (!this.resultStore) {
       return null;
     }
     try {
-      const entry = await this.resultStore.get(tabId);
+      const entry = await this.resultStore.get(tabId, url);
       if (!entry) {
         return null;
       }
@@ -227,22 +235,66 @@ export class AiPrefetcher {
   }
 
   /**
-   * Wait for prefetch completion for a specific tab
-   * Returns a promise that resolves when prefetch is complete or timeout occurs
+   * Cancel the waiting loop for a specific tab.
+   * Should be called when a tab is removed from the queue.
    */
-  async waitForPrefetch(tabId: number, timeoutMs: number = 30000): Promise<PrefetchWaitResult> {
+  cancelWait(tabId: number): void {
+    const controller = this.waitAbortControllers.get(tabId);
+    if (controller) {
+      controller.abort();
+      this.waitAbortControllers.delete(tabId);
+    }
+  }
+
+  /**
+   * Wait for prefetch completion for a specific tab
+   * Returns a promise that resolves when prefetch is complete or timeout occurs.
+   * Can be cancelled via cancelWait(tabId).
+   */
+  async waitForPrefetch(
+    tabId: number,
+    timeoutMs: number = 30000,
+    waitMode: 'wait' | 'skip' = 'skip'
+  ): Promise<PrefetchWaitResult> {
+    const effectiveTimeout = waitMode === 'wait' ? 120000 : timeoutMs;
     const startTime = Date.now();
 
-    // Poll status every 100ms
-    while (Date.now() - startTime < timeoutMs) {
-      const status = this.statusMap.get(tabId);
-      if (status?.state === 'completed') {
-        return 'completed';
+    // Set up an AbortController so callers can cancel the wait
+    const abortController = new AbortController();
+    this.waitAbortControllers.set(tabId, abortController);
+
+    try {
+      // Poll status every 100ms
+      while (Date.now() - startTime < effectiveTimeout) {
+        if (abortController.signal.aborted) {
+          this.logger.info(`[AiPrefetcher] Wait cancelled for tabId=${tabId}`);
+          return 'timed_out';
+        }
+
+        const status = this.statusMap.get(tabId);
+        if (status?.state === 'completed') {
+          return 'completed';
+        }
+        if (status?.state === 'failed') {
+          return 'failed';
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 100);
+          abortController.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('aborted'));
+          }, { once: true });
+        });
       }
-      if (status?.state === 'failed') {
-        return 'failed';
+    } catch (err) {
+      if (abortController.signal.aborted) {
+        this.logger.info(`[AiPrefetcher] Wait cancelled for tabId=${tabId}`);
+        return 'timed_out';
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      throw err;
+    } finally {
+      this.waitAbortControllers.delete(tabId);
     }
 
     // Timeout

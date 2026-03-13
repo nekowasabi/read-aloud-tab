@@ -50,6 +50,16 @@ export interface QueueSettingsUpdatePayload {
   settings: Partial<TTSSettings>;
 }
 
+export interface SetSummaryWaitModeMessage {
+  type: 'SET_SUMMARY_WAIT_MODE';
+  mode: 'wait' | 'skip';
+}
+
+export interface SkipSummaryWaitMessage {
+  type: 'SKIP_SUMMARY_WAIT';
+  tabId: number;
+}
+
 export type QueueCommandMessage =
   | { type: 'QUEUE_ADD'; payload: QueueAddPayload }
   | { type: 'QUEUE_REMOVE'; payload: QueueRemovePayload }
@@ -58,7 +68,9 @@ export type QueueCommandMessage =
   | { type: 'QUEUE_CONTROL'; payload: QueueControlPayload }
   | { type: 'QUEUE_UPDATE_SETTINGS'; payload: QueueSettingsUpdatePayload }
   | { type: 'QUEUE_CLEAR' }
-  | { type: 'REQUEST_QUEUE_STATE' };
+  | { type: 'REQUEST_QUEUE_STATE' }
+  | SetSummaryWaitModeMessage
+  | SkipSummaryWaitMessage;
 
 export interface QueueStatusPayload {
   status: QueueStatus;
@@ -143,6 +155,8 @@ export function isQueueCommandMessage(message: unknown): message is QueueCommand
     case 'QUEUE_UPDATE_SETTINGS':
     case 'QUEUE_CLEAR':
     case 'REQUEST_QUEUE_STATE':
+    case 'SET_SUMMARY_WAIT_MODE':
+    case 'SKIP_SUMMARY_WAIT':
       return true;
     default:
       return false;

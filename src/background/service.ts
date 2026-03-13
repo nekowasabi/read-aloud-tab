@@ -12,10 +12,10 @@ import {
   isOffscreenBroadcastMessage,
   PrefetchCommandMessage,
   PrefetchBroadcastMessage,
-  PrefetchStatusSnapshot,
   isPrefetchCommandMessage,
   KeepAliveDiagnosticsMessage,
   isKeepAliveDiagnosticsMessage,
+  SetSummaryWaitModeMessage,
 } from '../shared/messages';
 import { AiPrefetcher } from './aiPrefetcher';
 import { AiProcessor } from './aiProcessor';
@@ -124,7 +124,9 @@ export class BackgroundOrchestrator {
 
   /**
    * Content resolver for TabManager
-   * Waits for AI summary/translation if enabled before returning
+   * Waits for AI summary/translation if enabled before returning.
+   * If prefetch isn't ready yet, returns null immediately and triggers
+   * prefetch in the background so the caller can use fallback content.
    */
   private createContentResolver = async (tab: TabInfo) => {
     // If no content, request extraction first
@@ -141,55 +143,85 @@ export class BackgroundOrchestrator {
 
         if (needsAi) {
           this.logger.info(`[BackgroundOrchestrator] Waiting for AI prefetch for tab ${tab.tabId}...`);
-          const waitResult = await this.prefetcher.waitForPrefetch(tab.tabId, 30000);
+          const waitMode = settings.summaryWaitMode || 'wait';
 
-          if (waitResult === 'completed') {
-            this.logger.info(`[BackgroundOrchestrator] AI prefetch completed for tab ${tab.tabId}`);
-          } else if (waitResult === 'failed') {
-            this.logger.warn(`[BackgroundOrchestrator] AI prefetch failed for tab ${tab.tabId}, using best available content`);
-          } else {
-            this.logger.warn(
-              `[BackgroundOrchestrator] AI prefetch timed out for tab ${tab.tabId}, attempting on-demand fallback`
+          // Non-blocking: if prefetch isn't started for this tab, return immediately
+          // so the caller can proceed with fallback content
+          const isPrefetchComplete = this.prefetcher.isPrefetchComplete(tab.tabId);
+          if (!isPrefetchComplete) {
+            // Prefetch is in progress - use a bounded wait based on waitMode
+            const boundedTimeout = waitMode === 'wait' ? 120000 : 30000;
+            const waitResult = await this.prefetcher.waitForPrefetch(
+              tab.tabId,
+              boundedTimeout,
+              waitMode
             );
-          }
 
-          const updatedTab = this.tabManager.getTabById(tab.tabId) ?? tab;
-          const shouldFallbackToOnDemandSummary =
-            settings.enableAiSummary === true &&
-            !updatedTab.summary &&
-            waitResult !== 'failed';
+            if (waitResult === 'completed') {
+              this.logger.info(`[BackgroundOrchestrator] AI prefetch completed for tab ${tab.tabId}`);
+            } else if (waitResult === 'failed') {
+              this.logger.warn(`[BackgroundOrchestrator] AI prefetch failed for tab ${tab.tabId}, using best available content`);
+            } else {
+              this.logger.warn(
+                `[BackgroundOrchestrator] AI prefetch timed out for tab ${tab.tabId}, attempting on-demand fallback`
+              );
+            }
 
-          if (shouldFallbackToOnDemandSummary) {
-            this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
-            const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId);
-            if (cachedResult?.summary) {
-              this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
-              updatedTab.summary = cachedResult.summary;
-              if (cachedResult.translation) {
-                updatedTab.translation = cachedResult.translation;
-              }
-            } else if (this.aiProcessor) {
-              this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
-              try {
-                const processed = await this.aiProcessor.processContent(updatedTab, settings);
-                if (processed) {
-                  updatedTab.summary = processed;
+            const updatedTab = this.tabManager.getTabById(tab.tabId) ?? tab;
+            const shouldFallbackToOnDemandSummary =
+              settings.enableAiSummary === true &&
+              !updatedTab.summary &&
+              (waitResult !== 'failed' || settings.summaryWaitMode === 'wait');
+
+            if (shouldFallbackToOnDemandSummary) {
+              this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
+              // Pass the tab URL to verify cached result is for the current page
+              const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId, tab.url);
+              if (cachedResult?.summary) {
+                this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
+                // Only apply if URL still matches (guard against navigation)
+                const currentTab = this.tabManager.getTabById(tab.tabId);
+                if (!currentTab || currentTab.url === tab.url) {
+                  updatedTab.summary = cachedResult.summary;
+                  if (cachedResult.translation) {
+                    updatedTab.translation = cachedResult.translation;
+                  }
                 }
-              } catch (fallbackError) {
-                this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
+              } else if (this.aiProcessor) {
+                this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
+                try {
+                  const processed = await this.aiProcessor.processContent(updatedTab, settings);
+                  if (processed) {
+                    updatedTab.summary = processed;
+                  }
+                } catch (fallbackError) {
+                  this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
+                }
               }
             }
-          }
 
-          const hasSummary = !!updatedTab.summary;
-          const hasTranslation = !!updatedTab.translation;
-          this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
-          return {
-            content: updatedTab.content,
-            summary: updatedTab.summary,
-            translation: updatedTab.translation,
-            extractedAt: updatedTab.extractedAt,
-          };
+            const hasSummary = !!updatedTab.summary;
+            const hasTranslation = !!updatedTab.translation;
+            this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
+            return {
+              content: updatedTab.content,
+              summary: updatedTab.summary,
+              translation: updatedTab.translation,
+              extractedAt: updatedTab.extractedAt,
+            };
+          } else {
+            // Prefetch already complete (or not needed) - return current tab state
+            const currentTab = this.tabManager.getTabById(tab.tabId) ?? tab;
+            const hasSummary = !!currentTab.summary;
+            const hasTranslation = !!currentTab.translation;
+            this.logger.debug?.(`[BackgroundOrchestrator] Prefetch already complete for tab ${tab.tabId}: summary=${hasSummary}, translation=${hasTranslation}`);
+            return {
+              content: currentTab.content,
+              summary: currentTab.summary,
+              translation: currentTab.translation,
+              extractedAt: currentTab.extractedAt,
+            };
+          }
         }
       } catch (error) {
         this.logger.warn('[BackgroundOrchestrator] Failed to check AI settings or wait for prefetch', error);
@@ -208,9 +240,8 @@ export class BackgroundOrchestrator {
     };
   };
 
-  private emitContentRequest(tabId: number, reason: 'missing' | 'stale'): void {
-    const event = { type: 'QUEUE_CONTENT_REQUEST', payload: { tabId, reason } } as const;
-    for (const listener of this.unsubscribeFns) {
+  private emitContentRequest(tabId: number, _reason: 'missing' | 'stale'): void {
+    {
       // This is a workaround - we need to emit to command listeners
       // but we don't have direct access here
     }
@@ -659,6 +690,15 @@ export class BackgroundOrchestrator {
         return { success: true };
       case 'REQUEST_QUEUE_STATE':
         return { success: true, payload: this.tabManager.getSnapshot() };
+      case 'SET_SUMMARY_WAIT_MODE': {
+        const { mode } = message as SetSummaryWaitModeMessage;
+        const currentSettings = await StorageManager.getAiSettings();
+        await StorageManager.saveAiSettings({ ...currentSettings, summaryWaitMode: mode });
+        return { success: true };
+      }
+      case 'SKIP_SUMMARY_WAIT':
+        // Phase C で詳細実装
+        return { success: true };
       default:
         return { success: false, error: 'Unknown command' } as any;
     }
@@ -985,11 +1025,11 @@ export class BackgroundOrchestrator {
     this.logger.info('[BackgroundOrchestrator] Received offscreen broadcast', message.type);
 
     switch (message.type) {
-      case 'OFFSCREEN_TTS_STATUS':
+      case 'OFFSCREEN_TTS_STATUS': {
         // Map offscreen status to queue status and broadcast
-        const status = message.payload.status;
         // Broadcast to popup/options pages
         break;
+      }
       case 'OFFSCREEN_TTS_PROGRESS':
         // Forward progress updates
         break;

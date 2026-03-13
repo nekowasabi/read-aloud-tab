@@ -16,6 +16,8 @@ export interface AiSettings {
   translationPrompt: string;
   /** 特定のプロバイダを優先する場合に指定（例: DeepInfra, Together） */
   openRouterProvider?: string;
+  /** 要約待機モード: 'wait' = プリフェッチ完了まで待機、'skip' = タイムアウト後スキップ */
+  summaryWaitMode?: 'wait' | 'skip';
 }
 
 /**

@@ -9,6 +9,7 @@ import TabQueueList from './TabQueueList';
 import useTabQueue from '../hooks/useTabQueue';
 import DiagnosticsBanner from './DiagnosticsBanner';
 import usePrefetchStatus from '../hooks/usePrefetchStatus';
+import SummaryControl from './SummaryControl';
 import { SerializedTabInfo } from '../../shared/messages';
 
 const DEFAULT_SETTINGS: TTSSettings = {
@@ -42,11 +43,17 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [developerMode, setDeveloperMode] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [summaryWaitMode, setSummaryWaitMode] = useState<'wait' | 'skip'>('wait');
 
   // Debounce timer for settings changes (insurance layer)
   const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { statuses: prefetchStatuses, diagnostics: prefetchDiagnostics } = usePrefetchStatus();
-  const isConnected = connectionState === 'connected';
+  // Treat 'connecting' (auto-reconnect in progress) the same as 'connected' for
+  // button availability. Commands sent while the port is not yet ready will
+  // surface as error toasts via sendCommand's rejection path.  Only fully
+  // disable controls when the connection has been given up entirely.
+  const isConnected = connectionState !== 'disconnected';
   const manifestVersion = typeof chrome !== 'undefined' && chrome.runtime?.getManifest
     ? chrome.runtime.getManifest().version
     : undefined;
@@ -66,14 +73,17 @@ export default function App() {
           console.warn('[Popup Init] No active tab found');
         }
 
-        const [savedSettings, devMode] = await Promise.all([
+        const [savedSettings, devMode, aiSettings] = await Promise.all([
           StorageManager.getSettings(),
           StorageManager.getDeveloperMode(),
+          StorageManager.getAiSettings(),
         ]);
 
         if (mounted) {
           setSettings(savedSettings);
           setDeveloperMode(devMode);
+          setAiEnabled(aiSettings.enableAiSummary && Boolean(aiSettings.openRouterApiKey));
+          setSummaryWaitMode(aiSettings.summaryWaitMode ?? 'wait');
         }
       } catch (initError) {
         console.error('[Popup Init] Initialization failed:', initError);
@@ -309,6 +319,11 @@ export default function App() {
     chrome.runtime?.sendMessage?.({ type: 'PREFETCH_RETRY', payload: { tabId } });
   }, []);
 
+  const handleSummaryWaitModeChange = useCallback((mode: 'wait' | 'skip') => {
+    setSummaryWaitMode(mode);
+    chrome.runtime?.sendMessage?.({ type: 'SET_SUMMARY_WAIT_MODE', mode });
+  }, []);
+
   const queueStatus: QueueStatus = queueState?.status ?? 'idle';
   const queueTabs = queueState?.tabs ?? [];
   const queueIndex = queueState?.currentIndex ?? 0;
@@ -412,6 +427,12 @@ export default function App() {
         onToggle={handleToggle}
         onStop={() => handleControl('stop')}
         disabled={!isConnected}
+      />
+
+      <SummaryControl
+        aiEnabled={aiEnabled}
+        summaryWaitMode={summaryWaitMode}
+        onModeChange={handleSummaryWaitModeChange}
       />
 
       <TabQueueList

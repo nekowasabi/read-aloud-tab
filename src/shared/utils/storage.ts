@@ -34,6 +34,7 @@ export class StorageManager {
     summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
     translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
     openRouterProvider: '',
+    summaryWaitMode: 'wait',
   };
 
   private static readonly DEFAULT_DEVELOPER_MODE = false;
@@ -124,6 +125,9 @@ export class StorageManager {
       openRouterProvider: typeof settings.openRouterProvider === 'string'
         ? settings.openRouterProvider.trim()
         : this.DEFAULT_AI_SETTINGS.openRouterProvider,
+      summaryWaitMode: settings.summaryWaitMode === 'wait' || settings.summaryWaitMode === 'skip'
+        ? settings.summaryWaitMode
+        : this.DEFAULT_AI_SETTINGS.summaryWaitMode,
     };
   }
 

@@ -19,11 +19,13 @@ interface PrefetchSchedulerOptions {
 }
 
 const DEFAULT_PREFETCH_AHEAD = 1;
+const WAIT_MODE_PREFETCH_AHEAD = 3;
 
 export class PrefetchScheduler {
   private readonly enqueueJob: (job: PrefetchJob) => void;
   private readonly cancelJob: (tabId: number) => void;
-  private readonly maxPrefetchAhead: number;
+  private readonly _configuredMaxPrefetchAhead: number;
+  private _summaryWaitMode: 'wait' | 'skip' | null = null;
   private readonly scheduled = new Set<number>();
   private readonly cooldownMap = new Map<number, number>();
   private readonly COOLDOWN_MS = 5000;
@@ -33,8 +35,19 @@ export class PrefetchScheduler {
   constructor(options: PrefetchSchedulerOptions) {
     this.enqueueJob = options.enqueue;
     this.cancelJob = options.cancel;
-    this.maxPrefetchAhead = options.maxPrefetchAhead ?? DEFAULT_PREFETCH_AHEAD;
+    this._configuredMaxPrefetchAhead = options.maxPrefetchAhead ?? DEFAULT_PREFETCH_AHEAD;
     this.logger = options.logger || console;
+  }
+
+  private get maxPrefetchAhead(): number {
+    if (this._summaryWaitMode === 'wait') {
+      return WAIT_MODE_PREFETCH_AHEAD;
+    }
+    return this._configuredMaxPrefetchAhead;
+  }
+
+  setSummaryWaitMode(mode: 'wait' | 'skip'): void {
+    this._summaryWaitMode = mode;
   }
 
   setOnEnqueue(callback: (tabId: number) => void): void {

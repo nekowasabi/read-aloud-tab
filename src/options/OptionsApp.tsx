@@ -323,6 +323,24 @@ export default function OptionsApp() {
             長文を短く要約して読み上げます。効率的に内容を把握できます。
           </p>
         </div>
+        {aiSettings.enableAiSummary && (
+          <div className="setting-item">
+            <label htmlFor="summaryWaitMode">
+              <span className="setting-label">要約待機モード</span>
+              <select
+                id="summaryWaitMode"
+                value={aiSettings.summaryWaitMode || 'wait'}
+                onChange={(e) => handleAiSettingChange('summaryWaitMode', e.target.value)}
+              >
+                <option value="wait">要約完了まで待つ</option>
+                <option value="skip">タイムアウト後スキップ</option>
+              </select>
+            </label>
+            <p className="setting-description">
+              「要約完了まで待つ」を選ぶと、要約が完了するまで次のタブの読み上げを待機します。
+            </p>
+          </div>
+        )}
         <div className="setting-item">
           <label htmlFor="summaryPrompt">要約プロンプト</label>
           <textarea
