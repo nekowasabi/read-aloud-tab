@@ -128,6 +128,7 @@ export default function useTabQueue(): UseTabQueueResult {
 
         const handleDisconnect = () => {
           if (isUnmountedRef.current) return;
+          if (portRef.current !== port) return;
           portRef.current = null;
           setLastError(chrome.runtime.lastError?.message ?? 'キューとの接続が切断されました');
           scheduleReconnect();
