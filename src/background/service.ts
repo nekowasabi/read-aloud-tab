@@ -15,7 +15,6 @@ import {
   isPrefetchCommandMessage,
   KeepAliveDiagnosticsMessage,
   isKeepAliveDiagnosticsMessage,
-  SetSummaryWaitModeMessage,
 } from '../shared/messages';
 import { AiPrefetcher } from './aiPrefetcher';
 import { AiProcessor } from './aiProcessor';
@@ -24,6 +23,7 @@ import { KeepAliveController, KeepAliveConfig, KeepAliveEvent, RuntimePort } fro
 import { StorageManager } from '../shared/utils/storage';
 import { BrowserAdapter } from '../shared/utils/browser';
 import { getIgnoredDomains } from '../shared/utils/storage';
+import { createRuntimeCommandRouter, RuntimeCommandResult } from './runtimeCommandRouter';
 
 interface ChromeRuntimePort {
   name: string;
@@ -104,6 +104,7 @@ export class BackgroundOrchestrator {
     fallbackCount: 0,
   };
   private lastOffscreenHeartbeatAt: number | null = null;
+  private readonly routeRuntimeCommand: (message: QueueCommandMessage) => Promise<RuntimeCommandResult>;
 
   constructor(options: BackgroundOrchestratorOptions) {
     this.tabManager = options.tabManager;
@@ -113,6 +114,13 @@ export class BackgroundOrchestrator {
     this.prefetcher = options.prefetcher ?? null;
     this.aiProcessor = options.aiProcessor ?? null;
     this.keepAliveController = options.keepAliveController || this.createKeepAliveController(options.keepAliveConfig);
+    this.routeRuntimeCommand = createRuntimeCommandRouter({
+      tabManager: this.tabManager,
+      handleAddCommand: (payload) => this.handleAddCommand(payload),
+      handleControlCommand: (action) => this.handleControlCommand(action),
+      handleUpdateSettings: (settings) => this.handleUpdateSettings(settings),
+      prefetcher: this.prefetcher,
+    });
 
     if (!this.chrome?.runtime) {
       throw new Error('Chrome runtime APIs are not available');
@@ -168,10 +176,12 @@ export class BackgroundOrchestrator {
             }
 
             const updatedTab = this.tabManager.getTabById(tab.tabId) ?? tab;
+            const waitWasCancelled = this.prefetcher.consumeCancelledWait(tab.tabId);
             const shouldFallbackToOnDemandSummary =
               settings.enableAiSummary === true &&
               !updatedTab.summary &&
-              (waitResult !== 'failed' || settings.summaryWaitMode === 'wait');
+              !waitWasCancelled &&
+              (waitResult !== 'failed' || waitMode === 'wait');
 
             if (shouldFallbackToOnDemandSummary) {
               this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
@@ -665,43 +675,8 @@ export class BackgroundOrchestrator {
     this.sendPrefetchSnapshotToPort(port);
   }
 
-  private async processCommand(message: QueueCommandMessage): Promise<{ success: boolean; payload?: unknown }> {
-    switch (message.type) {
-      case 'QUEUE_ADD':
-        await this.handleAddCommand(message.payload);
-        return { success: true };
-      case 'QUEUE_REMOVE':
-        await this.tabManager.removeTab(message.payload.tabId);
-        return { success: true };
-      case 'QUEUE_REORDER':
-        await this.tabManager.reorderTabs(message.payload.fromIndex, message.payload.toIndex);
-        return { success: true };
-      case 'QUEUE_SKIP':
-        await this.tabManager.skipTab(message.payload.direction);
-        return { success: true };
-      case 'QUEUE_CONTROL':
-        await this.handleControlCommand(message.payload.action);
-        return { success: true };
-      case 'QUEUE_UPDATE_SETTINGS':
-        await this.handleUpdateSettings(message.payload.settings);
-        return { success: true };
-      case 'QUEUE_CLEAR':
-        await this.tabManager.clearQueue();
-        return { success: true };
-      case 'REQUEST_QUEUE_STATE':
-        return { success: true, payload: this.tabManager.getSnapshot() };
-      case 'SET_SUMMARY_WAIT_MODE': {
-        const { mode } = message as SetSummaryWaitModeMessage;
-        const currentSettings = await StorageManager.getAiSettings();
-        await StorageManager.saveAiSettings({ ...currentSettings, summaryWaitMode: mode });
-        return { success: true };
-      }
-      case 'SKIP_SUMMARY_WAIT':
-        // Phase C で詳細実装
-        return { success: true };
-      default:
-        return { success: false, error: 'Unknown command' } as any;
-    }
+  private async processCommand(message: QueueCommandMessage): Promise<RuntimeCommandResult> {
+    return this.routeRuntimeCommand(message);
   }
 
   private handlePrefetchCommand(message: PrefetchCommandMessage, sendResponse: (response: unknown) => void): void {

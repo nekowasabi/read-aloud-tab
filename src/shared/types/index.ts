@@ -46,7 +46,7 @@ export interface KeepAliveDiagnostics {
 
 import type { TabContent } from './tab';
 import type { TTSSettings, TTSState } from './tts';
-import type { TabInfo } from './tab';
+import type { QueueCommandMessage } from '../messages';
 
 export type MessageType =
   | { type: 'EXTRACT_TEXT'; tabId: number }
@@ -58,23 +58,4 @@ export type MessageType =
   | { type: 'GET_STATUS' }
   | { type: 'STATUS_UPDATE'; state: TTSState };
 
-export type QueueMessage =
-  | {
-      type: 'QUEUE_ADD';
-      payload: {
-        tabInfo: TabInfo;
-        position: 'start' | 'end' | number;
-      };
-    }
-  | {
-      type: 'QUEUE_REMOVE';
-      payload: { tabId: number };
-    }
-  | {
-      type: 'QUEUE_REORDER';
-      payload: { fromIndex: number; toIndex: number };
-    }
-  | {
-      type: 'QUEUE_SKIP';
-      payload: { direction: 'next' | 'previous' };
-    };
+export type QueueMessage = QueueCommandMessage;
