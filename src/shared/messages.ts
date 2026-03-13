@@ -9,6 +9,12 @@ import {
 
 export type { SerializedTabInfo } from './types';
 
+// ============================================================================
+// Queue Messages
+// Split target: src/shared/messages/queue.ts
+// Contains: command payloads, broadcast payloads, type guards, listeners
+// ============================================================================
+
 export type QueueSkipDirection = 'next' | 'previous';
 
 export interface QueueTabInput {
@@ -102,6 +108,12 @@ export type QueueBroadcastMessage =
   | { type: 'QUEUE_ERROR'; payload: QueueErrorPayload }
   | { type: 'QUEUE_CONTENT_REQUEST'; payload: { tabId: number; reason: 'missing' | 'stale' } };
 
+// ============================================================================
+// Prefetch Messages
+// Split target: src/shared/messages/prefetch.ts
+// Contains: prefetch status payloads, broadcast/command messages, type guards
+// ============================================================================
+
 export interface PrefetchStatusPayload {
   tabId: number;
   state: 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
@@ -124,6 +136,12 @@ export type PrefetchCommandMessage =
   | { type: 'PREFETCH_RETRY'; payload: { tabId: number } }
   | { type: 'PREFETCH_STATUS_SNAPSHOT_REQUEST' };
 
+// ============================================================================
+// Diagnostics Messages
+// Split target: src/shared/messages/diagnostics.ts
+// Contains: keep-alive diagnostics message, type guard
+// ============================================================================
+
 export interface KeepAliveDiagnosticsMessage {
   type: 'KEEP_ALIVE_DIAGNOSTICS';
   payload: KeepAliveDiagnostics;
@@ -135,6 +153,8 @@ export type QueueErrorListener = (payload: QueueErrorPayload) => void;
 export type QueueCommandListener = (
   event: Extract<QueueBroadcastMessage, { type: 'QUEUE_CONTENT_REQUEST' }>
 ) => void;
+
+// ─── Queue Type Guards ─────────────────────────────────────────────────────
 
 export function isQueueCommandMessage(message: unknown): message is QueueCommandMessage {
   if (typeof message !== 'object' || message === null) {
@@ -184,6 +204,8 @@ export function isQueueBroadcastMessage(message: unknown): message is QueueBroad
   }
 }
 
+// ─── Prefetch Type Guards ──────────────────────────────────────────────────
+
 export function isPrefetchCommandMessage(message: unknown): message is PrefetchCommandMessage {
   if (typeof message !== 'object' || message === null) {
     return false;
@@ -203,6 +225,8 @@ export function isPrefetchBroadcastMessage(message: unknown): message is Prefetc
   return candidate.type === 'PREFETCH_STATUS_SYNC';
 }
 
+// ─── Diagnostics Type Guards ───────────────────────────────────────────────
+
 export function isKeepAliveDiagnosticsMessage(message: unknown): message is KeepAliveDiagnosticsMessage {
   if (typeof message !== 'object' || message === null) {
     return false;
@@ -220,6 +244,8 @@ export function toSerializedTabInfo(tab: TabInfo): SerializedTabInfo {
 
 // ============================================================================
 // Offscreen Document Messages (Chrome Manifest V3)
+// Split target: src/shared/messages/offscreen.ts
+// Contains: command/broadcast messages, heartbeat message, type guards
 // ============================================================================
 
 /**

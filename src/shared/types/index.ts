@@ -46,7 +46,6 @@ export interface KeepAliveDiagnostics {
 
 import type { TabContent } from './tab';
 import type { TTSSettings, TTSState } from './tts';
-import type { QueueCommandMessage } from '../messages';
 
 export type MessageType =
   | { type: 'EXTRACT_TEXT'; tabId: number }
@@ -58,4 +57,8 @@ export type MessageType =
   | { type: 'GET_STATUS' }
   | { type: 'STATUS_UPDATE'; state: TTSState };
 
-export type QueueMessage = QueueCommandMessage;
+// NOTE: QueueMessage is defined as a re-export alias from messages.ts to avoid
+// a circular dependency (types/ -> messages -> types/).
+// Consumers should import QueueCommandMessage directly from '../messages'
+// when the full union type is needed, or use this alias for backward compat.
+export type QueueMessage = import('../messages').QueueCommandMessage;

@@ -163,6 +163,14 @@ export class StorageManager {
   }
 }
 
+// ============================================================================
+// REPOSITORY_BOUNDARY: Queue Repository
+// Split target: src/shared/repositories/queueRepository.ts
+// Contains: saveQueue, loadQueue, clearQueue, getIgnoredDomains,
+//           addIgnoredDomain, removeIgnoredDomain
+// Note: StorageManager class above → src/shared/repositories/settingsRepository.ts
+// ============================================================================
+
 // Queue management functions for Phase 2
 
 /**
@@ -310,6 +318,12 @@ export async function removeIgnoredDomain(domain: string): Promise<void> {
  * @param oldData - Legacy v1 storage data
  * @returns {Promise<ReadingQueue>} Migrated reading queue
  */
+// ============================================================================
+// REPOSITORY_BOUNDARY: Migration Utilities
+// Split target: src/shared/repositories/migrationUtils.ts
+// Contains: migrateStorageSchema
+// ============================================================================
+
 export async function migrateStorageSchema(oldData: any): Promise<ReadingQueue> {
   const migratedQueue: ReadingQueue = {
     tabs: [],
