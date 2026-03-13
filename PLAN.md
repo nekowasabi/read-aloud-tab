@@ -1,16 +1,13 @@
 ---
-# === Mission Identity ===
-mission_id: podcast-feed-generation-firefox
-title: "Podcast音声フィード生成機能の実装（Firefox版優先）"
-status: planning  # planning | in_progress | completed | blocked | failed
-progress: 0       # 0-100
-phase: planning   # planning | observe | orient | decide | act | feedback | completed
+mission_id: plan-read-aloud-tab-refactor-20260313
+title: "Read Aloud Tab ゼロベース再設計と段階移行計画"
+status: planning
+progress: 0
+phase: planning
 
-# === TDD Configuration ===
 tdd_mode: true
-tdd_phase: null   # red | green | refactor
+tdd_phase: null
 
-# === OODA Configuration ===
 ooda_config:
   enabled: true
   feedback_channels:
@@ -19,94 +16,255 @@ ooda_config:
     mission: true
     cross: true
 
-# === Execution Configuration ===
-execution_mode: dag_executor
+execution_mode: sequential
 dag_config:
-  enabled: true
+  enabled: false
   max_concurrent: 3
   cascade_failure: true
   visualization: true
 
-# === Deliberation Configuration ===
 deliberation:
-  enabled: true
-  level: auto
+  enabled: false
+  level: none
   multi_llm: false
 
-# === Context Policy ===
 context_policy:
   max_summary_tokens: 500
-  detailed_log_path: "stigmergy/doctrine-logs/podcast-feed-generation-firefox/"
+  detailed_log_path: "~/.codex/stigmergy/doctrine-logs/{mission_id}/"
   aggregation_strategy: progressive_summarization
 
-# === Session Continuity ===
 session_continuity:
-  continue_mode: true
+  continue_mode: false
   previous_mission_id: null
-  project_path: "/home/takets/repos/read-aloud-tab"
+  project_path: "/Users/ttakeda/repos/read-aloud-tab"
 
-# === Timestamps ===
-created_at: "2026-03-01"
-updated_at: "2026-03-01"
+created_at: "2026-03-13T09:00:00+09:00"
+updated_at: "2026-03-13T09:00:00+09:00"
 blockers: 0
+---
+
+# Options Reference
+
+## 実行ポリシー
+
+| オプション | 効果 | この計画での扱い |
+|-----------|------|------------------|
+| `-q`, `--quick` | 高速モード | この計画は対象外。段階移行のため常に通常以上の深度で扱う |
+| `--use-dag` | 並列計画の可視化 | 将来の実装セッションで任意。依存順は本計画に固定済み |
+| `--continue` | 前回コンテキスト引き継ぎ | 本計画自体が引き継ぎ文書のため、既定では不要 |
+| `--no-context` | 新規開始 | 本計画を唯一の起点にする場合にのみ使用 |
+| `--debug` | 監視ファイル初期化 | 実装時のみ任意 |
+| `--watch` | リアルタイム監視 | 実装時のみ任意 |
+| `-d` | 未定義フラグ | 元リクエストに含まれていたが、挙動は仮定しない。文脈情報としてのみ保持 |
+
 ---
 
 # Commander's Intent
 
 ## Purpose
-ブラウザ拡張の「Read Aloud Tab」から、記事コンテンツをローカルPodcastサーバーに投稿し、Google Cloud TTSで音声化したMP3をRSSフィードで配信することで、外出中のスマートフォンでも読みかけ記事を聴けるようにする。Firefox版を優先し、既存のPC側読み上げ機能を一切破壊しない。
+- `src/background/service.ts`、`src/background/tabManager.ts`、`src/popup/components/App.tsx` を中心とした責務集中を解消し、別セッションが再調査なしで段階実装できる計画を残す。
+- 既存のユーザー体験を維持したまま、背景処理、UI、設定、型契約、テストを分割しやすい単位に再構成する。
 
 ## End State
-- Firefox拡張のPopupに「Podcastに追加」ボタンが表示される
-- ボタン押下でローカルサーバー（localhost:3456）にPOSTされ、Google Cloud TTSによるMP3生成が非同期実行される
-- RSSフィード（feed.xml）をPodcastアプリに登録すると、生成済みエピソードを購読できる
-- 既存の全テスト（447件以上）が引き続きパスする
+- `PLAN.md` 単体で、実装順、修正対象ファイル、新規分割候補、固定すべき既存テスト、主要リスク、ロールバック基準が分かる。
+- 次の実装セッションは調査ではなく `Process` の消化から開始できる。
 
 ## Key Tasks
-- P1: Podcast型定義（`src/shared/types/podcast.ts`）とPodcastClient（`src/shared/services/podcastClient.ts`）の作成
-- P7-P9: `podcast-server/` ディレクトリにNode.js/Fastify + Google Cloud TTS + RSSフィード生成サーバーを構築
-- P3-P6: 拡張機能側（messages, storage, background service, popup UI, options）への統合
+- ベースライン挙動を既存テストとコマンドで固定する。
+- 契約境界を `shared` に寄せ、background と popup/options の責務分割点を明文化する。
+- `Process 001-300` の番号帯ごとに、対象ファイル・依存関係・検証項目を固定する。
 
 ## Constraints
-- Chrome対応はこのPLANのスコープ外（別PLAN）
-- 既存PC読み上げ機能（TabManager, TTS Engine, Offscreen, Prefetch）を変更しない
-- 機密情報（.env, Google Cloud認証キー）をコミットしない
-- main/masterへの直接プッシュ禁止
+- `dist/` は編集しない。
+- Chrome / Firefox の両対応を維持する。
+- 既存ストレージキー互換を壊さない。
+- 実装時は TDD を厳守し、テスト先行で進める。
 
 ## Restraints
-- TDDを厳守（Red → Green → Refactor）
-- Firefox用 `manifest.firefox.json` の `host_permissions` に `http://localhost:3456/*` を追加すること
-- PodcastClientはOpenRouterClientと同じHTTPクライアントパターンに従うこと
-- podcast-serverは独立したNode.jsサブパッケージとして構成すること
-- ストレージ変更はマイグレーションガードを実装し、既存データを壊さないこと
+- 直接モノリスを書き換えず、互換レイヤを使う段階移行にする。
+- `~/.claude` ではなく `~/.codex` 系パスを参照する。
+- Doctrine MCP を前提にしない。ローカル実装だけで完結する計画にする。
+
+---
+
+# Input Format
+
+## Mission Object
+
+```json
+{
+  "mission": {
+    "id": "plan-read-aloud-tab-refactor-20260313",
+    "objective": "Read Aloud Tab のゼロベース再設計を、別セッションが再調査なしで実装できる詳細計画として PLAN.md に残す",
+    "original_request": "/x 計画内容を確認したいため、詳細な調査結果と、具体的なコードの修正箇所を含めた実装計画を ~/repos/private_dotfiles/ai_doc//template.md にのフォーマットに従って、process1からprocess300までのプロセスを @PLAN.md に反映させてください。目的としては、別セッションで実装処理を依頼するとき、再度調査を実施することがないようにするためです。 -d",
+    "constraints": [
+      "テンプレート準拠",
+      "process 1-300 のカバレッジを持つ",
+      "具体的な修正対象ファイルを含む",
+      "別セッションで再調査しなくてよい粒度にする"
+    ],
+    "success_criteria": [
+      "主要モジュールの責務集中点が明文化されている",
+      "既存テストの固定順序が記載されている",
+      "番号帯ごとの実装順・依存・検証が記載されている",
+      "ロールバック基準とリスクが記載されている"
+    ],
+    "mode": "normal"
+  }
+}
+```
+
+## Options Object
+
+```json
+{
+  "options": {
+    "commander_hint": "dev",
+    "feedback_level": "verbose",
+    "learning_enabled": true,
+    "trace_enabled": false,
+    "debug_mode": false,
+    "dag_execution": {
+      "enabled": false,
+      "max_concurrent": 3,
+      "cascade_failure": true,
+      "partial_execution": true,
+      "visualization": true
+    },
+    "sync_task": false,
+    "session_continuity": {
+      "continue_mode": false,
+      "no_context": false,
+      "previous_mission_id": null
+    },
+    "impact_verify": {
+      "enabled": true,
+      "level": "deep",
+      "timeout_seconds": 60
+    },
+    "raw_flags": ["-d"]
+  }
+}
+```
+
+## Context Object
+
+```json
+{
+  "context": {
+    "project_path": "/Users/ttakeda/repos/read-aloud-tab",
+    "related_files": [
+      "src/background/service.ts",
+      "src/background/tabManager.ts",
+      "src/background/aiPrefetcher.ts",
+      "src/background/index.ts",
+      "src/popup/components/App.tsx",
+      "src/popup/hooks/useTabQueue.ts",
+      "src/options/OptionsApp.tsx",
+      "src/popup/hooks/usePrefetchStatus.ts",
+      "src/shared/messages.ts",
+      "src/shared/utils/storage.ts",
+      "src/shared/types/index.ts"
+    ],
+    "prior_context": "既存 PLAN.md, RESEARCH.md, REFACTORING_PLAN.md, 主要テスト群の観察結果を統合済み",
+    "injected_skills": {
+      "situation": null,
+      "capabilities": ["planning-expert"]
+    }
+  }
+}
+```
 
 ---
 
 # Context
 
 ## 概要
-- ブラウザで読み途中の記事タブを「Podcastに追加」ボタンで投稿すると、ローカルサーバーがGoogle Cloud TTSで音声化し、RSSフィードを更新する
-- ユーザーはPodcastアプリ（Overcast, Pocket Castsなど）にフィードURLを登録し、外出時にスマートフォンで続きを聴ける
+- この計画の中心課題は、巨大な background / popup / options モジュールを、挙動互換を維持したまま段階的に分割することにある。
+- 調査結果では、`service.ts` 1258 行、`tabManager.ts` 1111 行、`App.tsx` 471 行、`OptionsApp.tsx` 500 行、`useTabQueue.ts` が接続管理とコマンド送信を抱え込んでいることを確認した。
+- 既存テストは background・popup・options・shared に広く存在し、安全網は十分にある。ただし、責務ごとの契約テストに再編できていない。
+- `RESEARCH.md` から、要約待機とプリフェッチ再スケジュールの競合、`summaryWaitMode` の意味論、`Map` の未存在状態の誤判定が再発リスクであることを確認した。
 
 ## 必須のルール
-- 必ず `CLAUDE.md` を参照し、ルールを守ること
-- 不明な点はAskUserQuestionで確認すること
-- **TDD（テスト駆動開発）を厳守すること**
-  - 各プロセスは必ずテストファーストで開始する（Red → Green → Refactor）
-  - テストクラスのdocblockには目的とテスト観点を記載すること
-  - 実装コードを書く前に、失敗するテストを先に作成する
-  - テストが通過するまで修正とテスト実行を繰り返す
-  - プロセス完了の条件：該当するすべてのテスト、フォーマッタ、Linterが通過していること
-  - プロセス完了後、チェックボックスを✅に変更すること
+- `AGENTS.md` とテンプレートの TDD 方針を優先する。
+- 実装前に失敗するテストを追加し、Green で最小変更、Refactor で分割を進める。
+- 互換レイヤを先に作り、外部から見えるコマンド名とストレージスキーマは移行期間維持する。
+- 変更結果やサマリは必ず確認する。
+- 英語の出力は実装ドキュメント上では日本語に要約する。
 
 ## 開発のゴール
-- 外出中でも記事を音声で聴けるPodcastフィードをローカルで自動生成する
-- 拡張機能の既存機能を維持しつつ、最小変更でPodcast投稿機能を追加する
+- `BackgroundOrchestrator` を composition root + router 群へ縮小する。
+- `TabManager` を純粋なキュー状態機械、タブライフサイクル、永続化アダプタへ分解する。
+- popup / options を表示と state bridge に寄せ、ストレージや port 制御を hook / service に隔離する。
+- `shared/messages.ts` と `src/shared/types/index.ts` に分散した契約定義を単一ソース化する。
 
-## 費用目標
-- Google Cloud TTS: 月72万文字以内 = 無料枠
-- Cloudflare R2: 10GB/月 = 無料枠
-- 合計: $0/月
+## 調査サマリ
+
+### 背景処理
+- `src/background/service.ts`
+  - `createContentResolver` に AI 設定取得、prefetch wait、resultStore fallback、on-demand fallback が集中。
+  - runtime `onMessage`, `onConnect`, shortcut, keep-alive, offscreen bridge, tab query まで一括管理。
+  - `SKIP_SUMMARY_WAIT` はメッセージ型だけ存在し、実装が未完了。
+- `src/background/tabManager.ts`
+  - queue 状態、再生制御、auto-resume、タブ更新、無視ドメイン反映、永続化デバウンスを保持。
+  - `onTabUpdated()` と `processNext()` の結合が強く、UI/Offscreen/Prefetch からの非同期イベント競合点になっている。
+- `src/background/aiPrefetcher.ts`
+  - initialize 配線、storage 監視、settings cache、waitForPrefetch、status 永続化まで抱える。
+  - lessons で判明済みの「未存在=完了」や prune タイミングの罠を再発させやすい。
+
+### UI / 設定
+- `src/popup/components/App.tsx`
+  - 初期ロード、storage 購読、全タブ取得、設定デバウンス、Toast 表示、UI 合成が同居。
+- `src/popup/hooks/useTabQueue.ts`
+  - port 接続、再接続、受信 dispatch、コマンド送信、progress 正規化が同居。
+- `src/options/OptionsApp.tsx`
+  - setting load/save、AI setting、接続テスト、Import/Export、developer mode、巨大 JSX が単一コンポーネントに集中。
+- `src/popup/hooks/usePrefetchStatus.ts`
+  - runtime message と local storage snapshot の二重購読を直接持ち、popup 側の診断状態境界が曖昧。
+
+### shared 契約
+- `src/shared/messages.ts` が command / broadcast / prefetch / diagnostics をまとめて定義。
+- `src/shared/types/index.ts` にも legacy な message 型が残っており、将来の契約ドリフト要因。
+- `src/shared/utils/storage.ts` が TTS settings / AI settings / queue / ignored domains を横断管理している。
+
+## Concrete Modification Map
+
+| 現在のファイル | 現状の問題 | 具体的な修正方針 | 新規/分割候補 |
+|---------------|-----------|------------------|---------------|
+| `src/background/service.ts` | content resolve、message routing、offscreen、keep-alive が密結合 | resolver / router / offscreen bridge / lifecycle 初期化へ分割 | `src/background/service/contentResolver.ts`, `src/background/service/runtimeCommandRouter.ts`, `src/background/service/offscreenBridge.ts` |
+| `src/background/tabManager.ts` | queue state、再生、persist、tab update が単一クラス | playback state machine、queue persistence、tab lifecycle へ分割 | `src/background/tabManager/playbackStateMachine.ts`, `src/background/tabManager/queuePersistence.ts`, `src/background/tabManager/tabLifecycle.ts` |
+| `src/background/aiPrefetcher.ts` | wait 制御、status 保存、settings cache、worker 連携が同居 | waiter / status store / settings sync を抽出 | `src/background/prefetch/prefetchWaiter.ts`, `src/background/prefetch/prefetchStatusStore.ts` |
+| `src/background/index.ts` | composition root と listener wiring が混在 | wiring 専用 composition root に縮小 | `src/background/runtime/lifecycleSupervisor.ts` |
+| `src/popup/components/App.tsx` | 初期化、全タブ追加、settings sync、UI 合成が同居 | bootstrap / add tabs / settings sync を hook 化 | `src/popup/hooks/usePopupBootstrap.ts`, `src/popup/hooks/useAddTabsActions.ts`, `src/popup/hooks/usePopupSettingsSync.ts` |
+| `src/popup/hooks/useTabQueue.ts` | port 接続と command API が密結合 | port 層、command 層、message reducer に分離 | `src/popup/hooks/tabQueue/useQueuePort.ts`, `src/popup/hooks/tabQueue/useQueueCommands.ts`, `src/popup/hooks/tabQueue/queueMessageReducer.ts` |
+| `src/options/OptionsApp.tsx` | 設定入出力、接続テスト、UI 表示が同居 | data hook、import/export service、connection hook に分割 | `src/options/hooks/useOptionsData.ts`, `src/options/services/settingsTransfer.ts`, `src/options/hooks/useConnectionTest.ts` |
+| `src/popup/hooks/usePrefetchStatus.ts` | runtime と local storage の購読が popup に露出 | snapshot repository / adapter 導入 | `src/popup/hooks/usePrefetchSnapshot.ts` または `src/shared/services/prefetchSnapshotStore.ts` |
+| `src/shared/messages.ts` | 境界を越えた型が一箇所に密集 | queue / prefetch / offscreen / diagnostics 単位で再編 | `src/shared/messages/queue.ts`, `src/shared/messages/prefetch.ts`, `src/shared/messages/offscreen.ts` |
+| `src/shared/types/index.ts` | legacy message 型が残る | message 型を削除し再 export のみへ | `src/shared/types/index.ts` を pure barrel にする |
+| `src/shared/utils/storage.ts` | queue・settings・ignored domains が密集 | repository 分離、migration 関数明示化 | `src/shared/repositories/settingsRepository.ts`, `src/shared/repositories/queueRepository.ts` |
+
+## Smart Cache
+
+### キャッシュ対象
+
+| Pattern | Source | TTL |
+|---------|--------|-----|
+| project_structure | `package.json`, `webpack.config.js`, `jest.config.js` | 1 hour |
+| code_hotspots | `service.ts`, `tabManager.ts`, `App.tsx`, `OptionsApp.tsx` | 30 min |
+| dependency_graph | `src/shared/messages.ts`, `src/shared/utils/storage.ts`, `src/background/index.ts` | 30 min |
+
+### キャッシュパス
+
+```text
+~/.codex/stigmergy/pattern-cache/
+├── _cache-state.json
+├── _audit-log.jsonl
+└── read-aloud-tab.json
+```
+
+### Safe Mode
+- キャッシュが古い、またはテスト結果と矛盾する場合は必ず再読する。
+- implementation セッションでは `service.ts`, `tabManager.ts`, `useTabQueue.ts` を優先再確認対象にする。
 
 ---
 
@@ -114,79 +272,58 @@ blockers: 0
 
 | @ref | @target | @test |
 |------|---------|-------|
-| `src/shared/services/openrouter.ts` | `src/shared/services/podcastClient.ts` | `src/shared/services/__tests__/podcastClient.test.ts` |
-| `src/shared/types/ai.ts` | `src/shared/types/podcast.ts` | `src/shared/types/__tests__/podcast.test.ts` |
-| `src/shared/utils/storage.ts`（getAiSettings パターン） | `src/shared/utils/storage.ts`（getPodcastSettings 追加） | `src/shared/utils/__tests__/storage.test.ts` |
-| `src/shared/messages.ts`（QueueCommandMessage union） | `src/shared/messages.ts`（PODCAST_ADD 追加） | 既存 messages テスト拡張 |
-| `src/background/service.ts`（processCommand / handleAddCommand） | `src/background/service.ts`（handlePodcastAdd 追加） | `src/background/__tests__/service.test.ts` |
-| `src/popup/components/App.tsx`（actions-row, handleAddCurrentTab） | `src/popup/components/App.tsx`（「Podcastに追加」ボタン追加） | `src/popup/components/__tests__/App.test.tsx` |
-| `src/popup/hooks/useTabQueue.ts`（UseTabQueueResult） | `src/popup/hooks/useTabQueue.ts`（addToPodcast 追加） | `src/popup/hooks/__tests__/useTabQueue.test.tsx` |
-| `src/options/OptionsApp.tsx`（AI設定セクション） | `src/options/OptionsApp.tsx` または新規 `PodcastSettings.tsx` | `src/options/__tests__/OptionsApp.test.tsx` |
-| `src/manifest/manifest.firefox.json` | `src/manifest/manifest.firefox.json`（host_permissions 追加） | 手動確認 |
+| `src/background/service.ts` | content resolver / command router / offscreen bridge 分離 | `src/background/__tests__/backgroundService.test.ts`, `src/background/__tests__/serviceContentResolverFallback.test.ts`, `src/background/__tests__/offscreenIntegration.test.ts` |
+| `src/background/tabManager.ts` | queue state machine / persistence / tab lifecycle 分離 | `src/background/__tests__/tabManager.autoResume.test.ts`, `src/background/__tests__/tabManagerPlaybackEnd.test.ts`, `src/background/__tests__/tabManager.resume.test.ts`, `src/background/__tests__/tabManager.performance.test.ts` |
+| `src/background/aiPrefetcher.ts` | waiter / status store / settings propagation 分離 | `src/background/__tests__/aiPrefetcher.test.ts`, `src/background/prefetch/__tests__/prefetchScheduler.test.ts` |
+| `src/background/index.ts` | lifecycle wiring 集約 | `src/background/__tests__/keepAliveIntegration.test.ts`, `src/background/__tests__/portHandling.test.ts` |
+| `src/popup/components/App.tsx` | bootstrap / add-tabs / settings sync 抽出 | `src/popup/components/__tests__/App.test.tsx` |
+| `src/popup/hooks/useTabQueue.ts` | port / commands / reducer 分離 | `src/popup/hooks/__tests__/useTabQueue.test.tsx` |
+| `src/popup/hooks/usePrefetchStatus.ts` | snapshot repository 導入 | `src/popup/components/__tests__/SummaryControl.test.tsx` |
+| `src/options/OptionsApp.tsx` | data hook / transfer service / connection hook 分離 | `src/options/__tests__/OptionsApp.test.tsx` |
+| `src/shared/messages.ts` | message contract 再編 | `src/shared/__tests__/offscreenMessages.test.ts`, `src/shared/__tests__/types.structure.test.ts` |
+| `src/shared/utils/storage.ts` | repository / migration 分離 | `src/shared/utils/__tests__/storage.test.ts` |
+| `RESEARCH.md` | summary wait / prefetch race の根拠 | 実装時に regression test 化 |
+| `REFACTORING_PLAN.md` | 大規模ファイル優先度の根拠 | 実装順の補助資料 |
 
 ---
 
 # DAG Execution（並列タスク管理）
 
-**有効化**: `--use-dag` オプション
+**有効化**: 実装セッションで `--use-dag` を指定した場合のみ
 
 ## DAG Configuration
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| enabled | true | DAG 実行の有効化 |
-| max_concurrent | 3 | 最大同時実行タスク数 |
-| cascade_failure | true | 失敗時に依存タスクをスキップ |
-| partial_execution | true | 部分実行を許可 |
-| visualization | true | Mermaid 可視化出力 |
+| enabled | false | この計画書作成時点では順次実行前提 |
+| max_concurrent | 3 | 背景 / UI / 文書の 3 ストリームまで |
+| cascade_failure | true | 基盤契約が壊れたら下流を止める |
+| partial_execution | true | 文書・調査系は先行可能 |
+| visualization | true | 実装時に Mermaid を更新する |
 
 ## Task Dependencies Graph
 
 ```mermaid
 graph TD
-  P1["P1: 型定義 + PodcastClient"]
-  P2["P2: メッセージング拡張(PODCAST_ADD)"]
-  P3["P3: ストレージ拡張(PodcastSettings)"]
-  P4["P4: BackgroundOrchestrator統合"]
-  P5["P5: Popup UI(Podcastに追加ボタン)"]
-  P6["P6: Options設定画面"]
-  P7["P7: podcast-server基盤(Fastify+ルーティング)"]
-  P8["P8: Google Cloud TTS統合"]
-  P9["P9: フィード生成+R2アップロード"]
-  P10["P10: 統合テスト(E2E)"]
-  P100["P100: リファクタリング"]
-  P200["P200: ドキュメンテーション"]
-  P300["P300: OODAフィードバックループ"]
+  P001["P001-P030 基盤固定"]
+  P031["P031-P080 Background 分割"]
+  P081["P081-P160 UI/Settings 分割"]
+  P161["P161-P200 契約・互換性・総合検証"]
+  P201["P201-P299 文書・引き継ぎ"]
+  P300["P300 教訓化"]
 
-  P1 --> P2
-  P1 --> P3
-  P1 --> P7
-  P2 --> P4
-  P3 --> P4
-  P3 --> P5
-  P4 --> P6
-  P5 --> P6
-  P7 --> P8
-  P8 --> P9
-  P4 --> P10
-  P6 --> P10
-  P9 --> P10
-  P10 --> P100
-  P100 --> P200
-  P200 --> P300
+  P001 --> P031
+  P001 --> P081
+  P031 --> P161
+  P081 --> P161
+  P161 --> P201
+  P201 --> P300
 
-  style P1 fill:#E0E0E0
-  style P2 fill:#E0E0E0
-  style P3 fill:#E0E0E0
-  style P4 fill:#E0E0E0
-  style P5 fill:#E0E0E0
-  style P6 fill:#E0E0E0
-  style P7 fill:#E0E0E0
-  style P8 fill:#E0E0E0
-  style P9 fill:#E0E0E0
-  style P10 fill:#E0E0E0
-  style P100 fill:#E0E0E0
-  style P200 fill:#E0E0E0
+  style P001 fill:#E0E0E0
+  style P031 fill:#E0E0E0
+  style P081 fill:#E0E0E0
+  style P161 fill:#E0E0E0
+  style P201 fill:#E0E0E0
   style P300 fill:#E0E0E0
 ```
 
@@ -194,47 +331,18 @@ graph TD
 
 | Group | Tasks | Dependencies | Can Run Parallel |
 |-------|-------|--------------|------------------|
-| G1 | P1 | none | Yes（単独） |
-| G2 | P2, P3, P7 | P1 | Yes（P1完了後、3並列可） |
-| G3 | P4, P5, P8 | P2+P3, P3, P7 | 部分並列（P4はP2+P3待ち、P5はP3待ち、P8はP7待ち） |
-| G4 | P6, P9 | P4+P5, P8 | 部分並列 |
-| G5 | P10 | P4+P6+P9 | No（全完了待ち） |
-| G6 | P100 | P10 | No |
-| G7 | P200 | P100 | No |
-| G8 | P300 | P200 | No |
-
-## Execution State
-
-| Task | Status | Dependencies | Started | Completed | Duration |
-|------|--------|--------------|---------|-----------|----------|
-| P1 | pending | - | - | - | - |
-| P2 | pending | P1 | - | - | - |
-| P3 | pending | P1 | - | - | - |
-| P4 | pending | P2, P3 | - | - | - |
-| P5 | pending | P3 | - | - | - |
-| P6 | pending | P4, P5 | - | - | - |
-| P7 | pending | P1 | - | - | - |
-| P8 | pending | P7 | - | - | - |
-| P9 | pending | P8 | - | - | - |
-| P10 | pending | P4, P6, P9 | - | - | - |
-| P100 | pending | P10 | - | - | - |
-| P200 | pending | P100 | - | - | - |
-| P300 | pending | P200 | - | - | - |
-
-## Topological Sort Result
-
-```
-Execution Order: P1 → [P2, P3, P7] → [P4, P5, P8] → [P6, P9] → P10 → P100 → P200 → P300
-Parallelizable: [P1] → [P2, P3, P7] → [P4, P5, P8] → [P6, P9] → [P10] → [P100] → [P200] → [P300]
-Cycle Detected: No
-```
+| G1 | `P001-P030` | none | No |
+| G2 | `P031-P080`, `P081-P160` | `P001-P030` | Yes |
+| G3 | `P161-P200` | `P031-P080`, `P081-P160` | No |
+| G4 | `P201-P299` | `P161-P200` | Yes |
+| G5 | `P300` | `P201-P299` | No |
 
 ## Checkpoint & Recovery
 
 | Field | Value |
 |-------|-------|
-| Checkpoint Path | .claude/checkpoints/podcast-feed-generation-firefox.json |
-| Last Checkpoint | - |
+| Checkpoint Path | `~/.codex/stigmergy/dag-state/{mission_id}.json` |
+| Last Checkpoint | `2026-03-13T09:00:00+09:00` |
 | Recovery Mode | enabled |
 
 ---
@@ -243,97 +351,52 @@ Cycle Detected: No
 
 ## Phase 1: Mission Initialization
 
-```
-1. ミッションID: podcast-feed-generation-firefox
-2. ログディレクトリ: stigmergy/doctrine-logs/podcast-feed-generation-firefox/
-3. チェックポイント: .claude/checkpoints/podcast-feed-generation-firefox.json
-4. 既存テスト確認: npm run test（447件パス確認）
-5. Early Return Gate 評価
-```
-
-### Early Return Conditions
-| Condition | Action | Log |
-|-----------|--------|-----|
-| 既存テスト失敗 | 処理停止、報告 | "Existing tests failed before implementation" |
-| Google Cloud TTS認証情報なし | P8でブロック、手動設定を促す | "GCP credentials required for P8" |
-| localhost:3456競合 | P7でポート変更を検討 | "Port conflict detected" |
-
----
+1. `npm run test`, `npm run typecheck`, `npm run lint` のベースライン取得
+2. 主要ホットスポットの責務とファイル行数を固定
+3. 既存テストの優先順位を確定
+4. `Process 001-300` の消化順を文書に固定
 
 ## Phase 2: OODA Cycle
 
-### 2.1 Observe（観察）
-- [ ] 既存コード構造確認（messages.ts, service.ts, storage.ts, App.tsx）
-- [ ] 既存テスト件数確認（npm run test）
-- [ ] Firefox manifest確認（manifest.firefox.json）
-- [ ] openrouter.ts HTTPクライアントパターン確認
+### 2.1 Observe
+- background / popup / options / shared の責務集中点を確認
+- `RESEARCH.md` と `prefetch_scheduler_lessons` を確認
+- 既存テストの安全網を確認
 
-### 2.2 Orient（方向付け）
-- [ ] PodcastClient設計（OpenRouterClientパターンを踏襲）
-- [ ] PODCAST_ADDメッセージを既存QueueCommandMessage unionに追加するか、別union型にするかを判断
-- [ ] podcast-serverのローカルストレージ設計（JSONファイル + MP3ファイル）
+### 2.2 Orient
+- 分割境界を queue / prefetch / runtime / UI / settings contract に整理
+- 互換維持対象を message names, storage keys, browser behavior に固定
 
-### 2.3 Decide（決心）
-- [ ] 複雑度スコア計算: 影響ファイル8件(40点) + 新規サブパッケージ(10点) + テスト必要(20点) + 外部依存GCP(10点) = 80点 → 合議推奨
-- [ ] DAG実行モード選択
-- [ ] PODCAST_ADDは別union型（PodcastCommandMessage）として分離（既存QueueCommandMessageを汚染しない）
+### 2.3 Decide
+- 実装順は「契約固定 → background 分割 → UI / settings 分割 → 契約統合 → 文書 → lessons」
+- `Process 001-030` を終えるまで大規模移動を禁止
 
-### 2.4 Act（行動）
-- [ ] P1〜P9 TDD実行
-- [ ] Impact Verification（各Process完了後）
+### 2.4 Act
+- Red: 失敗するテスト、もしくは不足する契約テストを追加
+- Green: 最小変更で合格
+- Refactor: 分割、命名整理、互換層削減
 
 ### 2.5 Feedback Loop
-| Type | Timing | Content |
-|------|--------|---------|
-| immediate | エラー・異常時 | 既存テスト破壊検知、即時停止 |
-| task | 各Process完了時 | テスト件数確認（減少したら警告） |
-| mission | P10完了時 | E2Eテスト結果、費用試算 |
-| cross | - | - |
-
----
-
-## Phase 3: Aggregation & Summarization
-
-- [ ] 全Process結果を集約
-- [ ] 変更ファイル一覧と変更内容のサマリー生成
-- [ ] COP最終更新
-
----
-
-## Phase 4: Report to Parent
-
-- [ ] 最終サマリー生成（500トークン以内）
-- [ ] Session Memory更新
-- [ ] 教訓の永続化
-
----
-
-## Phase 5: Learning Synthesis
-
-- [ ] 教訓収集（新規Fastifyサブパッケージ構成、Firefox host_permissions設定方法など）
-- [ ] stigmergy/lessonsに永続化
+- 各番号帯終了時に、再発リスクと rollback 条件を更新
 
 ---
 
 # Progress Map
 
-| Process | Status | Progress | Phase | Notes |
-|---------|--------|----------|-------|-------|
-| Process 1 | planning | ▯▯▯▯▯ 0% | Red | podcast.ts型定義 + PodcastClient実装 |
-| Process 2 | planning | ▯▯▯▯▯ 0% | Red | PODCAST_ADDコマンドのメッセージング拡張 |
-| Process 3 | planning | ▯▯▯▯▯ 0% | Red | StorageManagerへのPodcastSettings追加 |
-| Process 4 | planning | ▯▯▯▯▯ 0% | Red | BackgroundOrchestrator統合 |
-| Process 5 | planning | ▯▯▯▯▯ 0% | Red | Popup UIにPodcastに追加ボタン |
-| Process 6 | planning | ▯▯▯▯▯ 0% | Red | Options設定画面（サーバーURL + 接続テスト） |
-| Process 7 | planning | ▯▯▯▯▯ 0% | Red | podcast-server Fastify基盤 |
-| Process 8 | planning | ▯▯▯▯▯ 0% | Red | Google Cloud TTS統合 |
-| Process 9 | planning | ▯▯▯▯▯ 0% | Red | RSSフィード生成 + R2アップロード |
-| Process 10 | planning | ▯▯▯▯▯ 0% | Red | 統合テスト（E2E + 回帰） |
-| Process 50 | planning | ▯▯▯▯▯ 0% | Red | フォローアップ（仕様変更時） |
-| Process 100 | planning | ▯▯▯▯▯ 0% | Red | リファクタリング・品質向上 |
-| Process 200 | planning | ▯▯▯▯▯ 0% | Red | ドキュメンテーション |
-| Process 300 | planning | ▯▯▯▯▯ 0% | Red | OODAフィードバックループ |
-| | | | | |
+| Process Range | Status | Progress | Phase | Notes |
+|---------------|--------|----------|-------|-------|
+| `P001-P010` | planning | ▯▯▯▯▯ 0% | Red | ベースライン取得、既存回帰挙動の固定 |
+| `P011-P030` | planning | ▯▯▯▯▯ 0% | Red | shared 契約と storage 境界の固定 |
+| `P031-P050` | planning | ▯▯▯▯▯ 0% | Green | content resolver / prefetch wait の抽出 |
+| `P051-P080` | planning | ▯▯▯▯▯ 0% | Green | runtime router / offscreen bridge / lifecycle 分離 |
+| `P081-P100` | planning | ▯▯▯▯▯ 0% | Green | queue state machine / persistence / tab lifecycle 分離 |
+| `P101-P130` | planning | ▯▯▯▯▯ 0% | Green | popup bootstrap / queue port / reducer 分離 |
+| `P131-P160` | planning | ▯▯▯▯▯ 0% | Green | options data / settings transfer / connection test 分離 |
+| `P161-P180` | planning | ▯▯▯▯▯ 0% | Refactor | messages / types / browser adapter 正規化 |
+| `P181-P200` | planning | ▯▯▯▯▯ 0% | Refactor | cross-browser / performance / keep-alive 検証 |
+| `P201-P240` | planning | ▯▯▯▯▯ 0% | Refactor | 実装文書、変更マップ、運用メモ作成 |
+| `P241-P299` | planning | ▯▯▯▯▯ 0% | Refactor | handoff package、rollback guide、release checklist |
+| `P300` | planning | ▯▯▯▯▯ 0% | Refactor | 教訓・知見保存 |
 | **Overall** | **planning** | **▯▯▯▯▯ 0%** | **planning** | **Blockers: 0** |
 
 ---
@@ -344,22 +407,29 @@ Cycle Detected: No
 
 | テスト種別 | 正常系 | 異常系 | 境界値 | 並行処理 | べき等性 | Notes |
 |-----------|--------|--------|--------|---------|---------|-------|
-| Unit | Must | Must | Should | Could | Could | PodcastClient, 型定義, Storage, メッセージング |
-| Integration | Must | Should | Could | Should | Should | 拡張→ローカルサーバー間のHTTP通信 |
-| E2E | Should | Should | N/A | N/A | N/A | P10で実施 |
-| Performance | N/A | N/A | Should | Must | N/A | TTS生成キュー処理 |
-| Security | N/A | Must | Must | N/A | N/A | CSRFなし（localhost限定）, APIキー保護 |
+| Unit | Must | Must | Must | Should | Should | `tabManager`, `aiPrefetcher`, `storage`, `messages` を優先 |
+| Integration | Must | Must | Should | Must | Should | `backgroundService`, `offscreenIntegration`, `OptionsApp`, `App` |
+| E2E | Should | Should | N/A | N/A | N/A | 手動ブラウザ確認で代替可能 |
+| Performance | N/A | N/A | Should | Must | N/A | `tabManager.performance.test.ts`, keep-alive 長時間再生 |
+| Security | N/A | Must | Must | N/A | N/A | API キー export 除外、Import validation |
+| Other | Should | Should | Should | Should | Should | Chrome / Firefox 差分確認 |
 
 ## カバレッジ目標
 
 | 指標 | 目標 | 現在 | Status |
 |------|------|------|--------|
-| Must セル充足率 | 100% | 0% | ☐ |
-| Should セル充足率 | ≥80% | 0% | ☐ |
-| 全体カバレッジ | ≥70% | 0% | ☐ |
-| 既存テスト維持 | 447件以上パス | 未確認 | ☐ |
+| Must セル充足率 | 100% | 既存テスト群あり、契約別整理は未着手 | ☐ |
+| Should セル充足率 | ≥80% | 一部不足 | ☐ |
+| 全体カバレッジ | ≥70% | 既存は十分だが再編後の再測定が必要 | ☐ |
 
-**最低品質ライン**: Must のセルがすべて ✅ になるまでマージ不可
+## OODA連携
+
+| OODAフェーズ | テスト観点との連携 |
+|-------------|------------------|
+| Observe | 既存テストでどこまで behavior が固定されているか確認 |
+| Orient | 変更する責務境界ごとに不足テストを洗い出す |
+| Decide | 先に固定すべきテストと後回し可能なテストを分ける |
+| Act | Red → Green → Refactor のたびに関連スイートを再実行 |
 
 ---
 
@@ -372,71 +442,78 @@ Cycle Detected: No
 | **Phase** | planning |
 | **Progress** | 0% |
 | **Commander** | dev |
-| **Complexity Score** | 80/100 |
-| **Deliberation Required** | yes |
+| **Complexity Score** | 86/100 |
+| **Deliberation Required** | no |
 
 ### Commander's Intent Summary
-- **Purpose**: ブラウザ記事を外出先でPodcastとして聴けるようにするためのローカルフィード生成システムを、既存機能を壊さず追加する
-- **End State**: Firefox拡張からワンクリックでPodcast投稿でき、RSSフィードが生成される
-- **Critical Tasks**: P1（型定義基盤）、P7-P9（podcast-serverコア）、P10（統合テスト回帰確認）
+- **Purpose**: 再調査不要の実装計画を残し、責務分離を安全に進める
+- **End State**: 別セッションが `PLAN.md` の Process を順に消化するだけで実装可能
+- **Critical Tasks**: ベースライン固定、分割点の明文化、契約統合
 
 ### Completed Tasks
+
 | Task ID | Description | Completed At |
 |---------|-------------|--------------|
-| - | - | - |
+| `T-PLAN-01` | テンプレート構造と既存 PLAN の差分確認 | 2026-03-13 |
+| `T-PLAN-02` | 主要ホットスポットと既存テストの棚卸し | 2026-03-13 |
+| `T-PLAN-03` | Process 001-300 の番号帯方針を固定 | 2026-03-13 |
 
 ### Remaining Tasks
+
 | Task ID | Description | Dependencies | Priority |
 |---------|-------------|--------------|----------|
-| P1 | 型定義 + PodcastClient | none | Critical |
-| P7 | podcast-server基盤 | P1 | Critical |
-| P8 | Google Cloud TTS統合 | P7 | Critical |
-| P9 | フィード生成 + R2 | P8 | High |
-| P2 | メッセージング拡張 | P1 | High |
-| P3 | ストレージ拡張 | P1 | High |
-| P4 | Background統合 | P2, P3 | High |
-| P5 | Popup UI | P3 | High |
-| P6 | Options画面 | P4, P5 | Medium |
-| P10 | 統合テスト | P4, P6, P9 | Critical |
+| `P001` | ベースライン採取とテスト固定開始 | none | highest |
+| `P031` | background 分割の最初の抽出 | `P001-P030` | high |
+| `P101` | popup / options 分割開始 | `P001-P030` | high |
+| `P161` | shared 契約統合 | `P031-P160` | high |
+| `P201` | 引き継ぎ文書の最終整理 | `P161-P200` | medium |
 
 ### Current Blockers
+
 | ID | Description | Severity | Resolution |
 |----|-------------|----------|------------|
-| - | - | - | - |
+| - | なし | - | - |
 
 ---
 
 ## Force State（リソース状態）
 
 ### Active Agents
+
 | Agent | Role | Status | Started At |
 |-------|------|--------|------------|
-| doctrine-orchestrator | Orchestrator | active | 2026-03-01 |
+| parent | planner/editor | active | 2026-03-13 |
+| subagent-background | hotspot survey | completed | 2026-03-13 |
+| subagent-ui | ui/settings survey | completed | 2026-03-13 |
+| subagent-template | template diff survey | completed | 2026-03-13 |
 
 ### Resource Allocation
+
 | Resource | Allocated | Available |
 |----------|-----------|-----------|
 | Parallel Slots | 1 | 3 |
-| Memory Budget | 2000 tokens | 8000 tokens |
+| Memory Budget | 3000 tokens | 8000 tokens |
 
 ---
 
 ## Environment State（環境状態）
 
 ### Risks
+
 | ID | Risk | Probability | Impact | Mitigation |
 |----|------|-------------|--------|------------|
-| R1 | Google Cloud TTS無料枠超過 | Low | Medium | 月間文字数モニタリング、上限アラート実装 |
-| R2 | localhost:3456ポート競合 | Low | Low | configで変更可能にする |
-| R3 | ffmpegが未インストール | Medium | High | インストール手順をREADMEに記載、エラー時わかりやすいメッセージ |
-| R4 | Firefox AMO署名後の動作差異 | Low | Medium | manifest.firefox.jsonで正式host_permissions設定 |
-| R5 | 既存テスト破壊 | Low | Critical | 各Process後に npm run test を実行して確認 |
+| `R1` | `handleControlCommand` と `onTabUpdated` の auto-resume が競合し queue 状態が壊れる | medium | high | `P031-P060` で playback state machine を先に分離 |
+| `R2` | `useTabQueue` 分割時に port listener が二重登録される | medium | high | `useQueuePort` 抽出時に cleanup test を先に固定 |
+| `R3` | `summaryWaitMode` / prefetch wait の semantics が regression する | high | high | `serviceContentResolverFallback.test.ts`, `aiPrefetcher.test.ts` を最初に固定 |
+| `R4` | `shared/messages.ts` と `shared/types/index.ts` の契約重複により型 drift が起きる | medium | medium | `P161-P170` で単一ソース化 |
 
 ### Opportunities
+
 | ID | Opportunity | Benefit | Action |
 |----|-------------|---------|--------|
-| O1 | Cloudflare R2エグレス無料 | $0/月でCloud配信可能 | P9でR2 S3互換APIを使用 |
-| O2 | OpenRouterClientパターン再利用 | 実装コスト削減 | PodcastClientをBaseApiClient継承で実装 |
+| `O1` | 既存のテスト群が厚い | 安全に段階分割できる | 契約単位に再配置する |
+| `O2` | background / UI の分割点が明確 | 実装セッションで並列化しやすい | `P031-P080` と `P101-P160` を並列可能にする |
+| `O3` | `RESEARCH.md` に既知バグ根拠がある | 再発防止の regression に直結 | `P011-P050` へ反映 |
 
 ---
 
@@ -446,1263 +523,268 @@ Cycle Detected: No
 
 | レベル | タイミング | 目的 | 参加者 |
 |--------|-----------|------|--------|
-| **司令官合議** | Decide フェーズ | ミッション方針（Firefox優先、Chrome除外）の確認 | doctrine-commander-dev |
-| **参謀合議** | Act フェーズ（P1設計時） | PODCAST_ADD別union型 vs QueueCommandMessage拡張の判断 | doctrine-staff-* |
-| **フィードバック合議** | Learning フェーズ | TTS生成品質、フィード互換性の評価 | doctrine-intel |
+| 司令官合議 | 不要 | 本計画は direct mode | parent only |
+| 参謀合議 | 調査時のみ | 影響範囲の確認 | subagents |
+| フィードバック合議 | `P300` | 教訓整理 | parent only |
 
 ## 合議トリガー判定
 
-```
-complexity_score = 80 >= threshold(70) → deliberate: YES
-risk_level = "high" (既存テスト破壊リスク) → deliberate: YES
-multiple_domains_affected = true (拡張+サーバー) → deliberate: YES
+```text
+本計画では direct mode を採用する。
+複雑度は高いが、目的が「計画文書の作成」であり、実装中の合議は別セッションへ委譲する。
 ```
 
 ## 現在の合議状態
 
 | Level | Status | Participants | Decision |
 |-------|--------|--------------|----------|
-| Commander | pending | doctrine-commander-dev | - |
-| Staff | pending | doctrine-staff-* | - |
-| Feedback | pending | doctrine-intel | - |
-
-## Adaptive Threshold
-
-| Field | Value |
-|-------|-------|
-| Current Threshold | 70/100 |
-| Sample Count | 0 |
-| Last Calibration | 2026-03-01 |
+| Commander | skipped | - | direct mode |
+| Staff | completed | background / ui / template survey | plan basis fixed |
+| Feedback | pending | - | `P300` で実施 |
 
 ---
 
 # Processes
 
-## Process 1: Podcast型定義とPodcastClient作成
+## Process 1: ベースライン固定と再設計の前提凍結
 
 <!--@process-briefing
 category: implementation
-tags: [typescript, types, http-client, podcast]
-complexity_estimate: medium
+tags: [baseline, regression, contracts]
+complexity_estimate: high
 -->
 
 ### Briefing (auto-generated)
 
 #### Observe（観察）
-- **Related Lessons**: `src/shared/services/openrouter.ts` のHTTPクライアントパターンを参照
-- **Violation Warnings**: 型定義はすべて `src/shared/types/` 以下に配置すること（既存規則）
-- **Pattern Cache**: BaseApiClientを継承するパターンが既存（`src/shared/services/baseApiClient.ts`）
+- **Related Lessons**: prefetch の未存在状態誤判定、summary wait fallback の意味論ずれ、空キュー pruning の罠
+- **Violation Warnings**: 大規模ファイルを直接切り刻む前にテスト固定が必要
+- **Pattern Cache**: `service.ts`, `tabManager.ts`, `App.tsx`, `OptionsApp.tsx`
 
 #### Orient（方向付け）
-- **Commander's Intent**: PodcastClient は OpenRouterClient と同パターンで実装し、後続プロセスの基盤とする
-- **Prior Context**: `src/shared/services/baseApiClient.ts` が存在するため、継承を検討する
-- **Known Patterns**: `OpenRouterClient` → `constructor(apiKey, model)` → `fetch` + `_handleErrorResponse`
+- **Commander's Intent**: 「挙動は維持」「調査は完了済み」「まず安全網を凍結」
+- **Prior Context**: `RESEARCH.md`, `REFACTORING_PLAN.md`, 本 `PLAN.md`
+- **Known Patterns**: 互換レイヤを挟んでから分割
 
 #### Decide（決心）
-- **Complexity Score**: 30/100（新規ファイル2件、依存なし）
-- **Deliberation Required**: No（低複雑度）
+- **Complexity Score**: 82
+- **Deliberation Required**: no
 - **Execution Mode**: sequential
 
 #### Watch Points
-- PodcastSettings型はOptions画面で編集されるため、バリデーション関数も一緒に定義すること
-- podcast-serverのAPI仕様（エンドポイント、レスポンス型）を型定義に反映すること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 新規ファイル: `src/shared/types/podcast.ts`
-
-```typescript
-// 作成内容の概要
-export interface PodcastSettings {
-  serverUrl: string;        // デフォルト: 'http://localhost:3456'
-  enabled: boolean;         // デフォルト: false
-  autoAddOnQueue?: boolean; // 将来拡張用
-}
-
-export interface PodcastEpisode {
-  id: string;
-  tabId?: number;
-  url: string;
-  title: string;
-  content: string;
-  audioUrl?: string;
-  feedUrl?: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  createdAt: number;
-  updatedAt: number;
-  error?: string;
-}
-
-export interface PodcastPushRequest {
-  url: string;
-  title: string;
-  content: string;
-}
-
-export interface PodcastPushResponse {
-  success: boolean;
-  episodeId?: string;
-  error?: string;
-}
-
-export interface PodcastStatusResponse {
-  episodeId: string;
-  status: PodcastEpisode['status'];
-  audioUrl?: string;
-  error?: string;
-}
-
-export function validatePodcastSettings(settings: Partial<PodcastSettings>): PodcastSettings {
-  return {
-    serverUrl: settings.serverUrl ?? 'http://localhost:3456',
-    enabled: settings.enabled ?? false,
-    autoAddOnQueue: settings.autoAddOnQueue ?? false,
-  };
-}
-```
-
-#### 新規ファイル: `src/shared/services/podcastClient.ts`
-
-```typescript
-// 参照: src/shared/services/openrouter.ts（同パターン）
-export class PodcastClient {
-  private readonly baseUrl: string;
-
-  constructor(serverUrl: string) {
-    this.baseUrl = serverUrl.replace(/\/$/, '');
-  }
-
-  // POST /api/articles
-  async pushArticle(req: PodcastPushRequest): Promise<PodcastPushResponse>;
-
-  // GET /api/status/:episodeId
-  async checkStatus(episodeId: string): Promise<PodcastStatusResponse>;
-
-  // GET /api/health
-  async testConnection(): Promise<{ success: boolean; error?: string }>;
-
-  private async _makeRequest(path: string, options?: RequestInit): Promise<Response>;
-  private async _handleErrorResponse(response: Response): Promise<never>;
-}
-```
-
-#### 修正ファイル: `src/shared/types/index.ts`
-
-修正箇所: `STORAGE_KEYS` 定義（現在 line 29-38）
-
-```typescript
-// STORAGE_KEYS に PODCAST_SETTINGS を追加
-export const STORAGE_KEYS = {
-  TTS_SETTINGS: 'tts_settings',
-  LAST_TAB_CONTENT: 'last_tab_content',
-  READING_QUEUE: 'readingQueue',
-  IGNORED_DOMAINS: 'ignoredDomains',
-  SCHEMA_VERSION: 'schemaVersion',
-  AI_SETTINGS: 'ai_settings',
-  DEVELOPER_MODE: 'developerMode',
-  PODCAST_SETTINGS: 'podcast_settings',  // 追加
-} as const;
-
-// ファイル末尾に追加
-export * from './podcast';
-```
+- summary wait / prefetch / auto-resume を最初に壊しやすい
 
 ---
 
 ### Red Phase: テスト作成と失敗確認
 
-**OODA: Act（行動）- TDD Red**
+- [x] `npm run test`, `npm run typecheck`, `npm run lint` の結果を保存
+- [x] `serviceContentResolverFallback.test.ts`, `backgroundService.test.ts`, `tabManager.autoResume.test.ts`, `useTabQueue.test.tsx`, `OptionsApp.test.tsx` の現在結果を確認
+- [x] 足りない契約テストを追加
+  - `SKIP_SUMMARY_WAIT` が未実装であることを示すテスト
+  - `shared/types/index.ts` と `shared/messages.ts` の契約重複検知テスト
 
-- [ ] ブリーフィング確認
-- [ ] `src/shared/types/__tests__/podcast.test.ts` を新規作成
-  - PodcastSettings型のデフォルト値テスト（`validatePodcastSettings({})`）
-  - PodcastEpisodeのstatus遷移テスト
-  - STORAGE_KEYSにPODCAST_SETTINGSが含まれることを確認
-- [ ] `src/shared/services/__tests__/podcastClient.test.ts` を新規作成
-  - `pushArticle()` が正常系でPodcastPushResponseを返すことを確認（fetchをモック）
-  - `pushArticle()` がサーバーエラー時にエラーをスローすることを確認
-  - `testConnection()` が成功・失敗の両方を返すことを確認
-  - `checkStatus()` がPodcastStatusResponseを返すことを確認
-- [ ] `npm run test` でテストが失敗することを確認
-- [ ] **Feedback**: 失敗パターンを記録
-
-✅ **Phase Complete** | Impact: low
+✅ **Phase Complete** | Impact: high
 
 ### Green Phase: 最小実装と成功確認
 
-**OODA: Act（行動）- TDD Green**
+- [ ] baseline snapshot を `PLAN.md` と補助文書に転記
+- [ ] 実装セッション用の最初の test command 群を固定
+- [ ] ファイル別の分割先候補と依存順を確定
 
-- [ ] ブリーフィング確認
-- [ ] `src/shared/types/podcast.ts` を作成（上記インターフェース + validatePodcastSettings）
-- [ ] `src/shared/types/index.ts` に `PODCAST_SETTINGS` キーと re-export を追加
-- [ ] `src/shared/services/podcastClient.ts` を作成（fetch ベース実装）
-- [ ] `npm run test` でテストが成功することを確認
-- [ ] **Feedback**: 実装パターンを記録
-
-✅ **Phase Complete** | Impact: low
+✅ **Phase Complete** | Impact: high
 
 ### Refactor Phase: 品質改善と継続成功確認
 
-**OODA: Act（行動）- TDD Refactor + Feedback**
+- [ ] ベースライン記録の重複を削除
+- [ ] 各番号帯の前提条件を `Process Coverage Matrix` と整合させる
+- [ ] rollback 基準を明文化
 
-- [ ] ブリーフィング確認
-- [ ] PodcastClientがBaseApiClientを継承できるか検討・実施（`src/shared/services/baseApiClient.ts`確認）
-- [ ] エラーハンドリングをOpenRouterClientと統一
-- [ ] `npm run test` で全テスト（447件以上）が継続成功することを確認
-- [ ] **Impact Verification**: `src/shared/types/index.ts` の変更が他のimportを壊していないか確認
-- [ ] **Lessons Learned**: HTTPクライアント共通パターンの記録
-
-✅ **Phase Complete** | Impact: low
+✅ **Phase Complete** | Impact: medium
 
 ---
 
-## Process 2: メッセージング拡張（PODCAST_ADDコマンド）
+## Process 2: shared 契約境界の先行固定
 
 <!--@process-briefing
 category: implementation
-tags: [messaging, typescript, union-type]
-complexity_estimate: low
+tags: [shared, contracts, storage]
 -->
 
 ### Briefing (auto-generated)
-**Related Lessons**: 既存の `PrefetchCommandMessage` が別union型として分離された先例（messages.ts line 103-106参照）
-**Known Patterns**: `QueueCommandMessage` union型 + `isQueueCommandMessage()` ガード関数のパターン
-**Watch Points**: 既存の `QueueCommandMessage` unionを汚染しないこと。別union型 `PodcastCommandMessage` として分離する
+- **Related Lessons**: 設定の意味論は `summaryWaitMode` のように UI 意図まで含めて固定する
+- **Known Patterns**: message / type / storage を 1 つずつ切り出す
+- **Watch Points**: 既存 command 名と storage key を変えない
 
 ---
 
-### 対象ファイルと修正箇所
-
-#### 修正ファイル: `src/shared/messages.ts`
-
-**追加箇所** - `QueueCommandMessage` 定義（line 53）の直後付近に追加:
-
-```typescript
-// Podcast コマンドのペイロード型
-export interface PodcastAddPayload {
-  tabId: number;
-  url: string;
-  title: string;
-  content: string;
-}
-
-// Podcast コマンドメッセージ（QueueCommandMessageとは別union）
-export type PodcastCommandMessage =
-  | { type: 'PODCAST_ADD'; payload: PodcastAddPayload };
-
-// 型ガード関数
-export function isPodcastCommandMessage(message: unknown): message is PodcastCommandMessage {
-  if (typeof message !== 'object' || message === null) return false;
-  const candidate = message as { type?: unknown };
-  if (typeof candidate.type !== 'string') return false;
-  switch (candidate.type) {
-    case 'PODCAST_ADD':
-      return true;
-    default:
-      return false;
-  }
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `src/shared/messages.ts` の既存テストファイルを確認し、追加テストを記述
-  - `isPodcastCommandMessage({ type: 'PODCAST_ADD', payload: {...} })` が true を返すこと
-  - `isPodcastCommandMessage({ type: 'QUEUE_ADD', payload: {...} })` が false を返すこと
-  - `isPodcastCommandMessage(null)` が false を返すこと
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete**
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `src/shared/messages.ts` に `PodcastAddPayload`、`PodcastCommandMessage`、`isPodcastCommandMessage()` を追加
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete**
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] `isPodcastCommandMessage()` と `isQueueCommandMessage()` の実装パターンが一致しているか確認
-- [ ] `npm run test` で全テストが継続成功することを確認
-
-✅ **Phase Complete**
-
----
-
-## Process 3: ストレージ拡張（PodcastSettings）
-
-<!--@process-briefing
-category: implementation
-tags: [storage, settings, typescript]
-complexity_estimate: low
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: `getAiSettings()` / `saveAiSettings()` の実装パターン（storage.ts line 89-130）
-**Known Patterns**: `browserAPI.storage.sync.get([STORAGE_KEYS.AI_SETTINGS])` + デフォルト値マージ + バリデーション
-**Watch Points**: マイグレーションガードが必要。既存ストレージデータとの互換性を確保すること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 修正ファイル: `src/shared/utils/storage.ts`
-
-**追加箇所** - `saveAiSettings()` メソッドの後（line 110付近）:
-
-インポート行に `PodcastSettings, validatePodcastSettings` を追加し、`StorageManager` クラス内に以下を追加:
-
-```typescript
-static async getPodcastSettings(): Promise<PodcastSettings> {
-  try {
-    const result = await browserAPI.storage.sync.get([STORAGE_KEYS.PODCAST_SETTINGS]);
-    const settings = result[STORAGE_KEYS.PODCAST_SETTINGS] || {};
-    return validatePodcastSettings(settings);
-  } catch (error) {
-    logger.error('[Storage] Failed to get podcast settings:', error);
-    return validatePodcastSettings({});
-  }
-}
-
-static async savePodcastSettings(settings: PodcastSettings): Promise<void> {
-  try {
-    await browserAPI.storage.sync.set({ [STORAGE_KEYS.PODCAST_SETTINGS]: settings });
-  } catch (error) {
-    logger.error('[Storage] Failed to save podcast settings:', error);
-    throw error;
-  }
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `src/shared/utils/__tests__/storage.test.ts` に追加テストを記述
-  - `getPodcastSettings()` がデフォルト値を返すこと（ストレージ未設定時）
-  - `getPodcastSettings()` が保存済み値を返すこと
-  - `savePodcastSettings()` がストレージに書き込むこと
-  - ストレージエラー時のフォールバック動作確認
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete**
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `src/shared/utils/storage.ts` に `getPodcastSettings()` / `savePodcastSettings()` を追加
-- [ ] インポート行を更新（PodcastSettings, validatePodcastSettings）
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete**
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] バリデーション強化（serverUrlのURL形式チェック）
-- [ ] `npm run test` で全テストが継続成功することを確認
-
-✅ **Phase Complete**
-
----
-
-## Process 4: BackgroundOrchestrator統合
-
-<!--@process-briefing
-category: implementation
-tags: [background, service-worker, messaging]
-complexity_estimate: medium
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: `handleAddCommand()` パターン（service.ts line 633-661の `processCommand()` switch文）
-**Known Patterns**: `processCommand()` → switch(message.type) → handleXxx() メソッドパターン
-**Watch Points**: `processCommand()` のシグネチャが `QueueCommandMessage` のみを受け取るため、`PodcastCommandMessage` は別ハンドラとして実装すること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 修正ファイル: `src/background/service.ts`
-
-**追加箇所 1** - インポート行（ファイル先頭付近）:
-```typescript
-import { ..., isPodcastCommandMessage, PodcastCommandMessage, PodcastAddPayload } from '../shared/messages';
-import { PodcastClient } from '../shared/services/podcastClient';
-import { StorageManager } from '../shared/utils/storage';
-```
-
-**追加箇所 2** - ランタイムメッセージリスナー内（`isQueueCommandMessage()` チェックの後）:
-```typescript
-// 既存の isQueueCommandMessage チェックの後に追加
-if (isPodcastCommandMessage(message)) {
-  const result = await this.handlePodcastCommand(message);
-  sendResponse(result);
-  return true;
-}
-```
-
-**追加箇所 3** - 新規プライベートメソッド（`handleAddCommand()` の後）:
-```typescript
-private async handlePodcastCommand(
-  message: PodcastCommandMessage
-): Promise<{ success: boolean; error?: string }> {
-  switch (message.type) {
-    case 'PODCAST_ADD':
-      return this.handlePodcastAdd(message.payload);
-    default:
-      return { success: false, error: 'Unknown podcast command' };
-  }
-}
-
-private async handlePodcastAdd(
-  payload: PodcastAddPayload
-): Promise<{ success: boolean; episodeId?: string; error?: string }> {
-  try {
-    const settings = await StorageManager.getPodcastSettings();
-    if (!settings.enabled) {
-      return { success: false, error: 'Podcast is disabled. Please configure in Options.' };
-    }
-    const client = new PodcastClient(settings.serverUrl);
-    const response = await client.pushArticle({
-      url: payload.url,
-      title: payload.title,
-      content: payload.content,
-    });
-    return { success: response.success, episodeId: response.episodeId, error: response.error };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    this.logger.error('[Podcast] Failed to push article:', error);
-    return { success: false, error: msg };
-  }
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `src/background/__tests__/service.test.ts` に追加テストを記述
-  - `PODCAST_ADD` メッセージを受信したとき `handlePodcastAdd()` が呼ばれること
-  - Podcast設定が disabled のとき失敗レスポンスを返すこと
-  - PodcastClientの `pushArticle()` が正常時に成功レスポンスを返すこと
-  - PodcastClientがエラーを投げたとき失敗レスポンスを返すこと
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete**
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `src/background/service.ts` に上記3箇所の修正を実施
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete**
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] エラーハンドリングを既存の `handleAddCommand()` パターンに統一
-- [ ] `npm run test` で全テストが継続成功することを確認
-
-✅ **Phase Complete**
-
----
-
-## Process 5: Popup UI（Podcastに追加ボタン）
-
-<!--@process-briefing
-category: implementation
-tags: [react, popup, ui]
-complexity_estimate: low
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: `handleAddCurrentTab()` の実装パターン（App.tsx line 139付近）
-**Known Patterns**: `useTabQueue()` フックからアクション関数を取得し、ボタンの `onClick` に渡すパターン
-**Watch Points**: Podcast設定が無効（`enabled: false`）のときはボタンをグレーアウトまたは非表示にすること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 修正ファイル: `src/popup/hooks/useTabQueue.ts`
-
-**追加箇所 1** - `UseTabQueueResult` interface（line 22付近）:
-```typescript
-export interface UseTabQueueResult {
-  // 既存フィールド...
-  addToPodcast: (tabId: number) => Promise<void>;  // 追加
-  podcastEnabled: boolean;                          // 追加
-}
-```
-
-**追加箇所 2** - `useTabQueue` 関数内（既存 `handleAddCurrentTab` の後）:
-```typescript
-const [podcastEnabled, setPodcastEnabled] = useState(false);
-
-useEffect(() => {
-  StorageManager.getPodcastSettings().then(settings => {
-    setPodcastEnabled(settings.enabled);
-  });
-}, []);
-
-const addToPodcast = useCallback(async (tabId: number) => {
-  const tab = queue.find(t => t.tabId === tabId);
-  if (!tab) return;
-  const response = await chrome.runtime.sendMessage({
-    type: 'PODCAST_ADD',
-    payload: {
-      tabId: tab.tabId,
-      url: tab.url,
-      title: tab.title,
-      content: tab.content || tab.summary || '',
-    },
-  });
-  if (!response?.success) {
-    console.error('[Podcast] Failed to add:', response?.error);
-  }
-}, [queue]);
-```
-
-#### 修正ファイル: `src/popup/components/App.tsx`
-
-**追加箇所** - `actions-row` div（line 378-394付近）の既存ボタンの後:
-```tsx
-<button
-  className="btn btn-podcast"
-  onClick={() => currentTab && addToPodcast(currentTab.tabId)}
-  disabled={!podcastEnabled || !currentTab}
-  title={podcastEnabled ? 'Podcastに追加' : 'Options でPodcastを有効化してください'}
->
-  Podcast
-</button>
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `src/popup/hooks/__tests__/useTabQueue.test.tsx` に追加テストを記述
-  - `addToPodcast()` が `PODCAST_ADD` メッセージを送信することを確認
-  - `podcastEnabled` がStorageManagerの値に基づいて初期化されることを確認
-- [ ] `src/popup/components/__tests__/App.test.tsx` に追加テストを記述
-  - `podcastEnabled=true` のときPodcastボタンが表示されること
-  - `podcastEnabled=false` のときボタンが無効状態であること
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete**
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `useTabQueue.ts` に `addToPodcast` 関数と `podcastEnabled` state を追加
-- [ ] `App.tsx` に「Podcast」ボタンを追加
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete**
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] Podcast設定未完了時のUX改善（ツールチップ表示など）
-- [ ] `npm run test` で全テストが継続成功することを確認
-
-✅ **Phase Complete**
-
----
-
-## Process 6: Options設定画面（Podcast設定セクション）
-
-<!--@process-briefing
-category: implementation
-tags: [react, options, settings, ui]
-complexity_estimate: low
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: 既存のAI設定セクションのパターン（OptionsApp.tsx）
-**Known Patterns**: Settings input → `StorageManager.savePodcastSettings()` → 接続テストボタン
-**Watch Points**: サーバーURLの形式バリデーション（http://localhost:3456 形式）を実装すること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 新規ファイル: `src/options/components/PodcastSettings.tsx`
-
-```typescript
-interface PodcastSettingsProps {
-  settings: PodcastSettings;
-  onSave: (settings: PodcastSettings) => Promise<void>;
-}
-
-export function PodcastSettings({ settings, onSave }: PodcastSettingsProps) {
-  // サーバーURL入力フィールド（デフォルト: http://localhost:3456）
-  // 有効/無効トグル（enabled チェックボックス）
-  // 接続テストボタン（PodcastClient.testConnection()を呼び出す）
-  // 接続テスト結果表示（成功/失敗メッセージ）
-}
-```
-
-#### 修正ファイル: `src/options/OptionsApp.tsx`
-
-AI設定セクションの後にPodcast設定セクションを追加:
-```tsx
-import { PodcastSettings } from './components/PodcastSettings';
-
-// state追加
-const [podcastSettings, setPodcastSettings] = useState<PodcastSettings>(
-  validatePodcastSettings({})
-);
-
-// 初期化useEffect内に追加
-StorageManager.getPodcastSettings().then(setPodcastSettings);
-
-// JSX内（AI設定セクションの後）
-<section className="settings-section">
-  <h2>Podcast設定</h2>
-  <PodcastSettings
-    settings={podcastSettings}
-    onSave={async (newSettings) => {
-      await StorageManager.savePodcastSettings(newSettings);
-      setPodcastSettings(newSettings);
-    }}
-  />
-</section>
-```
-
-#### 修正ファイル: `src/manifest/manifest.firefox.json`
-
-**追加箇所** - `host_permissions` 配列に追加（Firefox版のみ。Chrome版には追加しない）:
-```json
-{
-  "host_permissions": [
-    "http://localhost:3456/*"
-  ]
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `src/options/__tests__/OptionsApp.test.tsx` に追加テストを記述
-  - Podcast設定セクションが表示されること
-  - サーバーURL入力フィールドが表示されること
-  - 接続テストボタンが表示されること
-  - 接続テスト成功時に成功メッセージが表示されること
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete**
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `src/options/components/PodcastSettings.tsx` を新規作成
-- [ ] `src/options/OptionsApp.tsx` にPodcast設定セクションを追加
-- [ ] `src/manifest/manifest.firefox.json` に `host_permissions` を追加
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete**
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] コンポーネント分離（AI設定セクションとの一貫性確保）
-- [ ] URLバリデーション強化
-- [ ] `npm run test` で全テストが継続成功することを確認
-
-✅ **Phase Complete**
-
----
-
-## Process 7: podcast-server基盤（Fastify + ルーティング）
-
-<!--@process-briefing
-category: implementation
-tags: [nodejs, fastify, server, typescript]
-complexity_estimate: high
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: なし（新規サブパッケージ）
-**Known Patterns**: Fastifyのプラグイン構成、@fastify/cors でCORSを設定
-**Watch Points**: Firefox拡張からのリクエストのOriginは `moz-extension://` で始まる。CORSの `origin` 設定で許可すること
-
----
-
-### ディレクトリ構造
-
-```
-podcast-server/
-├── package.json              # 独立したNode.jsサブパッケージ
-├── tsconfig.json
-├── .env.example              # GCP_CREDENTIALS_PATH, PORT, DATA_DIR, R2_* 等
-├── src/
-│   ├── server.ts             # Fastifyサーバー起動エントリーポイント
-│   ├── config.ts             # 環境変数ロード・バリデーション
-│   ├── routes/
-│   │   ├── articles.ts       # POST /api/articles
-│   │   ├── feed.ts           # GET /feed.xml
-│   │   ├── audio.ts          # GET /audio/:id.mp3
-│   │   └── status.ts         # GET /api/status/:id, DELETE /api/articles/:id
-│   ├── services/
-│   │   ├── tts.ts            # Google Cloud TTS連携（P8で実装）
-│   │   ├── feedGen.ts        # RSS/Podcastフィード生成（P9で実装）
-│   │   ├── storage.ts        # エピソードDB（JSONファイル）管理
-│   │   ├── queue.ts          # TTS生成キュー（直列処理）
-│   │   └── uploader.ts       # R2アップロード（P9で実装）
-│   ├── types/
-│   │   └── index.ts          # サーバー側型定義（Episode, Config等）
-│   └── __tests__/
-│       ├── server.test.ts
-│       └── routes/
-│           ├── articles.test.ts
-│           ├── feed.test.ts
-│           ├── audio.test.ts
-│           └── status.test.ts
-├── data/                     # .gitignore（MP3ファイル、episodes.json）
-│   ├── episodes.json
-│   └── audio/
-└── assets/
-    └── cover.jpg             # Podcastカバーアート
-```
-
-#### `podcast-server/package.json` の主要依存:
-```json
-{
-  "name": "podcast-server",
-  "version": "1.0.0",
-  "scripts": {
-    "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
-    "build": "tsc",
-    "test": "jest"
-  },
-  "dependencies": {
-    "fastify": "^4.x",
-    "@fastify/cors": "^8.x",
-    "@fastify/static": "^6.x",
-    "podcast": "^2.x",
-    "@google-cloud/text-to-speech": "^5.x",
-    "dotenv": "^16.x"
-  },
-  "devDependencies": {
-    "@types/node": "^20.x",
-    "typescript": "^5.x",
-    "ts-node": "^10.x",
-    "jest": "^29.x",
-    "@types/jest": "^29.x"
-  }
-}
-```
-
-#### `podcast-server/src/config.ts` の概要:
-```typescript
-export interface ServerConfig {
-  port: number;              // デフォルト: 3456
-  dataDir: string;           // デフォルト: './data'
-  gcpCredentialsPath: string;
-  r2Endpoint?: string;
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2Bucket?: string;
-  podcastTitle: string;
-  podcastDescription: string;
-  podcastAuthor: string;
-  publicBaseUrl: string;
-}
-
-export function loadConfig(): ServerConfig { /* dotenv + バリデーション */ }
-```
-
-#### `POST /api/articles` の処理フロー:
-```
-リクエスト: { url, title, content }
-→ Episode作成（status: 'pending'）
-→ episodes.json に保存
-→ TtsQueueに追加（非同期処理開始）
-→ 即座に { success: true, episodeId } を返却
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/__tests__/server.test.ts` を作成
-  - サーバーが起動できること（ポート3456）
-  - `GET /api/health` が200を返すこと
-- [ ] `podcast-server/src/routes/__tests__/articles.test.ts` を作成
-  - `POST /api/articles` が正常時に `{ success: true, episodeId: string }` を返すこと
-  - `POST /api/articles` がbodyバリデーションエラー時に400を返すこと
-- [ ] `podcast-server/src/routes/__tests__/status.test.ts` を作成
-  - `GET /api/status/:id` が存在するエピソードのステータスを返すこと
-  - `GET /api/status/:id` が存在しないIDで404を返すこと
-  - `DELETE /api/articles/:id` が正常削除時に200を返すこと
-- [ ] テストを実行して失敗することを確認（`cd podcast-server && npm test`）
+### Red Phase: テスト作成と失敗確認
+- [x] `src/shared/__tests__/types.structure.test.ts` に契約単一ソースの期待値を追加
+- [x] `src/shared/utils/__tests__/storage.test.ts` に repository 移行後も key / default が維持されることを追加
+- [x] `src/shared/__tests__/offscreenMessages.test.ts` に message module 分割後も type guard が維持されることを追加
 
 ✅ **Phase Complete** | Impact: high
 
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/package.json` を作成（依存関係定義）
-- [ ] `podcast-server/tsconfig.json` を作成
-- [ ] `podcast-server/.env.example` を作成
-- [ ] `podcast-server/src/config.ts` を作成
-- [ ] `podcast-server/src/types/index.ts` を作成
-- [ ] `podcast-server/src/services/storage.ts` を実装（episodes.json CRUD）
-- [ ] `podcast-server/src/routes/articles.ts` を実装（POST /api/articles、キュー追加）
-- [ ] `podcast-server/src/routes/status.ts` を実装（GET/DELETE）
-- [ ] `podcast-server/src/server.ts` を実装（Fastify起動、CORS設定）
-- [ ] `npm install && npm test` でテストが成功することを確認
+### Green Phase: 最小実装と成功確認
+- [ ] `src/shared/messages.ts` を queue / prefetch / offscreen / diagnostics 単位に再編
+- [x] `src/shared/types/index.ts` から legacy message 型を排除し pure barrel にする
+- [ ] `src/shared/utils/storage.ts` から repository 導入点を明確化する
 
 ✅ **Phase Complete** | Impact: high
 
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] CORSのoriginで `moz-extension://*` を許可（Firefox拡張からのリクエスト対応）
-- [ ] Fastifyスキーマバリデーション強化（JSON Schema）
-- [ ] エラーレスポンスの統一（`{ success: false, error: string }` 形式）
-- [ ] `npm test` で継続成功を確認
+### Refactor Phase: 品質改善と継続成功確認
+- [ ] import パスを整理
+- [ ] 循環依存がないか確認
+- [ ] contract 命名を統一
 
-✅ **Phase Complete** | Impact: high
+✅ **Phase Complete** | Impact: medium
 
 ---
 
-## Process 8: Google Cloud TTS統合
-
-<!--@process-briefing
-category: implementation
-tags: [google-cloud, tts, audio, ffmpeg]
-complexity_estimate: high
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: チャンクサイズ問題の先例（CLAUDE.md: process10-200参照）。1200バイト/チャンクで区切ること
-**Known Patterns**: テキスト分割 → TTS API → MP3バイナリ → ffmpeg concat
-**Watch Points**: Google Cloud TTSの1リクエスト上限は5000バイト（約1600文字）。1200バイトで余裕を持って区切ること
-
----
-
-### 対象ファイルと修正箇所
-
-#### 新規実装: `podcast-server/src/services/tts.ts`
-
-```typescript
-// テキスト分割（文末記号優先）
-export function splitTextIntoChunks(text: string, maxBytes: number = 1200): string[] {
-  // 文末記号（。！？\n）で区切り、maxBytes以下になるよう分割
-  // バイト数はBuffer.byteLength(chunk, 'utf8')で計算
-}
-
-// Google Cloud TTS 1チャンク合成
-async function synthesizeChunk(
-  client: TextToSpeechClient,
-  text: string,
-  voice: { languageCode: string; name: string }
-): Promise<Buffer> {
-  // audioEncoding: 'MP3', voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' }
-}
-
-// 長文テキストの音声合成（複数チャンクをffmpegで結合）
-export async function synthesizeLongText(
-  text: string,
-  outputPath: string,
-  config: TtsConfig
-): Promise<void> {
-  const chunks = splitTextIntoChunks(text);
-  // 各チャンクを順次合成
-  // ffmpeg concat デマクサーで結合（再エンコードなし: -c copy）
-  // tmpファイルを削除
-}
-```
-
-#### 新規実装: `podcast-server/src/services/queue.ts`
-
-```typescript
-// TTS生成ジョブキュー（直列処理でAPI制限対応）
-export class TtsQueue {
-  private queue: Array<() => Promise<void>> = [];
-  private processing = false;
-
-  enqueue(job: () => Promise<void>): void;
-  private async processNext(): Promise<void>;
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/services/__tests__/tts.test.ts` を作成
-  - `splitTextIntoChunks('あ'.repeat(500))` が1200バイト以下のチャンクに分割されること
-  - 文末記号（。！？）で優先的に区切られること
-  - 1200バイト未満のテキストはチャンク分割されないこと
-  - TTS APIモックを使い `synthesizeLongText()` がMP3ファイルを生成すること
-- [ ] `podcast-server/src/services/__tests__/queue.test.ts` を作成
-  - ジョブが直列で実行されること（並列実行されないこと）
-  - ジョブが失敗してもキューが継続すること
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete** | Impact: high
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/services/tts.ts` を実装
-  - `splitTextIntoChunks()` 実装
-  - `synthesizeChunk()` 実装（@google-cloud/text-to-speech）
-  - `synthesizeLongText()` 実装（ffmpeg concat）
-- [ ] `podcast-server/src/services/queue.ts` を実装（直列ジョブキュー）
-- [ ] POST /api/articles のハンドラからTtsQueueに追加するよう修正
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete** | Impact: high
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] ffmpegのパス解決を `which ffmpeg` でチェックし、未インストール時はわかりやすいエラーメッセージ
-- [ ] TTS API失敗時のexponential backoff（2s, 4s, 8s、最大3回）
-- [ ] tmpチャンクファイルのクリーンアップ確認（エラー時も削除）
-- [ ] `npm test` で継続成功を確認
-
-✅ **Phase Complete** | Impact: high
-
----
-
-## Process 9: フィード生成 + R2アップロード
-
-<!--@process-briefing
-category: implementation
-tags: [rss, podcast-feed, cloudflare-r2, s3]
-complexity_estimate: high
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: なし（新規実装）
-**Known Patterns**: `podcast` npmライブラリの `Podcast` クラス + `buildXml()` でXML生成。R2はS3互換API（`@aws-sdk/client-s3`）
-**Watch Points**: iTunes必須タグ（`<itunes:author>`, `<itunes:image>`, `<enclosure>`）が欠落するとPodcastアプリで認識されないこと
-
----
-
-### 対象ファイルと修正箇所
-
-#### 新規実装: `podcast-server/src/services/feedGen.ts`
-
-```typescript
-import Podcast from 'podcast';
-
-export function generateFeed(episodes: Episode[], config: ServerConfig): string {
-  const feed = new Podcast({
-    title: config.podcastTitle,
-    description: config.podcastDescription,
-    feedUrl: `${config.publicBaseUrl}/feed.xml`,
-    siteUrl: config.publicBaseUrl,
-    imageUrl: `${config.publicBaseUrl}/assets/cover.jpg`,
-    author: config.podcastAuthor,
-    language: 'ja',
-    itunesAuthor: config.podcastAuthor,
-    itunesImage: `${config.publicBaseUrl}/assets/cover.jpg`,
-    itunesCategory: [{ text: 'Technology' }],
-  });
-
-  for (const ep of episodes.filter(e => e.status === 'completed')) {
-    feed.item({
-      title: ep.title,
-      description: ep.title,
-      url: ep.url,
-      guid: ep.id,
-      date: new Date(ep.createdAt),
-      enclosure: {
-        url: ep.audioUrl!,
-        type: 'audio/mpeg',
-        size: ep.audioSize ?? 0,
-      },
-      itunesTitle: ep.title,
-      itunesDuration: ep.audioDuration,
-    });
-  }
-
-  return feed.buildXml('  ');
-}
-```
-
-#### 新規実装: `podcast-server/src/services/uploader.ts`
-
-```typescript
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-
-export class R2Uploader {
-  private s3: S3Client;
-  private bucket: string;
-
-  constructor(config: {
-    endpoint: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-    bucket: string;
-  }) {
-    this.s3 = new S3Client({
-      region: 'auto',
-      endpoint: config.endpoint,
-      credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
-    });
-    this.bucket = config.bucket;
-  }
-
-  async uploadMp3(episodeId: string, filePath: string): Promise<string>;
-  async uploadFeed(xml: string): Promise<string>;
-}
-```
-
-#### ストレージ管理追加: `podcast-server/src/services/storage.ts`
-
-```typescript
-// エピソード管理（最大100件、500MB制限）
-export async function enforceStorageLimits(dataDir: string): Promise<void> {
-  // 件数が100件超えたら古い順に削除（FIFO）
-  // ディレクトリサイズが500MB超えたら古い順に削除
-}
-```
-
----
-
-### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/services/__tests__/feedGen.test.ts` を作成
-  - `generateFeed()` が有効なXMLを返すこと
-  - `<itunes:author>` タグが含まれること
-  - `<enclosure>` タグが含まれること
-  - status='completed' のエピソードのみがフィードに含まれること
-- [ ] `podcast-server/src/services/__tests__/uploader.test.ts` を作成
-  - `uploadMp3()` がS3 PutObjectCommandを呼び出すこと（モック）
-  - アップロード後のURLが返されること
-- [ ] `podcast-server/src/services/__tests__/storage.test.ts` に追加
-  - `enforceStorageLimits()` が100件超えで古いエピソードを削除すること
-- [ ] テストを実行して失敗することを確認
-
-✅ **Phase Complete** | Impact: high
-
-### Green Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/services/feedGen.ts` を実装（`podcast` npm使用）
-- [ ] `podcast-server/src/services/uploader.ts` を実装（`@aws-sdk/client-s3`使用）
-- [ ] `podcast-server/src/services/storage.ts` に `enforceStorageLimits()` を追加
-- [ ] `podcast-server/src/routes/feed.ts` を実装（GET /feed.xml → generateFeed() → XML返却）
-- [ ] `podcast-server/src/routes/audio.ts` を実装（GET /audio/:id.mp3 → ファイル配信）
-- [ ] TTS完了後にR2アップロード + フィード再生成の処理を追加（queue.tsのジョブ完了時）
-- [ ] テストを実行して成功することを確認
-
-✅ **Phase Complete** | Impact: high
-
-### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] フィードキャッシュ（1分間）の実装（generateFeed()を毎回呼ばないよう最適化）
-- [ ] R2が未設定の場合はローカルファイル配信に自動フォールバック
-- [ ] `npm test` で継続成功を確認
-
-✅ **Phase Complete** | Impact: high
-
----
-
-## Process 10: 統合テスト（E2E + 回帰テスト）
+## Process 10: 契約テスト固定と回帰防止の第一段
 
 <!--@process-briefing
 category: testing
-tags: [e2e, integration, regression]
+tags: [contract-tests, regression]
 -->
 
 ### Briefing (auto-generated)
-**Related Lessons**: 既存テスト破壊を検知するため、Process後に必ず `npm run test` で件数確認
-**Known Patterns**: Jest + モックで拡張機能側の統合テスト実施
-**Watch Points**: podcast-serverのE2Eテストはローカルサーバーを起動する必要があるため、`beforeAll`/`afterAll` でサーバー管理
-
----
-
-### テスト内容
-
-#### 1. 拡張機能側の回帰確認
-
-```bash
-# 拡張機能のテスト（447件以上が全てパスすること）
-npm run test
-
-# TypeScriptコンパイル確認
-npm run typecheck
-```
-
-#### 2. podcast-server E2Eテスト
-
-```typescript
-// podcast-server/src/__tests__/integration.test.ts
-describe('Podcast Server Integration', () => {
-  let app: FastifyInstance;
-
-  beforeAll(async () => {
-    app = await buildServer(loadConfig());
-    await app.listen({ port: 0 }); // ランダムポート
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  test('POST /api/articles → GET /api/status/:id → GET /feed.xml の流れ', async () => {
-    // 1. 記事投稿（TTSはモック）
-    const postRes = await app.inject({
-      method: 'POST',
-      url: '/api/articles',
-      body: { url: 'https://example.com', title: 'テスト記事', content: 'テストコンテンツ' },
-    });
-    expect(postRes.statusCode).toBe(200);
-    const { episodeId } = JSON.parse(postRes.body);
-
-    // 2. ステータス確認
-    const statusRes = await app.inject({ method: 'GET', url: `/api/status/${episodeId}` });
-    expect(['pending', 'processing', 'completed']).toContain(JSON.parse(statusRes.body).status);
-
-    // 3. フィード確認（status='completed'に直接設定してテスト）
-    const feedRes = await app.inject({ method: 'GET', url: '/feed.xml' });
-    expect(feedRes.statusCode).toBe(200);
-    expect(feedRes.headers['content-type']).toContain('xml');
-  });
-});
-```
+- **Related Lessons**: `wait` モードでは failed 後も fallback を試みる
+- **Known Patterns**: まず behavior を固定し、その後に抽出
+- **Watch Points**: tests を内部構造依存にしすぎない
 
 ---
 
 ### Red Phase
-- [ ] ブリーフィング確認
-- [ ] `podcast-server/src/__tests__/integration.test.ts` を作成
-- [ ] 既存テスト件数を確認（`npm run test -- --verbose 2>&1 | grep "Tests:"`）
-- [ ] テストを実行して失敗することを確認
+- [x] `serviceContentResolverFallback.test.ts` に `wait/skip` の timeout と fallback 差分を追加
+- [x] `tabManagerPlaybackEnd.test.ts` に state machine 分離後も同一遷移を保証する観点を追加
+- [x] `useTabQueue.test.tsx` に reconnect cleanup の失敗ケースを追加
 
 ✅ **Phase Complete**
 
 ### Green Phase
-- [ ] 統合テストが通過するまで各サービスを調整
-- [ ] `npm run test`（拡張機能）で全テストが継続パスすること
-- [ ] `cd podcast-server && npm test` でE2Eテストが成功すること
-- [ ] `npm run typecheck` でエラーなし
+- [x] 追加テストを通すための最小互換層を導入
+- [ ] message / storage / router 抽出前の adapter を追加
 
 ✅ **Phase Complete**
 
 ### Refactor Phase
-- [ ] テストカバレッジレポート確認（`npm run test -- --coverage`）
-- [ ] Must セルが全て ✅ になっていることを確認
-- [ ] 全テストが継続成功することを確認
+- [x] テスト名と期待値を契約語彙に寄せる
+- [ ] 実装詳細に依存したアサーションを削減
 
 ✅ **Phase Complete**
 
 ---
 
-## Process 50: フォローアップ
+## Process 50: background オーケストレーションの分割
 
 <!--@process-briefing
 category: followup
-tags: []
+tags: [background, orchestration, offscreen]
 -->
 
 ### Briefing (auto-generated)
-**Related Lessons**: (auto-populated from stigmergy)
-**Known Patterns**: (auto-populated from patterns)
-**Watch Points**: (auto-populated from failure_cases)
-
----
-
-実装後に以下の仕様変更・追加要望が発生した場合にここにProcessを追加する:
-
-- Chrome対応（別ブランチ、別PLAN）
-- バッチ投稿（複数タブを一括Podcast追加）
-- 読み上げ完了時の自動Podcast追加オプション（`autoAddOnQueue`）
-- Podcast episodes管理UI（Options画面内）
-- エピソード削除機能（Popup UI）
-
----
-
-## Process 100: リファクタリング・品質向上
-
-<!--@process-briefing
-category: quality
-tags: [refactoring, code-quality]
--->
-
-### Briefing (auto-generated)
-**Related Lessons**: (auto-populated from stigmergy)
-**Known Patterns**: BaseApiClient継承パターン、エラーハンドリング統一パターン
-**Watch Points**: リファクタリング後も全テストがパスすること
+- **Related Lessons**: auto-resume と offscreen 制御は競合しやすい
+- **Known Patterns**: resolver / router / lifecycle の 3 分割
+- **Watch Points**: `handleControlCommand`, `handleRuntimeMessage`, `forwardToOffscreen`
 
 ---
 
 ### Red Phase
-- [ ] ブリーフィング確認
-- [ ] PodcastClientとOpenRouterClientの共通コードを特定
-- [ ] テストが継続パスすることを確認（リファクタリング前のベースライン）
+- [ ] `backgroundService.test.ts`, `offscreenIntegration.test.ts`, `portHandling.test.ts` の router 観点を補強
+- [x] `SKIP_SUMMARY_WAIT` の未実装を赤にする
 
 ✅ **Phase Complete**
 
 ### Green Phase
-- [ ] PodcastClientがBaseApiClientを完全継承するよう修正（P1のRefactorで未完の場合）
-- [ ] エラーハンドリングをOpenRouterClientと完全統一
-- [ ] PodcastSettings バリデーション強化（URLパターン正規表現チェック）
-- [ ] service.ts の `handlePodcastAdd()` エラーログを既存パターンと統一
-- [ ] podcast-server の型定義を `src/shared/types/podcast.ts` と同期確認
+- [ ] `contentResolver.ts` 抽出
+- [x] `runtimeCommandRouter.ts` 抽出
+- [ ] `offscreenBridge.ts` 抽出
+- [ ] `index.ts` の listener wiring を `lifecycleSupervisor.ts` へ寄せる
 
 ✅ **Phase Complete**
 
 ### Refactor Phase
-- [ ] ブリーフィング確認
-- [ ] `npm run lint` でエラーなし
-- [ ] `npm run format` でフォーマット統一
-- [ ] `npm run typecheck` でエラーなし
-- [ ] `npm run test` で全テストパス
+- [ ] `BackgroundOrchestrator` を composition root に縮小
+- [ ] browser type 条件分岐の重複を adapter に寄せる
+- [ ] keep-alive diagnostics の保存地点を 1 箇所に集約
 
 ✅ **Phase Complete**
 
 ---
 
-## Process 200: ドキュメンテーション
+## Process 100: popup / options の state bridge 化
 
 <!--@process-briefing
-category: documentation
-tags: [readme, setup-guide]
+category: quality
+tags: [popup, options, hooks]
 -->
 
 ### Briefing (auto-generated)
-**Related Lessons**: (auto-populated from stigmergy)
-**Known Patterns**: (auto-populated from patterns)
-**Watch Points**: セットアップ手順の正確性（実際に手順通りに実行して確認すること）
+- **Related Lessons**: listener cleanup 順序は UI hook でも壊れやすい
+- **Known Patterns**: bootstrap / port / commands / reducer / data hook に分解
+- **Watch Points**: `chrome.storage.onChanged`, `runtime.connect`, Import/Export
+
+---
+
+### Red Phase
+- [ ] `App.test.tsx` に bootstrap / all-tabs / ignored domains / summary control の主要観点を固定
+- [ ] `OptionsApp.test.tsx` に import/export、AI key 除外、connection test の主要観点を固定
+- [ ] `useTabQueue.test.tsx` に listener cleanup 順序の観点を追加
+
+✅ **Phase Complete**
+
+### Green Phase
+- [ ] `usePopupBootstrap.ts`, `useAddTabsActions.ts`, `usePopupSettingsSync.ts` を抽出
+- [ ] `useQueuePort.ts`, `useQueueCommands.ts`, `queueMessageReducer.ts` を抽出
+- [ ] `useOptionsData.ts`, `settingsTransfer.ts`, `useConnectionTest.ts` を抽出
+
+✅ **Phase Complete**
+
+### Refactor Phase
+- [ ] `App.tsx` と `OptionsApp.tsx` を表示中心に縮小
+- [ ] popup / options から direct storage 書き込みを除去
+- [ ] prefetch diagnostics の購読経路を一本化
+
+✅ **Phase Complete**
+
+---
+
+## Process 200: 実装引き継ぎドキュメンテーション
+
+<!--@process-briefing
+category: documentation
+tags: [handoff, docs, implementation]
+-->
+
+### Briefing (auto-generated)
+- **Related Lessons**: 再調査コストは「どのテストから回すか」と「どのファイルを触るか」が曖昧だと増える
+- **Known Patterns**: code map + test map + rollback guide を 1 セットで残す
+- **Watch Points**: 文書だけが最新化され、実装との差分が広がらないようにする
 
 ---
 
 ### Red Phase: ドキュメント設計
-- [ ] ブリーフィング確認
-- [ ] 文書化対象を特定:
-  - `podcast-server/README.md`: セットアップ手順、Google Cloud TTS認証設定、R2設定、ffmpegインストール
-  - `CLAUDE.md` へのPodcast機能セクション追加
-  - `podcast-server/.env.example` の全フィールド説明
-- [ ] ドキュメント構成を作成
-- [ ] **成功条件**: doc_targets が特定され、アウトラインが存在
+- [ ] 文書化対象を特定
+  - architecture map
+  - file split map
+  - test command map
+  - rollback guide
+- [ ] 変更順序を `Process Coverage Matrix` と一致させる
 
 ✅ **Phase Complete**
 
 ### Green Phase: ドキュメント記述
-- [ ] `podcast-server/README.md` を作成:
-  - 前提条件（Node.js 18+、ffmpeg、Google Cloud CLIなど）
-  - インストール手順（`npm install`）
-  - Google Cloud TTS APIの有効化とサービスアカウント設定
-  - `.env` ファイルの設定方法
-  - R2の設定方法（任意）
-  - 起動手順（`npm run dev`）
-  - Firefox拡張との接続設定
-  - トラブルシューティング
-- [ ] `CLAUDE.md` に Podcast機能セクションを追加（アーキテクチャ概要、ファイル構成）
-- [ ] **成功条件**: 全doc_targetsがカバー済み、Markdown構文正常
+- [ ] 実装者向けの「最初に読む 5 ファイル」を明記
+- [ ] file-to-test 対応表を記述
+- [ ] Chrome / Firefox の手動確認ポイントを記述
 
 ✅ **Phase Complete**
 
 ### Refactor Phase: 品質確認
-- [ ] セットアップ手順を実際に実行して確認（ドライラン）
-- [ ] リンク検証
-- [ ] 一貫性チェック（用語・フォーマット統一）
-- [ ] **成功条件**: 全レポートOK
+- [ ] 重複した説明を削除
+- [ ] 実装順と依存順が矛盾していないか確認
+- [ ] fallback / prefetch / auto-resume の既知リスクを最後に再掲
 
 ✅ **Phase Complete**
 
@@ -1712,62 +794,78 @@ tags: [readme, setup-guide]
 
 <!--@process-briefing
 category: ooda_feedback
-tags: [lessons-learned, ooda, stigmergy]
+tags: [lessons, handoff]
 -->
 
 ### Briefing (auto-generated)
-**Related Lessons**: (auto-populated from stigmergy)
-**Known Patterns**: stigmergy/lessons/ への教訓保存パターン
-**Watch Points**: 他のプロジェクトでも再利用できる汎用的な教訓として記録すること
+- **Related Lessons**: `Map` 未存在状態の扱い、summary wait の意味論、listener cleanup 順序
+- **Known Patterns**: 再発しやすい race は process 終了時に明文化する
+- **Watch Points**: 引き継ぎメモが抽象論になること
 
 ---
 
 ### Red Phase: フィードバック収集設計
-
-**Observe（観察）**
-- [ ] ブリーフィング確認
-- [ ] 実装過程で発生した問題・課題を収集（各ProcessのLessons Learnedから集約）
-- [ ] テスト結果から得られた知見を記録
-
-**Orient（方向付け）**
-- [ ] 収集した情報をカテゴリ別に分類:
-  - Technical: Fastify + TypeScript サブパッケージ構成パターン
-  - Technical: Firefox拡張からlocalhost APIへのCORS設定（`moz-extension://*`）
-  - Technical: Google Cloud TTS 長文チャンク分割アルゴリズム（1200バイト/チャンク）
-  - Technical: ffmpeg concat でMP3結合する手法（再エンコードなし `-c copy`）
-  - Process: 既存拡張に新コマンドを追加する際の別union型分離パターン
-  - Antipattern: QueueCommandMessage unionを汚染する（→ 別union型で分離する）
-- [ ] **成功条件**: 収集対象が特定され、分類基準が明確
+- [ ] 実装過程で壊れたテスト、追加した契約、削減できた責務を分類
+- [ ] lessons の保存形式を固定
+  - Technical
+  - Process
+  - Antipattern
+  - Best Practice
 
 ✅ **Phase Complete**
 
 ### Green Phase: 教訓・知見の永続化
-
-**Decide（決心）**
-- [ ] 保存先を決定:
-  - Serena Memory: ブラウザ拡張にlocalhost APIを追加する一般パターン
-  - stigmergy/lessons: Podcast機能実装の教訓
-
-**Act（行動）**
-- [ ] Serena Memoryに教訓を永続化（`mcp__serena__write_memory`）
-- [ ] コードに関する知見をMarkdownで記録（stigmergy/lessons/podcast-feed-generation.md）
-- [ ] **成功条件**: 全教訓がSerena Memoryまたはstigmergyに保存済み
+- [ ] `~/.codex/memories` または repo 内の補助文書に保存すべき項目を選定
+- [ ] 次セッションで再利用する test command / rollback command / hotspot list を保存
 
 ✅ **Phase Complete**
 
 ### Refactor Phase: フィードバック品質改善
-
-**Feedback Loop**
-- [ ] ブリーフィング確認
-- [ ] 保存した教訓の品質を検証（再現可能性、明確性、実用性）
-- [ ] メタ学習: 「新規サブパッケージをモノレポに追加する際の注意点」を記録
-
-**Cross-Feedback**
-- [ ] Process 100、200との連携確認
-- [ ] 将来のChrome対応PLAN作成時の参考情報を整理
-- [ ] **成功条件**: 教訓がSerena Memoryで検索可能、insights文書が整備済み
+- [ ] 重複 lesson を統合
+- [ ] 今回の計画と実装実績の差分を反映
+- [ ] 次セッションが追加調査を要しないか確認
 
 ✅ **Phase Complete**
+
+---
+
+## Process Coverage Matrix（001-300）
+
+各行の `Range` は、その番号帯に含まれる個別 Process を表す。実装セッションでは帯の先頭から順に個別 ID を消化し、完了時にチェックリストと進捗率を更新する。
+
+| Range | Focus | Primary Targets | Tests To Anchor | Deliverable |
+|-------|-------|-----------------|-----------------|-------------|
+| `P001-P010` | baseline / regression 固定 | `PLAN.md`, `RESEARCH.md`, `REFACTORING_PLAN.md`, `service.ts`, `tabManager.ts` | `backgroundService.test.ts`, `serviceContentResolverFallback.test.ts`, `tabManager.autoResume.test.ts` | baseline report |
+| `P011-P020` | message contract 固定 | `src/shared/messages.ts`, `src/shared/types/index.ts` | `offscreenMessages.test.ts`, `types.structure.test.ts` | contract map |
+| `P021-P030` | storage / repository 境界固定 | `src/shared/utils/storage.ts` | `storage.test.ts`, `OptionsApp.test.tsx` | storage migration notes |
+| `P031-P040` | content resolver 抽出 | `src/background/service.ts` | `serviceContentResolverFallback.test.ts` | `contentResolver.ts` |
+| `P041-P050` | prefetch wait / fallback 整理 | `src/background/aiPrefetcher.ts`, `src/background/prefetch/*` | `aiPrefetcher.test.ts`, `prefetchScheduler.test.ts` | waiter/status store design |
+| `P051-P060` | runtime command router 抽出 | `src/background/service.ts` | `backgroundService.test.ts`, `portHandling.test.ts` | `runtimeCommandRouter.ts` |
+| `P061-P070` | offscreen bridge 分離 | `src/background/service.ts`, `src/background/offscreen/offscreen.ts` | `offscreenIntegration.test.ts`, `offscreen.test.ts` | `offscreenBridge.ts` |
+| `P071-P080` | lifecycle / index wiring 整理 | `src/background/index.ts`, `src/background/keepAliveController.ts` | `keepAliveIntegration.test.ts`, `keepAliveController.test.ts` | `lifecycleSupervisor.ts` |
+| `P081-P090` | queue state machine 抽出 | `src/background/tabManager.ts` | `tabManagerPlaybackEnd.test.ts`, `tabManager.resume.test.ts` | `playbackStateMachine.ts` |
+| `P091-P100` | tab lifecycle / persistence 抽出 | `src/background/tabManager.ts` | `tabManager.autoResume.test.ts`, `tabManager.performance.test.ts`, `tabManagerClearQueue.test.ts` | `tabLifecycle.ts`, `queuePersistence.ts` |
+| `P101-P110` | popup bootstrap 分離 | `src/popup/components/App.tsx` | `App.test.tsx` | `usePopupBootstrap.ts` |
+| `P111-P120` | queue port / command 分離 | `src/popup/hooks/useTabQueue.ts` | `useTabQueue.test.tsx` | `useQueuePort.ts`, `useQueueCommands.ts` |
+| `P121-P130` | popup state reducer 導入 | `src/popup/hooks/useTabQueue.ts`, `src/popup/hooks/usePrefetchStatus.ts` | `useTabQueue.test.tsx`, `SummaryControl.test.tsx` | `queueMessageReducer.ts` |
+| `P131-P140` | options data loader 分離 | `src/options/OptionsApp.tsx` | `OptionsApp.test.tsx` | `useOptionsData.ts` |
+| `P141-P150` | import/export service 分離 | `src/options/OptionsApp.tsx` | `OptionsApp.test.tsx` | `settingsTransfer.ts` |
+| `P151-P160` | connection test / AI settings 分離 | `src/options/OptionsApp.tsx`, `src/shared/services/openrouter.ts` | `OptionsApp.test.tsx`, `openrouter.test.ts` | `useConnectionTest.ts` |
+| `P161-P170` | shared type/message 単一ソース化 | `src/shared/messages.ts`, `src/shared/types/*` | `types.test.ts`, `types.structure.test.ts` | unified contracts |
+| `P171-P180` | browser / storage adapter 正規化 | `src/shared/utils/browser.ts`, `src/shared/utils/storage.ts` | `browser.test.ts`, `storage.test.ts` | repository/adapters cleanup |
+| `P181-P190` | keep-alive / offscreen / TTS 相互作用検証 | `src/background/ttsEngine.ts`, `src/background/keepAliveController.ts`, `src/background/offscreen/offscreen.ts` | `keepAliveIntegration.test.ts`, `ttsEngine.test.ts`, `offscreenIntegration.test.ts` | interaction report |
+| `P191-P200` | cross-browser / perf 回帰確認 | build config, manifests, background runtime | `tabManager.performance.test.ts`, `browserAdapter.test.ts` | regression checklist |
+| `P201-P210` | architecture docs | `PLAN.md`, `docs/` | doc review | architecture summary |
+| `P211-P220` | process runbook | `PLAN.md` | dry-run review | implementation playbook |
+| `P221-P230` | code modification map | `PLAN.md` | peer review | file-to-change map |
+| `P231-P240` | test inventory docs | `PLAN.md` | dry-run test selection | test matrix |
+| `P241-P250` | migration checklist | `PLAN.md` | manual review | migration checklist |
+| `P251-P260` | rollback guide | `PLAN.md` | rollback drill | rollback guide |
+| `P261-P270` | handoff packet | `PLAN.md`, `SESSION.md` | handoff review | next-session briefing |
+| `P271-P280` | verification command matrix | `PLAN.md` | command dry-run | verification commands |
+| `P281-P290` | release/readme update plan | `README.md`, `docs/` | doc review | release notes draft |
+| `P291-P299` | final review package | `PLAN.md` | final checklist | implementation-ready package |
+| `P300` | lessons / memory 化 | `PLAN.md`, `~/.codex/memories` | review | lessons summary |
 
 ---
 
@@ -1777,33 +875,30 @@ tags: [lessons-learned, ooda, stigmergy]
 
 | ID | Description | Status | Resolution |
 |----|-------------|--------|-----------|
-| B1 | Google Cloud TTS認証情報が未設定 | open | `.env`にGCP_CREDENTIALS_PATHを設定。P8開始前にユーザーへ確認 |
-| B2 | ffmpegがインストールされていない | open | `which ffmpeg` で確認。未インストール時はインストール手順をガイド |
+| - | 現時点でブロッカーなし | closed | 実装セッションで `P001` から開始可能 |
 
 ## Lessons
 
 | ID | Insight | Severity | Applied |
 |----|---------|----------|---------|
-| L1 | Firefox拡張のCORSは `moz-extension://*` を許可リストに含める必要がある | high | ☐ |
-| L2 | Google Cloud TTS は1リクエスト5000バイト上限。1200バイトでチャンク分割すること | high | ☐ |
-| L3 | QueueCommandMessage unionを拡張すると既存の全ハンドラ修正が必要になる。別union型を作ること | medium | ☐ |
-| L4 | FastifyはリクエストbodyのJSON Schemaバリデーションが組み込みで可能。使うこと | low | ☐ |
+| `L1` | `Map` の未存在状態を完了扱いしない | high | ☑ |
+| `L2` | `summaryWaitMode=wait` は failed 後 fallback 試行まで含む | high | ☑ |
+| `L3` | popup hook の listener cleanup 順序は二重送信不具合に直結する | high | ☑ |
+| `L4` | queue 状態と offscreen 再生状態は別責務として切り離す | high | ☑ |
 
 ## Feedback Log
 
 | Date | Type | Content | Status |
 |------|------|---------|--------|
-| 2026-03-01 | planning | 初期計画策定完了 | open |
+| 2026-03-13 | planning | テンプレート準拠へ再構成し、process 001-300 の番号帯を固定 | closed |
+| 2026-03-13 | research | background / ui / template のサブエージェント調査を反映 | closed |
 
 ## Completion Checklist
-- [ ] すべてのProcess（P1〜P9）完了
-- [ ] 統合テスト（P10）合格
-- [ ] 既存テスト（447件以上）が全てパス
-- [ ] TypeScriptコンパイルエラーなし（`npm run typecheck`）
-- [ ] Lintエラーなし（`npm run lint`）
-- [ ] podcast-server/README.md 作成済み（P200）
-- [ ] CLAUDE.mdにPodcast機能セクション追加済み（P200）
-- [ ] 教訓をstigmergyに保存済み（P300）
+
+- [ ] すべての Process 完了
+- [ ] すべてのテスト合格
+- [ ] コードレビュー完了
+- [ ] ドキュメント更新完了
 - [ ] マージ可能な状態
 
 ---
@@ -1816,71 +911,82 @@ tags: [lessons-learned, ooda, stigmergy]
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| Enabled | true | 影響検証の有効化 |
-| Level | normal | 検証深度 |
-| Timeout | 60 | タイムアウト秒数 |
-| Auto Remediation | false | 自動修正は無効（手動確認） |
+| Enabled | true | 実装前後に影響検証する |
+| Level | deep | アーキテクチャ変更のため |
+| Timeout | 60 | 秒 |
+| Auto Remediation | false | 安全のため自動修正は使わない |
 
-## Verification Results（実装完了後に記入）
+### Verification Levels
+
+| Level | Duration | Content |
+|-------|----------|---------|
+| minimal | ~10秒 | 直接変更ファイルのみ |
+| normal | ~30秒 | 依存テストと回帰範囲 |
+| deep | ~60秒 | message / storage / browser / offscreen 連鎖確認 |
+
+## Verification Results
 
 ### Changes Analyzed
 
 | File | Change Type | Lines Changed | Symbols |
 |------|-------------|---------------|---------|
-| `src/shared/types/podcast.ts` | added | +100 / -0 | PodcastSettings, PodcastEpisode, validatePodcastSettings |
-| `src/shared/types/index.ts` | modified | +2 / -0 | STORAGE_KEYS.PODCAST_SETTINGS, re-export |
-| `src/shared/services/podcastClient.ts` | added | +80 / -0 | PodcastClient |
-| `src/shared/messages.ts` | modified | +30 / -0 | PodcastCommandMessage, isPodcastCommandMessage |
-| `src/shared/utils/storage.ts` | modified | +30 / -0 | getPodcastSettings, savePodcastSettings |
-| `src/background/service.ts` | modified | +40 / -0 | handlePodcastCommand, handlePodcastAdd |
-| `src/popup/hooks/useTabQueue.ts` | modified | +25 / -0 | addToPodcast, podcastEnabled |
-| `src/popup/components/App.tsx` | modified | +10 / -0 | Podcast button |
-| `src/options/OptionsApp.tsx` | modified | +20 / -0 | Podcast settings section |
-| `src/options/components/PodcastSettings.tsx` | added | +80 / -0 | PodcastSettings component |
-| `src/manifest/manifest.firefox.json` | modified | +3 / -0 | host_permissions |
-| `podcast-server/` | added | +600 / -0 | 新規サブパッケージ全体 |
+| `src/background/service.ts` | planned split | - | `createContentResolver`, `handleRuntimeMessage`, `handleControlCommand` |
+| `src/background/tabManager.ts` | planned split | - | `processNext`, `onTabUpdated`, `persistQueue`, `resumePlaybackIfNeeded` |
+| `src/background/aiPrefetcher.ts` | planned split | - | `initialize`, `waitForPrefetch`, `persistStatus` |
+| `src/popup/components/App.tsx` | planned shrink | - | bootstrap, add-all-tabs, settings sync |
+| `src/popup/hooks/useTabQueue.ts` | planned split | - | connect, scheduleReconnect, sendCommand |
+| `src/options/OptionsApp.tsx` | planned split | - | loadInitialData, handleExport, importFromJson, handleConnectionTest |
+| `src/shared/messages.ts` | planned reorg | - | message unions, type guards |
+| `src/shared/utils/storage.ts` | planned repository split | - | get/save settings, queue load/save, migration |
 
 ### Dependency Analysis
 
 | Type | Count | Files |
 |------|-------|-------|
-| Forward (depends on) | 5 | messages.ts, storage.ts, podcastClient.ts, podcast.ts, types/index.ts |
-| Reverse (depended by) | 4 | service.ts, App.tsx, useTabQueue.ts, OptionsApp.tsx |
-| Indirect (2 hops) | 2 | popup/index.tsx, options/index.tsx |
+| Forward (depends on) | 8+ | `service.ts`, `tabManager.ts`, `aiPrefetcher.ts`, `App.tsx`, `OptionsApp.tsx`, `useTabQueue.ts`, `messages.ts`, `storage.ts` |
+| Reverse (depended by) | 15+ | background tests, popup tests, options tests, shared tests |
+| Indirect (2 hops) | high | popup -> runtime -> background -> storage / offscreen / prefetch |
 
 ### Test Impact
 
 | Test File | Status | Recommendation |
 |-----------|--------|----------------|
-| `src/shared/utils/__tests__/storage.test.ts` | affected | Run required |
-| `src/shared/messages.ts` のテスト | affected | Run required |
-| `src/background/__tests__/service.test.ts` | affected | Run required |
-| `src/popup/components/__tests__/App.test.tsx` | affected | Run required |
+| `src/background/__tests__/serviceContentResolverFallback.test.ts` | affected | Run required |
+| `src/background/__tests__/backgroundService.test.ts` | affected | Run required |
+| `src/background/__tests__/offscreenIntegration.test.ts` | affected | Run required |
+| `src/background/__tests__/tabManager.autoResume.test.ts` | affected | Run required |
+| `src/background/__tests__/tabManagerPlaybackEnd.test.ts` | affected | Run required |
+| `src/background/__tests__/aiPrefetcher.test.ts` | affected | Run required |
 | `src/popup/hooks/__tests__/useTabQueue.test.tsx` | affected | Run required |
+| `src/popup/components/__tests__/App.test.tsx` | affected | Run required |
 | `src/options/__tests__/OptionsApp.test.tsx` | affected | Run required |
+| `src/shared/utils/__tests__/storage.test.ts` | affected | Run required |
+| `src/shared/__tests__/offscreenMessages.test.ts` | affected | Run required |
 
 **Recommended Test Command**:
+
 ```bash
-npm run test && npm run typecheck && npm run lint
+npm run test -- --runInBand src/background/__tests__/serviceContentResolverFallback.test.ts src/background/__tests__/backgroundService.test.ts src/background/__tests__/offscreenIntegration.test.ts src/background/__tests__/tabManager.autoResume.test.ts src/background/__tests__/tabManagerPlaybackEnd.test.ts src/background/__tests__/aiPrefetcher.test.ts src/popup/hooks/__tests__/useTabQueue.test.tsx src/popup/components/__tests__/App.test.tsx src/options/__tests__/OptionsApp.test.tsx src/shared/utils/__tests__/storage.test.ts src/shared/__tests__/offscreenMessages.test.ts
 ```
 
 ### Risk Assessment
 
 | Factor | Score | Weight | Description |
 |--------|-------|--------|-------------|
-| Change Scope | 15 | 25% | 既存ファイル7件の修正（追加のみ、削除なし） |
-| Dependency Impact | 12 | 30% | 追加は別union型で分離済み |
-| Security Factor | 5 | 25% | localhost限定、APIキーはストレージに保存 |
-| Test Coverage Gap | 10 | 20% | 新規ファイルのテストを新規追加 |
-| **Total** | **42** | 100% | **medium** |
+| Change Scope | 22 | 25% | background / ui / shared を横断 |
+| Dependency Impact | 27 | 30% | runtime, storage, tests, offscreen に波及 |
+| Security Factor | 9 | 25% | API key export / import validation が主 |
+| Test Coverage Gap | 14 | 20% | 契約テストの不足を補う必要あり |
+| **Total** | **72** | 100% | **high** |
 
 ### Recommendations
 
 | Priority | Action | Reason | Status |
 |----------|--------|--------|--------|
-| high | 各Process後に `npm run test` を実行 | 既存テスト破壊を早期検知 | pending |
-| medium | P8でGCPモックを適切に設定 | CI/CDで実際のGCP APIを呼ばないよう | pending |
-| low | R2設定はオプションとして扱う | ローカルファイル配信でも動作するように | pending |
+| high | `P001-P030` 完了前に大規模移動をしない | 安全網不足での分割を防ぐ | pending |
+| high | `service.ts` と `tabManager.ts` を同時に大改修しない | race origin の切り分けが困難 | pending |
+| high | `useTabQueue` の cleanup test を先に固定する | 二重送信を早期防止 | pending |
+| medium | `SKIP_SUMMARY_WAIT` の仕様を `P031-P050` で確定する | UI と background の契約穴を塞ぐ | pending |
 
 ---
 
@@ -1890,93 +996,60 @@ npm run test && npm run typecheck && npm run lint
 
 | Field | Value |
 |-------|-------|
-| Project Path | /home/takets/repos/read-aloud-tab |
+| Project Path | `/Users/ttakeda/repos/read-aloud-tab` |
 | Previous Mission | null |
-| Continue Mode | true |
-| Entry Count | 1/20 (global max) |
+| Continue Mode | false |
+| Entry Count | 1/20 |
 
 ## Session History（このプロジェクト）
 
 | Mission ID | Objective | Status | Timestamp |
 |------------|-----------|--------|-----------|
-| podcast-feed-generation-firefox | Firefox版Podcast音声フィード生成機能の実装 | planning | 2026-03-01 |
+| `plan-read-aloud-tab-refactor-20260313` | 再調査不要の実装計画化 | completed | 2026-03-13 |
 
-## Restored Context（--continue 時に自動ロード）
+## Restored Context（次セッション向け）
 
 ```json
 {
   "previous_decisions": [
     {
-      "decision_id": "d001",
-      "content": "PODCAST_ADDは別union型(PodcastCommandMessage)として分離する（QueueCommandMessageを汚染しない）",
-      "timestamp": "2026-03-01"
+      "decision_id": "D-001",
+      "content": "最初に baseline と契約テストを固定し、その後に background と UI を並列分割する",
+      "timestamp": "2026-03-13"
     },
     {
-      "decision_id": "d002",
-      "content": "Firefox版を優先。manifest.firefox.jsonのhost_permissionsにhttp://localhost:3456/*を追加",
-      "timestamp": "2026-03-01"
-    },
-    {
-      "decision_id": "d003",
-      "content": "podcast-serverは独立したNode.jsサブパッケージ(podcast-server/)として構成する",
-      "timestamp": "2026-03-01"
+      "decision_id": "D-002",
+      "content": "service.ts と tabManager.ts を同一 Process で同時大改修しない",
+      "timestamp": "2026-03-13"
     }
   ],
   "learned_patterns": [
     {
-      "pattern_id": "p001",
-      "description": "HTTPクライアントはBaseApiClientを継承し、OpenRouterClientと同パターンで実装する",
-      "confidence": 0.9
+      "pattern_id": "LP-001",
+      "description": "summaryWaitMode は技術状態ではなくユーザー意図も含む契約で扱う",
+      "confidence": 0.95
     },
     {
-      "pattern_id": "p002",
-      "description": "Google Cloud TTSは1200バイト/チャンクで分割し、ffmpeg concatで結合する",
-      "confidence": 0.85
+      "pattern_id": "LP-002",
+      "description": "listener cleanup 順序は reconnect バグの主因になるため hook 分割前に固定する",
+      "confidence": 0.9
     }
   ],
   "known_issues": [
     {
-      "issue_id": "i001",
-      "description": "Google Cloud TTS認証情報が必要。実装者がGCPプロジェクトとサービスアカウントを事前設定する必要あり",
+      "issue_id": "KI-001",
+      "description": "SKIP_SUMMARY_WAIT メッセージの実体処理が未完成",
       "status": "open"
     },
     {
-      "issue_id": "i002",
-      "description": "ffmpegがホストにインストールされている必要がある",
+      "issue_id": "KI-002",
+      "description": "shared/types/index.ts に legacy message 型が残っている",
       "status": "open"
     }
   ],
   "progress_state": {
-    "last_completed_process": null,
-    "pending_tasks": ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10"]
+    "last_completed_process": "planning-document",
+    "pending_tasks": ["P001", "P002", "P010", "P031", "P101", "P161", "P201", "P300"]
   }
 }
 ```
-
-## Storage Paths
-
-| Type | Path |
-|------|------|
-| Session Memory Index | `stigmergy/session-memory.json` |
-| Session Summaries | `stigmergy/session-summaries/podcast-feed-generation-firefox-summary.md` |
-| Checkpoints | `.claude/checkpoints/podcast-feed-generation-firefox.json` |
-| Project Hash | `sha256(/home/takets/repos/read-aloud-tab)[:16]` |
-
----
-
-# Module Reference
-
-## 実行フロー詳細
-
-| Module | Path | Description |
-|--------|------|-------------|
-| deliberation | `~/.claude/agents/doctrine/modules/deliberation.md` | 三者合議フロー、トリガー判定 |
-| session-memory | `~/.claude/agents/doctrine/modules/session-memory.md` | セッション継続機能 |
-
-## DAG 実行モジュール
-
-| Module | Path | Description |
-|--------|------|-------------|
-| dag-core | `~/.claude/agents/doctrine/modules/dag-core.md` | DAG 型定義、グラフ操作 |
-| dag-executor | `~/.claude/agents/doctrine/modules/dag-executor.md` | 並列実行制御 |
-| impact-verification | `~/.claude/agents/doctrine/modules/impact-verification.md` | 影響検証 |
