@@ -1,7 +1,15 @@
 export class TextExtractor {
   private static readonly IGNORE_TAGS = [
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'EMBED', 'OBJECT',
-    'AUDIO', 'VIDEO', 'CANVAS', 'SVG', 'MATH'
+    'AUDIO', 'VIDEO', 'CANVAS', 'SVG', 'MATH',
+    'NAV', 'HEADER', 'FOOTER', 'ASIDE'
+  ];
+
+  private static readonly IGNORE_ARIA_ROLES = [
+    'navigation',
+    'banner',
+    'complementary',
+    'contentinfo'
   ];
 
   private static readonly CONTENT_SELECTORS = [
@@ -24,7 +32,7 @@ export class TextExtractor {
       return this.extractTextFromElement(mainContent);
     }
 
-    // フォールバック: body全体から抽出（不要な要素を除外）
+    // フォールバック: body全体から抽出（IGNORE_TAGSとARIAロールフィルタ適用済み）
     return this.extractTextFromElement(document.body);
   }
 
@@ -37,16 +45,47 @@ export class TextExtractor {
       }
     }
 
-    // ヒューリスティック: 最も長いテキストを持つ要素を探す
+    // ヒューリスティック: article / main を優先
+    const priorityElements = document.querySelectorAll('article, main');
+    for (const el of priorityElements) {
+      if (this.hasSignificantText(el as HTMLElement)) {
+        return el as HTMLElement;
+      }
+    }
+
+    // テキスト密度ヒューリスティック: HTMLに対するテキスト比率で選択
     const candidates = document.querySelectorAll('div, section, article');
     let bestCandidate: HTMLElement | null = null;
-    let maxTextLength = 0;
+    let bestScore = 0;
 
     for (const candidate of candidates) {
-      const textLength = this.getTextLength(candidate as HTMLElement);
-      if (textLength > maxTextLength && textLength > 100) {
-        maxTextLength = textLength;
-        bestCandidate = candidate as HTMLElement;
+      const el = candidate as HTMLElement;
+
+      // ラッパー要素を除外: 直接の子ブロック要素が多い場合はスキップ
+      const directBlockChildren = Array.from(el.children).filter(child =>
+        ['DIV', 'SECTION', 'ARTICLE', 'P', 'UL', 'OL', 'TABLE'].includes(child.tagName)
+      );
+      if (directBlockChildren.length > 10) {
+        continue;
+      }
+
+      const textLength = this.getTextLength(el);
+      if (textLength < 100) {
+        continue;
+      }
+
+      // テキスト密度: テキスト長 / innerHTML長の比率
+      const htmlLength = el.innerHTML.length;
+      if (htmlLength === 0) {
+        continue;
+      }
+      const density = textLength / htmlLength;
+
+      // スコア = テキスト密度 × テキスト長（長さにもボーナス）
+      const score = density * Math.log(textLength + 1);
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = el;
       }
     }
 
@@ -76,6 +115,12 @@ export class TextExtractor {
             return NodeFilter.FILTER_REJECT;
           }
 
+          // ARIAロールによるナビゲーション系要素を除外
+          const role = parent.getAttribute('role');
+          if (role && this.IGNORE_ARIA_ROLES.includes(role)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
           // 非表示要素は除外
           if (this.isHidden(parent)) {
             return NodeFilter.FILTER_REJECT;
@@ -92,14 +137,15 @@ export class TextExtractor {
     );
 
     const texts: string[] = [];
-    let node;
-    while (node = walker.nextNode()) {
+    let node = walker.nextNode();
+    while (node !== null) {
       const text = node.textContent?.trim();
       if (text) {
         // 重複する空白文字を正規化
         const normalizedText = text.replace(/\s+/g, ' ');
         texts.push(normalizedText);
       }
+      node = walker.nextNode();
     }
 
     // テキストを結合し、適切な区切りを追加
@@ -114,7 +160,8 @@ export class TextExtractor {
       style.opacity === '0' ||
       element.hidden ||
       element.offsetWidth === 0 ||
-      element.offsetHeight === 0
+      element.offsetHeight === 0 ||
+      element.getAttribute('aria-hidden') === 'true'
     );
   }
 
