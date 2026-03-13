@@ -49,6 +49,7 @@ export class AiPrefetcher {
   private statusMap = new Map<number, PrefetchStatusUpdate & { updatedAt: number }>();
   private keepAliveDiagnostics: KeepAliveDiagnostics | null = null;
   private waitAbortControllers = new Map<number, AbortController>();
+  private cancelledWaitTabs = new Set<number>();
 
   private cachedSettings: AiSettings | null = null;
   private cachedSettingsTimestamp = 0;
@@ -239,11 +240,18 @@ export class AiPrefetcher {
    * Should be called when a tab is removed from the queue.
    */
   cancelWait(tabId: number): void {
+    this.cancelledWaitTabs.add(tabId);
     const controller = this.waitAbortControllers.get(tabId);
     if (controller) {
       controller.abort();
       this.waitAbortControllers.delete(tabId);
     }
+  }
+
+  consumeCancelledWait(tabId: number): boolean {
+    const wasCancelled = this.cancelledWaitTabs.has(tabId);
+    this.cancelledWaitTabs.delete(tabId);
+    return wasCancelled;
   }
 
   /**
@@ -256,6 +264,11 @@ export class AiPrefetcher {
     timeoutMs: number = 30000,
     waitMode: 'wait' | 'skip' = 'skip'
   ): Promise<PrefetchWaitResult> {
+    if (this.cancelledWaitTabs.has(tabId)) {
+      this.logger.info(`[AiPrefetcher] Wait skipped before start for tabId=${tabId}`);
+      return 'timed_out';
+    }
+
     const effectiveTimeout = waitMode === 'wait' ? 120000 : timeoutMs;
     const startTime = Date.now();
 
