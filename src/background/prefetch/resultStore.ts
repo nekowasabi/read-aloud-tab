@@ -13,6 +13,7 @@ interface StoredResults {
 
 interface PrefetchEntry {
   tabId: number;
+  url: string;
   summary?: string;
   translation?: string;
   generatedAt: number;
@@ -42,7 +43,7 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
     await this.persist();
   }
 
-  async get(tabId: number): Promise<PrefetchEntry | null> {
+  async get(tabId: number, url?: string): Promise<PrefetchEntry | null> {
     const results = await this.load();
     const result = results.find((item) => item.tabId === tabId) ?? null;
     if (!result) {
@@ -50,6 +51,10 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
     }
     if (this.isExpired(result)) {
       await this.delete(tabId);
+      return null;
+    }
+    // If a URL is provided, verify it matches the cached entry to prevent stale results
+    if (url !== undefined && result.url !== url) {
       return null;
     }
     return result;

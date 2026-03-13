@@ -547,6 +547,12 @@ export class TabManager {
       tab.title = update.title;
     }
     if (update.url !== undefined) {
+      // Clear stale AI content when the tab navigates to a new URL
+      if (tab.url !== update.url) {
+        tab.summary = undefined;
+        tab.translation = undefined;
+        tab.content = undefined;
+      }
       tab.url = update.url;
       tab.isIgnored = this.isDomainIgnored(update.url);
     }

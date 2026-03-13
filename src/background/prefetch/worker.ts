@@ -4,6 +4,7 @@ import { detectLanguage, isTranslationNeeded } from '../../shared/utils/language
 
 interface PrefetchResult {
   tabId: number;
+  url: string;
   summary?: string;
   translation?: string;
   generatedAt: number;
@@ -11,7 +12,7 @@ interface PrefetchResult {
 
 export interface PrefetchResultStore {
   save(result: PrefetchResult): Promise<void>;
-  get(tabId: number): Promise<PrefetchResult | null>;
+  get(tabId: number, url?: string): Promise<PrefetchResult | null>;
   delete(tabId: number): Promise<void>;
   prune(): Promise<void>;
 }
@@ -205,6 +206,7 @@ export class PrefetchWorker {
 
     await this.resultStore.save({
       tabId: job.tabId,
+      url: tab.url,
       summary,
       translation,
       generatedAt: Date.now(),
