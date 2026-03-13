@@ -1,7 +1,7 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
-import { Subject, Subscription, of, EMPTY, from } from 'rxjs';
+import { Subject, Subscription, EMPTY, from } from 'rxjs';
 import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
 import { BrowserAdapter } from "../shared/utils/browser";
 // === process5 sub5: デフォルト音声選択ロジックの改善 ===
@@ -19,8 +19,6 @@ import {
   MIN_CHUNK_SIZE_GENERAL,
   CHUNK_COUNT_WARNING_THRESHOLD,
   MAX_CHUNK_RETRIES,
-  CHUNK_RETRY_WAIT_MS,
-  CHUNK_GAP_WARNING_THRESHOLD_MS,
 } from "../shared/constants";
 
 interface TTSEngineOptions {

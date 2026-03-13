@@ -29,7 +29,7 @@ class ContentScript {
     });
   }
 
-  private async handleMessage(message: MessageType, sender: chrome.runtime.MessageSender): Promise<any> {
+  private async handleMessage(message: MessageType, _sender: chrome.runtime.MessageSender): Promise<any> {
     switch (message.type) {
       case 'EXTRACT_TEXT':
         return this.extractText(message.tabId);
