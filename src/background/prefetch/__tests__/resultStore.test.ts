@@ -32,7 +32,7 @@ describe('PrefetchResultStoreImpl', () => {
 
   it('saves and retrieves results', async () => {
     const store = createStore();
-    await store.save({ tabId: 1, summary: 's', translation: 't', generatedAt: now() });
+    await store.save({ tabId: 1, url: 'https://example.com/1', summary: 's', translation: 't', generatedAt: now() });
     const saved = mockStorage.set.mock.calls[0][0].prefetch_results.results[0];
     expect(saved.tabId).toBe(1);
   });
@@ -40,13 +40,13 @@ describe('PrefetchResultStoreImpl', () => {
   it('prunes entries beyond limit', async () => {
     const store = createStore({
       results: [
-        { tabId: 1, summary: 'old', generatedAt: now() - 10 },
-        { tabId: 2, summary: 'older', generatedAt: now() - 20 },
-        { tabId: 3, summary: 'oldest', generatedAt: now() - 30 },
+        { tabId: 1, url: 'https://example.com/1', summary: 'old', generatedAt: now() - 10 },
+        { tabId: 2, url: 'https://example.com/2', summary: 'older', generatedAt: now() - 20 },
+        { tabId: 3, url: 'https://example.com/3', summary: 'oldest', generatedAt: now() - 30 },
       ],
     });
 
-    await store.save({ tabId: 4, summary: 'new', generatedAt: now() });
+    await store.save({ tabId: 4, url: 'https://example.com/4', summary: 'new', generatedAt: now() });
     const calls = mockStorage.set.mock.calls;
     const saved = calls[calls.length - 1]?.[0].prefetch_results.results;
     expect(saved).toHaveLength(3);
@@ -56,15 +56,47 @@ describe('PrefetchResultStoreImpl', () => {
   it('drops stale entries during prune', async () => {
     const store = createStore({
       results: [
-        { tabId: 1, summary: 'fresh', generatedAt: now() - 5_000 },
-        { tabId: 2, summary: 'stale', generatedAt: now() - 900_000 },
+        { tabId: 1, url: 'https://example.com/1', summary: 'fresh', generatedAt: now() - 5_000 },
+        { tabId: 2, url: 'https://example.com/2', summary: 'stale', generatedAt: now() - 900_000 },
       ],
     });
     await store.prune();
     const calls = mockStorage.set.mock.calls;
     const saved = calls[calls.length - 1]?.[0].prefetch_results.results;
     expect(saved).toEqual([
-      { tabId: 1, summary: 'fresh', generatedAt: now() - 5_000 },
+      { tabId: 1, url: 'https://example.com/1', summary: 'fresh', generatedAt: now() - 5_000 },
     ]);
+  });
+
+  it('returns null when URL does not match cached entry', async () => {
+    const store = createStore({
+      results: [
+        { tabId: 1, url: 'https://example.com/original', summary: 'cached', generatedAt: now() },
+      ],
+    });
+    const result = await store.get(1, 'https://example.com/different');
+    expect(result).toBeNull();
+  });
+
+  it('returns entry when URL matches cached entry', async () => {
+    const store = createStore({
+      results: [
+        { tabId: 1, url: 'https://example.com/page', summary: 'cached', generatedAt: now() },
+      ],
+    });
+    const result = await store.get(1, 'https://example.com/page');
+    expect(result).not.toBeNull();
+    expect(result?.summary).toBe('cached');
+  });
+
+  it('returns entry without URL verification when url param is omitted', async () => {
+    const store = createStore({
+      results: [
+        { tabId: 1, url: 'https://example.com/page', summary: 'cached', generatedAt: now() },
+      ],
+    });
+    const result = await store.get(1);
+    expect(result).not.toBeNull();
+    expect(result?.summary).toBe('cached');
   });
 });

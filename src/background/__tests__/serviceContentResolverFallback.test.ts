@@ -211,4 +211,45 @@ describe('createContentResolver fallback', () => {
     expect(result.summary).toBeUndefined();
     expect(result.content).toBe(baseTab.content);
   });
+
+  it('should pass summaryWaitMode to waitForPrefetch', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
+    const tabWithSummary = { ...baseTab, summary: 'Prefetched summary' };
+    tabManager.addTab(tabWithSummary);
+
+    const settingsWithWaitMode: AiSettings = {
+      ...aiSettingsEnabled,
+      summaryWaitMode: 'skip',
+    };
+    StorageManager.getAiSettings.mockResolvedValue(settingsWithWaitMode);
+
+    const resolver = (orchestrator as any).createContentResolver;
+    await resolver(tabWithSummary);
+
+    // Verify waitForPrefetch was called with the waitMode from settings
+    expect(prefetcher.waitForPrefetch).toHaveBeenCalledWith(
+      42,
+      expect.any(Number),
+      'skip'
+    );
+  });
+
+  it('should default to wait mode when summaryWaitMode is not set', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
+    const tabWithSummary = { ...baseTab, summary: 'Prefetched summary' };
+    tabManager.addTab(tabWithSummary);
+
+    // aiSettingsEnabled has no summaryWaitMode set
+    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+
+    const resolver = (orchestrator as any).createContentResolver;
+    await resolver(tabWithSummary);
+
+    // Should default to 'wait' when not specified
+    expect(prefetcher.waitForPrefetch).toHaveBeenCalledWith(
+      42,
+      expect.any(Number),
+      'wait'
+    );
+  });
 });

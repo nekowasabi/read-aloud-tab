@@ -228,6 +228,101 @@ describe('PrefetchScheduler', () => {
     });
   });
 
+  describe('dynamic prefetch ahead', () => {
+    it('should prefetch up to 3 tabs ahead when summaryWaitMode is "wait"', () => {
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel });
+      scheduler.setSummaryWaitMode('wait');
+
+      const status = baseStatus();
+      status.currentIndex = 0;
+      status.tabs = [makeTab(1), makeTab(2), makeTab(3), makeTab(4), makeTab(5)];
+      status.totalCount = 5;
+
+      scheduler.handleStatusUpdate(status);
+
+      // currentタブ(1) + 次の3タブ(2,3,4) = 4件enqueue
+      expect(enqueue).toHaveBeenCalledTimes(4);
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 2 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 3 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 4 }));
+      expect(enqueue).not.toHaveBeenCalledWith(expect.objectContaining({ tabId: 5 }));
+    });
+
+    it('should prefetch only 1 tab ahead when summaryWaitMode is "skip"', () => {
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel });
+      scheduler.setSummaryWaitMode('skip');
+
+      const status = baseStatus();
+      status.currentIndex = 0;
+      status.tabs = [makeTab(1), makeTab(2), makeTab(3), makeTab(4), makeTab(5)];
+      status.totalCount = 5;
+
+      scheduler.handleStatusUpdate(status);
+
+      // currentタブ(1) + 次の1タブ(2) = 2件enqueue（デフォルト動作）
+      expect(enqueue).toHaveBeenCalledTimes(2);
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 2 }));
+    });
+
+    it('should default to 1 tab ahead when summaryWaitMode is not set', () => {
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel });
+      // setSummaryWaitMode not called
+
+      const status = baseStatus();
+      status.currentIndex = 0;
+      status.tabs = [makeTab(1), makeTab(2), makeTab(3)];
+      status.totalCount = 3;
+
+      scheduler.handleStatusUpdate(status);
+
+      // currentタブ(1) + 次の1タブ(2) = 2件
+      expect(enqueue).toHaveBeenCalledTimes(2);
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 2 }));
+    });
+
+    it('should update maxPrefetchAhead dynamically when setSummaryWaitMode is called', () => {
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel });
+
+      const status = baseStatus();
+      status.currentIndex = 0;
+      status.tabs = [makeTab(1), makeTab(2), makeTab(3), makeTab(4)];
+      status.totalCount = 4;
+
+      // Initially skip mode: 2件
+      scheduler.handleStatusUpdate(status);
+      expect(enqueue).toHaveBeenCalledTimes(2);
+      enqueue.mockClear();
+
+      // Tab 1,2 を完了させてcleared状態に
+      scheduler.clearScheduled(1);
+      scheduler.clearScheduled(2);
+      // cooldown を避けるためにmockTimer使用なしで直接clearCooldownはできないため
+      // 新しいタブセットでテスト
+
+      // wait mode に切り替え: 4件になるはず（cooldown中は除外）
+      scheduler.setSummaryWaitMode('wait');
+      const status2 = baseStatus();
+      status2.currentIndex = 0;
+      status2.tabs = [makeTab(10), makeTab(11), makeTab(12), makeTab(13), makeTab(14)];
+      status2.totalCount = 5;
+
+      scheduler.handleStatusUpdate(status2);
+      // 10 + 11,12,13 = 4件
+      expect(enqueue).toHaveBeenCalledTimes(4);
+    });
+  });
+
   describe('cooldown after clearScheduled', () => {
     beforeEach(() => {
       jest.useFakeTimers();

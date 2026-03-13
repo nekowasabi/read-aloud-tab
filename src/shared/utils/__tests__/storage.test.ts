@@ -423,6 +423,7 @@ describe('StorageManager - AI Settings', () => {
         summaryPrompt: 'summary',
         translationPrompt: 'translation',
         openRouterProvider: '',
+        summaryWaitMode: 'wait',
       };
 
       mockStorage.sync.get.mockResolvedValue({
@@ -449,6 +450,7 @@ describe('StorageManager - AI Settings', () => {
         summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
+        summaryWaitMode: 'wait',
       });
     });
   });
@@ -503,6 +505,7 @@ describe('StorageManager - AI Settings', () => {
         summaryPrompt: 'summary',
         translationPrompt: 'translation',
         openRouterProvider: '',
+        summaryWaitMode: 'skip',
       };
 
       const result = StorageManager.validateAiSettings(validSettings);
@@ -525,6 +528,7 @@ describe('StorageManager - AI Settings', () => {
         summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
+        summaryWaitMode: 'wait',
       });
     });
 
@@ -539,6 +543,7 @@ describe('StorageManager - AI Settings', () => {
         summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
         translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
+        summaryWaitMode: 'wait',
       });
     });
 
@@ -597,6 +602,61 @@ describe('StorageManager - AI Settings', () => {
       expect(result.openRouterApiKey).toBe('');
       expect(result.openRouterModel).toBe('meta-llama/llama-3.2-1b-instruct');
       expect(result.enableAiSummary).toBe(true);
+    });
+  });
+
+  describe('summaryWaitMode フィールドの検証', () => {
+    describe('DEFAULT_AI_SETTINGS にデフォルト値が含まれる', () => {
+      it('デフォルトのsummaryWaitModeは "wait" である', async () => {
+        const mockStorage = getMockBrowserStorage();
+        mockStorage.sync.get.mockResolvedValue({});
+
+        const result = await StorageManager.getAiSettings();
+
+        expect(result.summaryWaitMode).toBe('wait');
+      });
+    });
+
+    describe('validateAiSettings でのsummaryWaitMode検証', () => {
+      it('有効な値 "wait" を保持する', () => {
+        const settings: Partial<AiSettings> = {
+          summaryWaitMode: 'wait',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.summaryWaitMode).toBe('wait');
+      });
+
+      it('有効な値 "skip" を保持する', () => {
+        const settings: Partial<AiSettings> = {
+          summaryWaitMode: 'skip',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.summaryWaitMode).toBe('skip');
+      });
+
+      it('未定義の場合はデフォルト値 "wait" になる', () => {
+        const settings: Partial<AiSettings> = {
+          openRouterApiKey: 'test-key',
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.summaryWaitMode).toBe('wait');
+      });
+
+      it('無効な値の場合はデフォルト値 "wait" になる', () => {
+        const settings: Partial<AiSettings> = {
+          summaryWaitMode: 'invalid' as any,
+        };
+
+        const result = StorageManager.validateAiSettings(settings);
+
+        expect(result.summaryWaitMode).toBe('wait');
+      });
     });
   });
 
