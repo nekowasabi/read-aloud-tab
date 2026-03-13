@@ -618,6 +618,113 @@ describe('Service Worker Port Handling', () => {
   });
 
   describe('Process 50 Red prep', () => {
-    it.todo('runtime port router 抽出後も offscreen heartbeat gap 検知契約を維持する');
+    it('runtime port router 抽出後も offscreen heartbeat gap 検知契約を維持する', async () => {
+      const logger = {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+      };
+
+      const contractOrchestrator = new BackgroundOrchestrator({
+        tabManager: mockTabManager,
+        chrome: mockChrome,
+        logger,
+      });
+
+      await contractOrchestrator.initialize();
+
+      const onConnectListener =
+        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+
+      const port = {
+        name: 'offscreen-keepalive',
+        onMessage: { addListener: jest.fn() },
+        onDisconnect: { addListener: jest.fn() },
+      };
+
+      onConnectListener(port);
+
+      const messageListener = port.onMessage.addListener.mock.calls[0][0];
+      const baseTime = 1_000_000;
+
+      // 1st heartbeat: Date.now() をモックして基準時刻を確立
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(baseTime);
+      messageListener({
+        type: 'OFFSCREEN_HEARTBEAT',
+        timestamp: baseTime,
+      } as OffscreenHeartbeatMessage);
+      logger.warn.mockClear();
+
+      // 2nd heartbeat: 40秒後（>30秒閾値）→ warn ログが必ず発火することを検証
+      dateSpy.mockReturnValue(baseTime + 40_000);
+      messageListener({
+        type: 'OFFSCREEN_HEARTBEAT',
+        timestamp: baseTime + 40_000,
+      } as OffscreenHeartbeatMessage);
+
+      dateSpy.mockRestore();
+
+      const gapWarn = logger.warn.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' &&
+          (call[0].includes('gap') || call[0].includes('Gap'))
+      );
+      expect(gapWarn).toBeDefined();
+    });
+
+    it('Router via Port: popup port の QUEUE_REMOVE が tabManager.removeTab に委譲される', async () => {
+      const removeTab = jest.fn().mockResolvedValue(undefined);
+      const tabManagerWithRemove = { ...mockTabManager, removeTab };
+
+      const contractOrchestrator = new BackgroundOrchestrator({
+        tabManager: tabManagerWithRemove,
+        chrome: mockChrome,
+        logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+      });
+      await contractOrchestrator.initialize();
+
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const port = {
+        name: 'popup',
+        onMessage: { addListener: jest.fn() },
+        onDisconnect: { addListener: jest.fn() },
+        postMessage: jest.fn(),
+      };
+      onConnectListener(port);
+
+      const portMessageListener = port.onMessage.addListener.mock.calls[0][0];
+      await portMessageListener({ type: 'QUEUE_REMOVE', payload: { tabId: 5 } });
+
+      expect(removeTab).toHaveBeenCalledWith(5);
+    });
+
+    it('Router via Port: popup port の REQUEST_QUEUE_STATE が tabManager.getSnapshot の結果を返す', async () => {
+      const contractOrchestrator = new BackgroundOrchestrator({
+        tabManager: mockTabManager,
+        chrome: mockChrome,
+        logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+      });
+      await contractOrchestrator.initialize();
+
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const port = {
+        name: 'popup',
+        onMessage: { addListener: jest.fn() },
+        onDisconnect: { addListener: jest.fn() },
+        postMessage: jest.fn(),
+      };
+      onConnectListener(port);
+
+      const portMessageListener = port.onMessage.addListener.mock.calls[0][0];
+      await portMessageListener({ type: 'REQUEST_QUEUE_STATE' });
+
+      expect(port.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'QUEUE_COMMAND_RESULT',
+          payload: expect.objectContaining({ command: 'REQUEST_QUEUE_STATE' }),
+        })
+      );
+    });
   });
 });

@@ -512,6 +512,79 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
   });
 
   describe('Process 50 Red prep', () => {
-    it.todo('offscreen bridge 抽出後も START/PAUSE/RESUME/STOP の forward 契約を維持する');
+    it('offscreen bridge 抽出後も START/PAUSE/RESUME/STOP の forward 契約を維持する', async () => {
+      const mockTab = {
+        tabId: 1,
+        url: 'https://example.com',
+        title: 'Contract Test',
+        content: 'Contract test content',
+        isIgnored: false,
+      };
+
+      tabManager.getSnapshot = jest.fn().mockReturnValue({
+        tabs: [mockTab],
+        currentIndex: 0,
+        status: 'idle',
+        settings: { rate: 1, pitch: 1, volume: 1, voice: null },
+        totalCount: 1,
+        activeTabId: null,
+      });
+
+      const orchestrator = new BackgroundOrchestrator({ tabManager, chrome: mockChrome });
+      await orchestrator.initialize();
+
+      const messageHandler = mockRuntime.onMessage.addListener.mock.calls[0][0];
+
+      // START → OFFSCREEN_TTS_START
+      mockRuntime.sendMessage.mockClear();
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'start' } }, {}, jest.fn());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OFFSCREEN_TTS_START' })
+      );
+
+      // PAUSE → OFFSCREEN_TTS_PAUSE
+      mockRuntime.sendMessage.mockClear();
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'pause' } }, {}, jest.fn());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OFFSCREEN_TTS_PAUSE' })
+      );
+
+      // RESUME → OFFSCREEN_TTS_RESUME
+      mockRuntime.sendMessage.mockClear();
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'resume' } }, {}, jest.fn());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OFFSCREEN_TTS_RESUME' })
+      );
+
+      // STOP → OFFSCREEN_TTS_STOP
+      mockRuntime.sendMessage.mockClear();
+      messageHandler({ type: 'QUEUE_CONTROL', payload: { action: 'stop' } }, {}, jest.fn());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OFFSCREEN_TTS_STOP' })
+      );
+    });
+
+    it('Router Delegation: QUEUE_REMOVE が onMessage 経由で tabManager.removeTab に委譲される', async () => {
+      const removeTab = jest.fn().mockResolvedValue(undefined);
+      const tabManagerWithRemove = { ...tabManager, removeTab } as any;
+
+      const orchestrator = new BackgroundOrchestrator({
+        tabManager: tabManagerWithRemove,
+        chrome: mockChrome,
+      });
+      await orchestrator.initialize();
+
+      const messageHandler = mockRuntime.onMessage.addListener.mock.calls[0][0];
+      const sendResponse = jest.fn();
+
+      messageHandler({ type: 'QUEUE_REMOVE', payload: { tabId: 7 } }, {}, sendResponse);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(removeTab).toHaveBeenCalledWith(7);
+    });
   });
 });

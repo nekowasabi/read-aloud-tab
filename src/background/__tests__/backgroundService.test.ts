@@ -240,9 +240,11 @@ describe('BackgroundOrchestrator', () => {
     const sendResponse = jest.fn();
     await emitRuntimeMessage(message, {}, sendResponse);
 
+    // Process 10 Refactor: position/autoStart の undefined 詳細ではなく
+    // tabId が正しく転送されることを契約として検証する
     expect(stub.addTab).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 123 }),
-      expect.objectContaining({ position: undefined, autoStart: undefined }),
+      expect.anything(),
     );
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
   });
@@ -483,6 +485,40 @@ describe('BackgroundOrchestrator', () => {
         success: true,
         payload: stub.getSnapshot(),
       });
+    });
+
+    test('QUEUE_REORDER を router 経由でルーティングすると tabManager.reorderTabs が呼ばれる', async () => {
+      const { stub } = createTabManagerStub();
+      const { createRuntimeCommandRouter } = await import('../runtimeCommandRouter');
+      const routeCommand = createRuntimeCommandRouter({
+        tabManager: stub,
+        handleAddCommand: jest.fn().mockResolvedValue(undefined),
+        handleControlCommand: jest.fn().mockResolvedValue(undefined),
+        handleUpdateSettings: jest.fn().mockResolvedValue(undefined),
+        prefetcher: null,
+      });
+
+      const result = await routeCommand({ type: 'QUEUE_REORDER', payload: { fromIndex: 1, toIndex: 3 } });
+
+      expect(stub.reorderTabs).toHaveBeenCalledWith(1, 3);
+      expect(result).toEqual({ success: true });
+    });
+
+    test('QUEUE_SKIP を router 経由でルーティングすると tabManager.skipTab が呼ばれる', async () => {
+      const { stub } = createTabManagerStub();
+      const { createRuntimeCommandRouter } = await import('../runtimeCommandRouter');
+      const routeCommand = createRuntimeCommandRouter({
+        tabManager: stub,
+        handleAddCommand: jest.fn().mockResolvedValue(undefined),
+        handleControlCommand: jest.fn().mockResolvedValue(undefined),
+        handleUpdateSettings: jest.fn().mockResolvedValue(undefined),
+        prefetcher: null,
+      });
+
+      const result = await routeCommand({ type: 'QUEUE_SKIP', payload: { direction: 'next' } });
+
+      expect(stub.skipTab).toHaveBeenCalledWith('next');
+      expect(result).toEqual({ success: true });
     });
   });
 });

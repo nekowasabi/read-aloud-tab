@@ -24,6 +24,9 @@ import { StorageManager } from '../shared/utils/storage';
 import { BrowserAdapter } from '../shared/utils/browser';
 import { getIgnoredDomains } from '../shared/utils/storage';
 import { createRuntimeCommandRouter, RuntimeCommandResult } from './runtimeCommandRouter';
+import { OffscreenBridge } from './offscreenBridge';
+import { LifecycleSupervisor } from './lifecycleSupervisor';
+import { createContentResolver } from './contentResolver';
 
 interface ChromeRuntimePort {
   name: string;
@@ -35,7 +38,7 @@ interface ChromeRuntimePort {
 interface ChromeRuntimeLike {
   onMessage: { addListener: (listener: RuntimeMessageListener) => void };
   onConnect: { addListener: (listener: (port: ChromeRuntimePort) => void) => void };
-  sendMessage: (message: QueueBroadcastMessage | OffscreenCommandMessage) => Promise<unknown> | void;
+  sendMessage: (message: QueueBroadcastMessage | Record<string, unknown>) => Promise<unknown> | void;
   lastError?: chrome.runtime.LastError | null;
   connect?: (options: { name: string }) => ChromeRuntimePort;
 }
@@ -105,6 +108,8 @@ export class BackgroundOrchestrator {
   };
   private lastOffscreenHeartbeatAt: number | null = null;
   private readonly routeRuntimeCommand: (message: QueueCommandMessage) => Promise<RuntimeCommandResult>;
+  private readonly offscreenBridge!: OffscreenBridge;
+  private readonly lifecycleSupervisor!: LifecycleSupervisor;
 
   constructor(options: BackgroundOrchestratorOptions) {
     this.tabManager = options.tabManager;
@@ -126,136 +131,60 @@ export class BackgroundOrchestrator {
       throw new Error('Chrome runtime APIs are not available');
     }
 
+    // OffscreenBridge: encapsulates Chrome Offscreen Document communication
+    this.offscreenBridge = new OffscreenBridge({
+      runtime: {
+        sendMessage: (msg) => this.chrome.runtime.sendMessage(msg as any),
+      },
+      logger: this.logger,
+    });
+
+    // LifecycleSupervisor: manages all listener registration/teardown
+    this.lifecycleSupervisor = new LifecycleSupervisor({
+      logger: this.logger,
+      runtime: this.chrome.runtime as any,
+      commands: this.chrome.commands ?? null,
+      alarms: this.chrome.alarms ?? null,
+      storage: (typeof chrome !== 'undefined' && chrome.storage?.onChanged)
+        ? (chrome.storage as any)
+        : null,
+      tabManager: this.tabManager,
+      onRuntimeMessage: this.handleRuntimeMessage,
+      onRuntimeConnect: (port: any) => this.handleRuntimePort(port),
+      onStatusUpdate: (payload) => this.handleStatusUpdate(payload),
+      onProgressUpdate: (payload) => this.broadcastProgress(payload),
+      onError: (payload) => this.broadcastError(payload),
+      onCommandEvent: (event) => this.handleCommandEvent(event),
+      onAlarm: (alarm) => {
+        void this.keepAliveController?.handleAlarm(alarm.name).catch((error) => {
+          this.logger.warn('BackgroundOrchestrator: keep-alive alarm handling failed', error);
+        });
+      },
+      onShortcutCommand: (command) => {
+        this.handleShortcutCommand(command).catch((error) => {
+          this.logger.error('BackgroundOrchestrator: shortcut command failed', error);
+        });
+      },
+      onDeveloperModeChanged: () => {
+        this.refreshDeveloperMode().catch((error) => {
+          this.logger.warn('BackgroundOrchestrator: failed to refresh developer mode', error);
+        });
+      },
+    });
+
     // Set content resolver for TabManager to enable AI prefetch waiting
-    this.tabManager.setContentResolver(this.createContentResolver);
+    this.tabManager.setContentResolver(
+      createContentResolver({
+        logger: this.logger,
+        prefetcher: this.prefetcher,
+        aiProcessor: this.aiProcessor,
+        tabLookup: this.tabManager,
+        emitContentRequest: (tabId) => this.emitContentRequest(tabId, 'missing'),
+      }),
+    );
   }
 
-  /**
-   * Content resolver for TabManager
-   * Waits for AI summary/translation if enabled before returning.
-   * If prefetch isn't ready yet, returns null immediately and triggers
-   * prefetch in the background so the caller can use fallback content.
-   */
-  private createContentResolver = async (tab: TabInfo) => {
-    // If no content, request extraction first
-    if (!tab.content || tab.content.trim().length === 0) {
-      this.emitContentRequest(tab.tabId, 'missing');
-      return null;
-    }
-
-    // If AI prefetcher is available and enabled, wait for summary/translation
-    if (this.prefetcher) {
-      try {
-        const settings = await import('../shared/utils/storage').then((m) => m.StorageManager.getAiSettings());
-        const needsAi = settings.enableAiSummary === true || settings.enableAiTranslation === true;
-
-        if (needsAi) {
-          this.logger.info(`[BackgroundOrchestrator] Waiting for AI prefetch for tab ${tab.tabId}...`);
-          const waitMode = settings.summaryWaitMode || 'wait';
-
-          // Non-blocking: if prefetch isn't started for this tab, return immediately
-          // so the caller can proceed with fallback content
-          const isPrefetchComplete = this.prefetcher.isPrefetchComplete(tab.tabId);
-          if (!isPrefetchComplete) {
-            // Prefetch is in progress - use a bounded wait based on waitMode
-            const boundedTimeout = waitMode === 'wait' ? 120000 : 30000;
-            const waitResult = await this.prefetcher.waitForPrefetch(
-              tab.tabId,
-              boundedTimeout,
-              waitMode
-            );
-
-            if (waitResult === 'completed') {
-              this.logger.info(`[BackgroundOrchestrator] AI prefetch completed for tab ${tab.tabId}`);
-            } else if (waitResult === 'failed') {
-              this.logger.warn(`[BackgroundOrchestrator] AI prefetch failed for tab ${tab.tabId}, using best available content`);
-            } else {
-              this.logger.warn(
-                `[BackgroundOrchestrator] AI prefetch timed out for tab ${tab.tabId}, attempting on-demand fallback`
-              );
-            }
-
-            const updatedTab = this.tabManager.getTabById(tab.tabId) ?? tab;
-            const waitWasCancelled = this.prefetcher.consumeCancelledWait(tab.tabId);
-            const shouldFallbackToOnDemandSummary =
-              settings.enableAiSummary === true &&
-              !updatedTab.summary &&
-              !waitWasCancelled &&
-              (waitResult !== 'failed' || waitMode === 'wait');
-
-            if (shouldFallbackToOnDemandSummary) {
-              this.logger.info(`[BackgroundOrchestrator] Fallback: checking result store for tab ${tab.tabId}`);
-              // Pass the tab URL to verify cached result is for the current page
-              const cachedResult = await this.prefetcher.getResultFromStore(tab.tabId, tab.url);
-              if (cachedResult?.summary) {
-                this.logger.info(`[BackgroundOrchestrator] Found cached result in store for tab ${tab.tabId}`);
-                // Only apply if URL still matches (guard against navigation)
-                const currentTab = this.tabManager.getTabById(tab.tabId);
-                if (!currentTab || currentTab.url === tab.url) {
-                  updatedTab.summary = cachedResult.summary;
-                  if (cachedResult.translation) {
-                    updatedTab.translation = cachedResult.translation;
-                  }
-                }
-              } else if (this.aiProcessor) {
-                this.logger.info(`[BackgroundOrchestrator] Fallback: triggering on-demand summarization for tab ${tab.tabId}`);
-                try {
-                  const processed = await this.aiProcessor.processContent(updatedTab, settings);
-                  if (processed) {
-                    updatedTab.summary = processed;
-                  }
-                } catch (fallbackError) {
-                  this.logger.warn('[BackgroundOrchestrator] On-demand fallback failed', fallbackError);
-                }
-              }
-            }
-
-            const hasSummary = !!updatedTab.summary;
-            const hasTranslation = !!updatedTab.translation;
-            this.logger.debug?.(`[BackgroundOrchestrator] Prefetch result: summary=${hasSummary}, translation=${hasTranslation}`);
-            return {
-              content: updatedTab.content,
-              summary: updatedTab.summary,
-              translation: updatedTab.translation,
-              extractedAt: updatedTab.extractedAt,
-            };
-          } else {
-            // Prefetch already complete (or not needed) - return current tab state
-            const currentTab = this.tabManager.getTabById(tab.tabId) ?? tab;
-            const hasSummary = !!currentTab.summary;
-            const hasTranslation = !!currentTab.translation;
-            this.logger.debug?.(`[BackgroundOrchestrator] Prefetch already complete for tab ${tab.tabId}: summary=${hasSummary}, translation=${hasTranslation}`);
-            return {
-              content: currentTab.content,
-              summary: currentTab.summary,
-              translation: currentTab.translation,
-              extractedAt: currentTab.extractedAt,
-            };
-          }
-        }
-      } catch (error) {
-        this.logger.warn('[BackgroundOrchestrator] Failed to check AI settings or wait for prefetch', error);
-      }
-    }
-
-    // Return current content (fallback or AI disabled)
-    const hasSummary = !!tab.summary;
-    const hasTranslation = !!tab.translation;
-    this.logger.debug?.(`[BackgroundOrchestrator] Resolved content for tab ${tab.tabId}: summary=${hasSummary}, translation=${hasTranslation}`);
-    return {
-      content: tab.content,
-      summary: tab.summary,
-      translation: tab.translation,
-      extractedAt: tab.extractedAt,
-    };
-  };
-
   private emitContentRequest(tabId: number, _reason: 'missing' | 'stale'): void {
-    {
-      // This is a workaround - we need to emit to command listeners
-      // but we don't have direct access here
-    }
-    // Send directly via tabs API
     try {
       this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
     } catch (error) {
@@ -270,12 +199,8 @@ export class BackgroundOrchestrator {
 
     await this.refreshDeveloperMode();
     await this.tabManager.initialize();
-    await this.setupOffscreenDocument();
-    this.registerTabManagerListeners();
-    this.registerRuntimeListeners();
-    this.registerCommandListeners();
-    this.registerKeepAliveListeners();
-    this.registerDeveloperModeListener();
+    await this.offscreenBridge.setup();
+    this.lifecycleSupervisor.registerAll();
 
     // Check if playback needs to be resumed after Service Worker restart
     const snapshot = this.tabManager.getSnapshot();
@@ -283,8 +208,8 @@ export class BackgroundOrchestrator {
       this.logger.info('[BackgroundOrchestrator] Service Worker restarted during playback, attempting to resume...');
 
       // For Chrome with Offscreen API, ensure offscreen document is available
-      if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
-        const hasOffscreen = await this.ensureOffscreenDocument();
+      if (this.offscreenBridge.isAvailable()) {
+        const hasOffscreen = await this.offscreenBridge.ensure();
         if (!hasOffscreen) {
           this.logger.warn('[BackgroundOrchestrator] Cannot resume: offscreen document unavailable');
           // TabManager will handle state sync in resumePlaybackIfNeeded
@@ -302,135 +227,20 @@ export class BackgroundOrchestrator {
     this.initialized = true;
   }
 
-  /**
-   * Setup Offscreen Document for Chrome Manifest V3
-   * Offscreen Document provides persistent context for Web Speech API
-   */
-  private async setupOffscreenDocument(): Promise<void> {
-    if (BrowserAdapter.getBrowserType() !== 'chrome' || !BrowserAdapter.isFeatureSupported('offscreen')) {
-      this.logger.info('[BackgroundOrchestrator] Offscreen API not available, skipping setup');
+  /** Handles TabManager status updates: broadcasts + keep-alive control */
+  private handleStatusUpdate(payload: QueueStatusPayload): void {
+    this.broadcastStatus(payload);
+    if (!this.keepAliveController) {
       return;
     }
-
-    try {
-      const hasOffscreen = await BrowserAdapter.hasOffscreenDocument();
-      if (hasOffscreen) {
-        this.logger.info('[BackgroundOrchestrator] Offscreen document already exists');
-        return;
-      }
-
-      await BrowserAdapter.createOffscreenDocument(
-        'offscreen.html',
-        ['AUDIO_PLAYBACK' as any],
-        'Text-to-speech audio playback'
-      );
-      this.logger.info('[BackgroundOrchestrator] Offscreen document created successfully');
-    } catch (error) {
-      this.logger.error('[BackgroundOrchestrator] Failed to setup offscreen document', error);
-      // Don't throw - allow initialization to continue without offscreen support
-      this.logger.warn('[BackgroundOrchestrator] Continuing without offscreen document support');
-    }
-  }
-
-  /**
-   * Ensure Offscreen Document exists, recreating if necessary.
-   * This is critical after Service Worker restarts.
-   * @returns true if offscreen document is available, false otherwise
-   */
-  private async ensureOffscreenDocument(): Promise<boolean> {
-    if (BrowserAdapter.getBrowserType() !== 'chrome' || !BrowserAdapter.isFeatureSupported('offscreen')) {
-      return false;
-    }
-
-    try {
-      const hasOffscreen = await BrowserAdapter.hasOffscreenDocument();
-      if (hasOffscreen) {
-        return true;
-      }
-
-      this.logger.warn('[BackgroundOrchestrator] Offscreen document missing, recreating...');
-      await BrowserAdapter.createOffscreenDocument(
-        'offscreen.html',
-        ['AUDIO_PLAYBACK' as any],
-        'Text-to-speech audio playback'
-      );
-      this.logger.info('[BackgroundOrchestrator] Offscreen document recreated successfully');
-      return true;
-    } catch (error) {
-      this.logger.error('[BackgroundOrchestrator] Failed to ensure offscreen document', error);
-      return false;
-    }
-  }
-
-  private registerTabManagerListeners(): void {
-    const statusHandler = (payload: QueueStatusPayload) => {
-      this.broadcastStatus(payload);
-      if (!this.keepAliveController) {
-        return;
-      }
-
-      if (payload.status === 'reading') {
-        void this.keepAliveController.startHeartbeat('queue').catch((error) => {
-          this.logger.warn('BackgroundOrchestrator: failed to start keep-alive heartbeat', error);
-        });
-      } else {
-        void this.keepAliveController.stopHeartbeat('queue').catch((error) => {
-          this.logger.warn('BackgroundOrchestrator: failed to stop keep-alive heartbeat', error);
-        });
-      }
-    };
-
-    this.unsubscribeFns.push(this.tabManager.addStatusListener(statusHandler));
-    this.unsubscribeFns.push(this.tabManager.addProgressListener((payload) => this.broadcastProgress(payload)));
-    this.unsubscribeFns.push(this.tabManager.addErrorListener((payload) => this.broadcastError(payload)));
-    this.unsubscribeFns.push(this.tabManager.addCommandListener((event) => this.handleCommandEvent(event)));
-  }
-
-  private registerRuntimeListeners(): void {
-    this.chrome.runtime.onMessage.addListener(this.handleRuntimeMessage);
-    this.chrome.runtime.onConnect.addListener((port) => this.handleRuntimePort(port));
-  }
-
-  private registerCommandListeners(): void {
-    if (!this.chrome.commands?.onCommand) {
-      return;
-    }
-
-    this.chrome.commands.onCommand.addListener((command) => {
-      this.handleShortcutCommand(command).catch((error) => {
-        this.logger.error('BackgroundOrchestrator: shortcut command failed', error);
+    if (payload.status === 'reading') {
+      void this.keepAliveController.startHeartbeat('queue').catch((error) => {
+        this.logger.warn('BackgroundOrchestrator: failed to start keep-alive heartbeat', error);
       });
-    });
-  }
-
-  private registerKeepAliveListeners(): void {
-    if (!this.keepAliveController || !this.chrome.alarms?.onAlarm?.addListener) {
-      return;
-    }
-
-    const handler = (alarm: { name: string }) => {
-      void this.keepAliveController?.handleAlarm(alarm.name).catch((error) => {
-        this.logger.warn('BackgroundOrchestrator: keep-alive alarm handling failed', error);
+    } else {
+      void this.keepAliveController.stopHeartbeat('queue').catch((error) => {
+        this.logger.warn('BackgroundOrchestrator: failed to stop keep-alive heartbeat', error);
       });
-    };
-
-    this.chrome.alarms.onAlarm.addListener(handler);
-    this.unsubscribeFns.push(() => this.chrome.alarms?.onAlarm?.removeListener?.(handler));
-  }
-
-  private registerDeveloperModeListener(): void {
-    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName !== 'sync' || !changes[STORAGE_KEYS.DEVELOPER_MODE]) {
-        return;
-      }
-      this.refreshDeveloperMode().catch((error) => {
-        this.logger.warn('BackgroundOrchestrator: failed to refresh developer mode', error);
-      });
-    };
-
-    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged?.addListener) {
-      chrome.storage.onChanged.addListener(listener);
-      this.unsubscribeFns.push(() => chrome.storage.onChanged.removeListener(listener));
     }
   }
 
@@ -532,10 +342,10 @@ export class BackgroundOrchestrator {
       logger: this.logger,
       onKeepAlive: async () => {
         // Ensure offscreen document exists if we're using Chrome with offscreen
-        if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
+        if (this.offscreenBridge.isAvailable()) {
           const snapshot = this.tabManager.getSnapshot();
           if (snapshot.status === 'reading') {
-            const hasOffscreen = await this.ensureOffscreenDocument();
+            const hasOffscreen = await this.offscreenBridge.ensure();
             if (!hasOffscreen) {
               this.logger.error('[KeepAlive] Offscreen document missing during reading state, pausing playback');
               this.tabManager.pause();
@@ -829,28 +639,46 @@ export class BackgroundOrchestrator {
   }
 
   private async handleControlCommand(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
-    // For Chrome with Offscreen API, handle tab preparation before forwarding
-    if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
-      // For 'start' action, ensure tab is ready before forwarding
+    // For Chrome with Offscreen API, handle tab preparation then delegate to OffscreenBridge
+    if (this.offscreenBridge.isAvailable()) {
       if (action === 'start') {
         const addedTabId = await this.ensureActiveTabInQueue();
-
-        // If a new tab was added, wait for content extraction
         if (addedTabId !== null) {
           this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
-
           const contentReady = await this.waitForTabContent(addedTabId);
-
           if (!contentReady) {
             this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
-            // Don't proceed - let onTabUpdated handle auto-resume
             return;
           }
         }
       }
 
-      // Forward to offscreen document
-      await this.forwardToOffscreen(action);
+      // Build start payload when needed
+      if (action === 'start') {
+        const snapshot = this.tabManager.getSnapshot();
+        const currentTab = snapshot.tabs[snapshot.currentIndex];
+        if (!currentTab) {
+          throw new Error('No tab available to start playback');
+        }
+        try {
+          await this.offscreenBridge.sendCommand('start', {
+            tab: currentTab as any,
+            settings: snapshot.settings,
+          });
+        } catch (error) {
+          this.tabManager.pause();
+          throw error;
+        }
+      } else {
+        try {
+          await this.offscreenBridge.sendCommand(action);
+        } catch (error) {
+          if (action === 'resume') {
+            this.tabManager.pause();
+          }
+          throw error;
+        }
+      }
       return;
     }
 
@@ -858,20 +686,14 @@ export class BackgroundOrchestrator {
     switch (action) {
       case 'start': {
         const addedTabId = await this.ensureActiveTabInQueue();
-
-        // If a new tab was added, wait for content extraction
         if (addedTabId !== null) {
           this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
-
           const contentReady = await this.waitForTabContent(addedTabId);
-
           if (!contentReady) {
             this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
-            // Don't call processNext yet - let onTabUpdated handle auto-resume
             return;
           }
         }
-
         await this.tabManager.processNext();
         break;
       }
@@ -890,101 +712,18 @@ export class BackgroundOrchestrator {
   }
 
   /**
-   * Forward TTS control commands to Offscreen Document.
-   * Ensures offscreen document exists before sending commands.
-   */
-  private async forwardToOffscreen(action: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
-    // Ensure offscreen document exists (recreate if necessary after Service Worker restart)
-    const hasOffscreen = await this.ensureOffscreenDocument();
-    if (!hasOffscreen) {
-      this.logger.error(`[BackgroundOrchestrator] Cannot forward ${action}: offscreen document unavailable`);
-      // Sync TabManager state to paused if offscreen is unavailable
-      if (action === 'start' || action === 'resume') {
-        this.tabManager.pause();
-      }
-      throw new Error('Offscreen document unavailable');
-    }
-
-    let message: OffscreenCommandMessage;
-
-    switch (action) {
-      case 'start': {
-        const snapshot = this.tabManager.getSnapshot();
-        const currentTab = snapshot.tabs[snapshot.currentIndex];
-        if (!currentTab) {
-          throw new Error('No tab available to start playback');
-        }
-        message = {
-          type: 'OFFSCREEN_TTS_START',
-          payload: {
-            tab: currentTab as any,
-            settings: snapshot.settings,
-          },
-        };
-        break;
-      }
-      case 'pause':
-        message = { type: 'OFFSCREEN_TTS_PAUSE' };
-        break;
-      case 'resume':
-        message = { type: 'OFFSCREEN_TTS_RESUME' };
-        break;
-      case 'stop':
-        message = { type: 'OFFSCREEN_TTS_STOP' };
-        break;
-      default:
-        throw new Error(`Unsupported offscreen action: ${action}`);
-    }
-
-    // Retry logic for message sending
-    let lastError: Error | null = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        await this.chrome.runtime.sendMessage(message);
-        this.logger.info(`[BackgroundOrchestrator] Forwarded ${action} command to offscreen (attempt ${attempt})`);
-        return; // Success
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        this.logger.warn(`[BackgroundOrchestrator] Failed to forward ${action} (attempt ${attempt}/2)`, error);
-
-        if (attempt < 2) {
-          // On first failure, try to recreate offscreen document
-          this.logger.warn('[BackgroundOrchestrator] Attempting to recreate offscreen document...');
-          const recreated = await this.ensureOffscreenDocument();
-          if (!recreated) {
-            break; // No point retrying if recreation failed
-          }
-          // Small delay before retry
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-    }
-
-    // All retries failed
-    this.logger.error(`[BackgroundOrchestrator] Failed to forward ${action} after 2 attempts`, lastError);
-    // Sync TabManager state to paused on failure
-    if (action === 'start' || action === 'resume') {
-      this.tabManager.pause();
-    }
-    throw lastError || new Error(`Failed to forward ${action} to offscreen`);
-  }
-
-  /**
    * Handle settings update - forward to both TabManager and Offscreen Document
    */
   private async handleUpdateSettings(settings: any): Promise<void> {
-    // Update TabManager settings
     await this.tabManager.updateSettings(settings);
 
-    // For Chrome with Offscreen API, also forward to offscreen document
-    if (BrowserAdapter.getBrowserType() === 'chrome' && BrowserAdapter.isFeatureSupported('offscreen')) {
-      const message: OffscreenCommandMessage = {
-        type: 'OFFSCREEN_TTS_UPDATE_SETTINGS',
-        payload: { settings },
-      };
-
+    if (this.offscreenBridge.isAvailable()) {
       try {
-        await this.chrome.runtime.sendMessage(message);
+        const message = { type: 'OFFSCREEN_TTS_UPDATE_SETTINGS', payload: { settings } };
+        const result = this.chrome.runtime.sendMessage(message as any);
+        if (result instanceof Promise) {
+          await result;
+        }
         this.logger.info('[BackgroundOrchestrator] Forwarded settings update to offscreen');
       } catch (error) {
         this.logger.error('[BackgroundOrchestrator] Failed to forward settings to offscreen', error);
