@@ -1,7 +1,7 @@
 import { TabManager } from '../tabManager';
 import type { PlaybackController } from '../tabManager';
 import type { TabInfo, ReadingQueue, TTSSettings } from '../../shared/types';
-import { loadQueue, saveQueue } from '../../shared/utils/storage';
+import { loadQueue, saveQueue, getIgnoredDomains } from '../../shared/utils/storage';
 
 jest.mock('../aiProcessor', () => ({
   AiProcessor: jest.fn().mockImplementation(() => ({
@@ -38,6 +38,7 @@ describe('TabManager.handlePlaybackEnd - タブ自動除去', () => {
   let mockResolveContent: jest.Mock;
   const mockedLoadQueue = loadQueue as jest.MockedFunction<typeof loadQueue>;
   const mockedSaveQueue = saveQueue as jest.MockedFunction<typeof saveQueue>;
+  const mockedGetIgnoredDomains = getIgnoredDomains as jest.MockedFunction<typeof getIgnoredDomains>;
 
   const initialSettings: TTSSettings = {
     rate: 1,
@@ -202,5 +203,38 @@ describe('TabManager.handlePlaybackEnd - タブ自動除去', () => {
 
     // 保存が呼ばれている
     expect(mockedSaveQueue).toHaveBeenCalled();
+  });
+
+  test('完了後は次の読み上げ可能タブへ遷移し、無視タブはスキップする', async () => {
+    mockedGetIgnoredDomains.mockResolvedValue(['ignored.example']);
+
+    const initialQueue: ReadingQueue = {
+      tabs: [
+        createTab(101),
+        {
+          ...createTab(202),
+          url: 'https://ignored.example/202',
+        },
+        createTab(303),
+      ],
+      currentIndex: 0,
+      status: 'reading',
+      settings: initialSettings,
+    };
+    mockedLoadQueue.mockResolvedValue({ ...initialQueue, tabs: [...initialQueue.tabs] });
+
+    await manager.initialize();
+    await startPlayback();
+    expect(playback.start).toHaveBeenCalledTimes(1);
+    expect(playback.start.mock.calls[0][0].tabId).toBe(101);
+
+    if (onEndCallback) {
+      onEndCallback();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(playback.start).toHaveBeenCalledTimes(2);
+    expect(playback.start.mock.calls[1][0].tabId).toBe(303);
   });
 });

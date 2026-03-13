@@ -1,5 +1,6 @@
 import type { QueueStatus } from '../types/queue';
 import type { TabInfo } from '../types/tab';
+import type { QueueMessage } from '../types';
 import { createSerializedTab } from '../types/helpers';
 
 describe('Shared types structure', () => {
@@ -19,5 +20,13 @@ describe('Shared types structure', () => {
   test('QueueStatus type includes paused state', () => {
     const status: QueueStatus = 'paused';
     expect(status).toBe('paused');
+  });
+
+  test('QueueMessage は summary wait 制御コマンドを受け取れる', () => {
+    const setWaitMode: QueueMessage = { type: 'SET_SUMMARY_WAIT_MODE', mode: 'wait' };
+    const skipWait: QueueMessage = { type: 'SKIP_SUMMARY_WAIT', tabId: 1 };
+
+    expect(setWaitMode.type).toBe('SET_SUMMARY_WAIT_MODE');
+    expect(skipWait.type).toBe('SKIP_SUMMARY_WAIT');
   });
 });

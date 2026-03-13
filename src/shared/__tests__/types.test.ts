@@ -96,19 +96,17 @@ describe('Type Definitions', () => {
       const addMessage: QueueMessage = {
         type: 'QUEUE_ADD',
         payload: {
-          tabInfo: {
+          tab: {
             tabId: 789,
             url: 'https://new.com',
             title: 'New Page',
-            isIgnored: false,
-            extractedAt: new Date(),
           },
           position: 'end',
         },
       };
 
       expect(addMessage.type).toBe('QUEUE_ADD');
-      expect(addMessage.payload.tabInfo.tabId).toBe(789);
+      expect(addMessage.payload.tab.tabId).toBe(789);
       expect(addMessage.payload.position).toBe('end');
     });
 

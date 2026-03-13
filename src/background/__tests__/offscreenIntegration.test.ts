@@ -510,4 +510,8 @@ describe('BackgroundOrchestrator Offscreen Integration', () => {
       expect(true).toBe(true);
     });
   });
+
+  describe('Process 50 Red prep', () => {
+    it.todo('offscreen bridge 抽出後も START/PAUSE/RESUME/STOP の forward 契約を維持する');
+  });
 });

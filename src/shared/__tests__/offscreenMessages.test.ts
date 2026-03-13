@@ -1,4 +1,10 @@
-import { isOffscreenCommandMessage, isOffscreenBroadcastMessage, OffscreenCommandMessage, OffscreenBroadcastMessage } from '../messages';
+import {
+  isOffscreenCommandMessage,
+  isOffscreenBroadcastMessage,
+  isOffscreenHeartbeatMessage,
+  OffscreenCommandMessage,
+  OffscreenBroadcastMessage,
+} from '../messages';
 import { TabInfo, TTSSettings } from '../types';
 
 describe('Offscreen Messages', () => {
@@ -84,6 +90,22 @@ describe('Offscreen Messages', () => {
       expect(isOffscreenBroadcastMessage(123)).toBe(false);
       expect(isOffscreenBroadcastMessage({})).toBe(false);
       expect(isOffscreenBroadcastMessage({ type: 'INVALID_TYPE' })).toBe(false);
+    });
+  });
+
+  describe('isOffscreenHeartbeatMessage', () => {
+    it('should return true for OFFSCREEN_HEARTBEAT with numeric timestamp', () => {
+      expect(
+        isOffscreenHeartbeatMessage({
+          type: 'OFFSCREEN_HEARTBEAT',
+          timestamp: Date.now(),
+        }),
+      ).toBe(true);
+    });
+
+    it('should return false when timestamp is missing or invalid', () => {
+      expect(isOffscreenHeartbeatMessage({ type: 'OFFSCREEN_HEARTBEAT' })).toBe(false);
+      expect(isOffscreenHeartbeatMessage({ type: 'OFFSCREEN_HEARTBEAT', timestamp: '123' })).toBe(false);
     });
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import { ReadingQueue, TabInfo, AiSettings } from '../../types';
+import { STORAGE_KEYS } from '../../types';
 
 // Mock BrowserAdapter first
 const mockBrowserStorage = {
@@ -224,6 +225,15 @@ describe('Storage Utilities - Developer Mode', () => {
   it('should save developer mode flag to storage', async () => {
     await StorageManager.setDeveloperMode(true);
     expect(getMockBrowserStorage().sync.set).toHaveBeenCalledWith({ developerMode: true });
+  });
+});
+
+describe('Storage Utilities - Key compatibility', () => {
+  test('Storage key values remain backward compatible', () => {
+    expect(STORAGE_KEYS.AI_SETTINGS).toBe('ai_settings');
+    expect(STORAGE_KEYS.IGNORED_DOMAINS).toBe('ignoredDomains');
+    expect(STORAGE_KEYS.READING_QUEUE).toBe('readingQueue');
+    expect(STORAGE_KEYS.SCHEMA_VERSION).toBe('schemaVersion');
   });
 });
 

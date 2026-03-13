@@ -616,4 +616,8 @@ describe('Service Worker Port Handling', () => {
       expect(gapWarning).toBeUndefined();
     });
   });
+
+  describe('Process 50 Red prep', () => {
+    it.todo('runtime port router 抽出後も offscreen heartbeat gap 検知契約を維持する');
+  });
 });

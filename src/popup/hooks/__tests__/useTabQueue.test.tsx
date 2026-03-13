@@ -121,4 +121,44 @@ describe('useTabQueue', () => {
     expect(screen.getByTestId('state').textContent).toBe('connected');
     jest.useRealTimers();
   });
+
+  test('古いポートの切断イベントでは再接続を再実行しない', () => {
+    jest.useFakeTimers();
+    const first = createPort();
+    const second = createPort();
+    const third = createPort();
+    (chrome.runtime.connect as jest.Mock)
+      .mockReturnValueOnce(first.port)
+      .mockReturnValueOnce(second.port)
+      .mockReturnValueOnce(third.port);
+
+    const TestComponent = () => {
+      const { connectionState } = useTabQueue();
+      return <div data-testid="state">{connectionState}</div>;
+    };
+
+    render(<TestComponent />);
+
+    const firstDisconnectHandler = first.port.onDisconnect.addListener.mock.calls[0][0];
+    act(() => {
+      firstDisconnectHandler();
+    });
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('state').textContent).toBe('connected');
+
+    // 既に置き換わった古いポートの切断通知が再度来ても再接続しないこと
+    act(() => {
+      firstDisconnectHandler();
+    });
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    jest.useRealTimers();
+  });
 });

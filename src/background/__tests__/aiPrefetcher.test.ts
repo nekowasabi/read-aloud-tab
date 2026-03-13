@@ -270,6 +270,23 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
       jest.useRealTimers();
     });
 
+    it('should honor cancelWait even when the skip request arrives before waiting starts', async () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+      prefetcher.cancelWait(42);
+
+      const result = await prefetcher.waitForPrefetch(42, 300);
+
+      expect(result).toBe('timed_out');
+      expect(prefetcher.consumeCancelledWait(42)).toBe(true);
+      expect(prefetcher.consumeCancelledWait(42)).toBe(false);
+    });
+
     it('should complete before extended timeout when status becomes completed in waitMode "wait"', async () => {
       jest.useFakeTimers();
 

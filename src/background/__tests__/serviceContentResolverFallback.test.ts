@@ -198,11 +198,14 @@ describe('createContentResolver fallback', () => {
     expect(result.summary).toBe('Delayed summary from fallback');
   });
 
-  it('should not trigger on-demand summarization when prefetch fails explicitly', async () => {
+  it('should not trigger on-demand summarization when prefetch fails explicitly in skip mode', async () => {
     prefetcher.waitForPrefetch.mockResolvedValue('failed');
     const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
     tabManager.addTab(tabNoSummary);
-    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+    StorageManager.getAiSettings.mockResolvedValue({
+      ...aiSettingsEnabled,
+      summaryWaitMode: 'skip',
+    });
 
     const resolver = (orchestrator as any).createContentResolver;
     const result = await resolver(tabNoSummary);
@@ -251,5 +254,53 @@ describe('createContentResolver fallback', () => {
       expect.any(Number),
       'wait'
     );
+  });
+
+  it('should use wait timeout=120000 and skip timeout=30000', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('completed');
+    const tab = { ...baseTab, summary: 'Prefetched summary' };
+    tabManager.addTab(tab);
+
+    StorageManager.getAiSettings.mockResolvedValue({ ...aiSettingsEnabled, summaryWaitMode: 'wait' });
+    const resolver = (orchestrator as any).createContentResolver;
+    await resolver(tab);
+    expect(prefetcher.waitForPrefetch).toHaveBeenLastCalledWith(42, 120000, 'wait');
+
+    prefetcher.waitForPrefetch.mockClear();
+    StorageManager.getAiSettings.mockResolvedValue({ ...aiSettingsEnabled, summaryWaitMode: 'skip' });
+    await resolver(tab);
+    expect(prefetcher.waitForPrefetch).toHaveBeenLastCalledWith(42, 30000, 'skip');
+  });
+
+  it('should treat missing summaryWaitMode as wait for failed prefetch fallback', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('failed');
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    tabManager.addTab(tabNoSummary);
+    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+    aiProcessor.processContent.mockResolvedValue('Fallback summary on default wait');
+
+    const resolver = (orchestrator as any).createContentResolver;
+    const result = await resolver(tabNoSummary);
+
+    expect(aiProcessor.processContent).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 42 }),
+      aiSettingsEnabled
+    );
+    expect(result.summary).toBe('Fallback summary on default wait');
+  });
+
+  it('should not trigger on-demand summarization when wait was cancelled explicitly', async () => {
+    prefetcher.waitForPrefetch.mockResolvedValue('timed_out');
+    (prefetcher as any).consumeCancelledWait = jest.fn().mockReturnValue(true);
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    tabManager.addTab(tabNoSummary);
+    StorageManager.getAiSettings.mockResolvedValue(aiSettingsEnabled);
+
+    const resolver = (orchestrator as any).createContentResolver;
+    const result = await resolver(tabNoSummary);
+
+    expect((prefetcher as any).consumeCancelledWait).toHaveBeenCalledWith(42);
+    expect(aiProcessor.processContent).not.toHaveBeenCalled();
+    expect(result.summary).toBeUndefined();
   });
 });

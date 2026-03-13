@@ -131,6 +131,7 @@ describe('BackgroundOrchestrator', () => {
     const emitRuntimeMessage = async (message: any, sender: any = {}, sendResponse: any = jest.fn()) => {
       const promises = runtimeMessageListeners.map((listener) => listener(message, sender, sendResponse));
       await Promise.all(promises);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       return sendResponse;
     };
 
@@ -260,6 +261,22 @@ describe('BackgroundOrchestrator', () => {
     await emitRuntimeMessage(message, {}, sendResponse);
 
     expect(stub.clearQueue).toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
+  });
+
+  test('SKIP_SUMMARY_WAIT メッセージで対象タブの待機をキャンセルする', async () => {
+    const { stub } = createTabManagerStub();
+    const prefetcher = {
+      cancelWait: jest.fn(),
+    } as any;
+    const { chromeLike, emitRuntimeMessage } = createChromeLike();
+    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, prefetcher });
+    await orchestrator.initialize();
+
+    const sendResponse = jest.fn();
+    await emitRuntimeMessage({ type: 'SKIP_SUMMARY_WAIT', tabId: 777 }, {}, sendResponse);
+
+    expect(prefetcher.cancelWait).toHaveBeenCalledWith(777);
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
   });
 
@@ -439,5 +456,33 @@ describe('BackgroundOrchestrator', () => {
       payload: { statuses: [], updatedAt: 42 },
     });
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
+  });
+
+  describe('Process 50 Red prep', () => {
+    test('runtime message router を service 本体から分離しても command/broadcast 経路が維持される', async () => {
+      const { stub } = createTabManagerStub();
+      const { createRuntimeCommandRouter } = await import('../runtimeCommandRouter');
+      const addCommand = jest.fn().mockResolvedValue(undefined);
+      const controlCommand = jest.fn().mockResolvedValue(undefined);
+      const updateSettings = jest.fn().mockResolvedValue(undefined);
+
+      const routeCommand = createRuntimeCommandRouter({
+        tabManager: stub,
+        handleAddCommand: addCommand,
+        handleControlCommand: controlCommand,
+        handleUpdateSettings: updateSettings,
+        prefetcher: null,
+      });
+
+      const clearResult = await routeCommand({ type: 'QUEUE_CLEAR' });
+      const snapshotResult = await routeCommand({ type: 'REQUEST_QUEUE_STATE' });
+
+      expect(stub.clearQueue).toHaveBeenCalledTimes(1);
+      expect(clearResult).toEqual({ success: true });
+      expect(snapshotResult).toEqual({
+        success: true,
+        payload: stub.getSnapshot(),
+      });
+    });
   });
 });
