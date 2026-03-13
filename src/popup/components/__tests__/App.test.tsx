@@ -233,4 +233,51 @@ describe('App integration', () => {
       expect.objectContaining({ url: 'https://example2.com' })
     );
   });
+
+  describe('Process 100 Red prep', () => {
+    it('bootstrap後にアクティブタブ情報が addTab 引数として渡される', async () => {
+      render(<App />);
+      const addButton = await screen.findByRole('button', { name: /キューに追加/ });
+      fireEvent.click(addButton);
+      expect(mockAddTab).toHaveBeenCalledWith(
+        expect.objectContaining({ tabId: 99, url: 'https://active.com' })
+      );
+    });
+
+    it('all-tabs 追加で chrome:// と about: が除外される', async () => {
+      mockBrowserQuery.mockResolvedValue([
+        { id: 10, url: 'https://valid.com', title: 'Valid' },
+        { id: 11, url: 'chrome://newtab', title: 'New Tab' },
+        { id: 12, url: 'about:blank', title: 'Blank' },
+      ]);
+      render(<App />);
+      const btn = await screen.findByRole('button', { name: /すべてのタブを追加/ });
+      fireEvent.click(btn);
+      await screen.findByText(/1個のタブをキューに追加しました/);
+      expect(mockAddTab).toHaveBeenCalledTimes(1);
+      expect(mockAddTab).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://valid.com' }));
+    });
+
+    it('ignored domains フィルタリングが usePopupBootstrap 抽出後も動作する', async () => {
+      storage.getIgnoredDomains.mockResolvedValue(['blocked.com']);
+      mockBrowserQuery.mockResolvedValue([
+        { id: 20, url: 'https://ok.com', title: 'OK' },
+        { id: 21, url: 'https://blocked.com/page', title: 'Blocked' },
+      ]);
+      render(<App />);
+      const btn = await screen.findByRole('button', { name: /すべてのタブを追加/ });
+      fireEvent.click(btn);
+      await screen.findByText(/1個のタブをキューに追加しました/);
+      expect(mockAddTab).not.toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://blocked.com/page' })
+      );
+    });
+
+    it('再生コントロールが useQueueCommands 抽出後も control(start) を呼ぶ', async () => {
+      render(<App />);
+      const playBtn = await screen.findByRole('button', { name: /再生/ });
+      fireEvent.click(playBtn);
+      expect(mockControl).toHaveBeenCalledWith('start');
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { render, screen, act, fireEvent, cleanup } from '@testing-library/react';
 import useTabQueue from '../useTabQueue';
 import { QueueStatusPayload } from '../../../shared/messages';
 
@@ -137,7 +137,7 @@ describe('useTabQueue', () => {
       return <div data-testid="state">{connectionState}</div>;
     };
 
-    render(<TestComponent />);
+    const { unmount } = render(<TestComponent />);
 
     const firstDisconnectHandler = first.port.onDisconnect.addListener.mock.calls[0][0];
     act(() => {
@@ -159,6 +159,50 @@ describe('useTabQueue', () => {
     });
 
     expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    // 次テストへの残留を防ぐため明示的にアンマウント
+    act(() => { unmount(); });
     jest.useRealTimers();
+  });
+
+  describe('Process 100 Red prep', () => {
+    beforeEach(() => {
+      // 前テストの fake timer 残留・レンダリング残留をリセット
+      jest.useRealTimers();
+      cleanup();
+    });
+
+    it('アンマウント後はポート切断イベントが来ても再接続を行わない', () => {
+      jest.useFakeTimers();
+      const { port } = createPort();
+      (chrome.runtime.connect as jest.Mock).mockReturnValue(port);
+      const TestComponent = () => {
+        useTabQueue();
+        return null;
+      };
+      const { unmount } = render(<TestComponent />);
+      // アンマウント前に切断ハンドラを取得（cleanup順序の観点）
+      const disconnectHandler = port.onDisconnect.addListener.mock.calls[0]?.[0];
+      act(() => { unmount(); });
+      if (disconnectHandler) {
+        // アンマウント後の切断通知で再接続が起きないこと
+        act(() => { disconnectHandler(); });
+        act(() => { jest.advanceTimersByTime(1000); });
+      }
+      // connect は初回マウント時の1回のみ（再接続なし）
+      expect(chrome.runtime.connect).toHaveBeenCalledTimes(1);
+      jest.useRealTimers();
+    });
+
+    it('useQueuePort 抽出後も onMessage と onDisconnect 双方にリスナーが登録される', () => {
+      const { port } = createPort();
+      (chrome.runtime.connect as jest.Mock).mockReturnValue(port);
+      const TestComponent = () => {
+        useTabQueue();
+        return null;
+      };
+      render(<TestComponent />);
+      expect(port.onMessage.addListener).toHaveBeenCalled();
+      expect(port.onDisconnect.addListener).toHaveBeenCalled();
+    });
   });
 });
