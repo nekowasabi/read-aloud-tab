@@ -550,4 +550,45 @@ describe('OptionsApp', () => {
       });
     });
   });
+
+  describe('Process 100 Red prep', () => {
+    beforeEach(() => {
+      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.getIgnoredDomains.mockResolvedValue([]);
+    });
+
+    it('エクスポートJSONに openRouterApiKey の実値が含まれない', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
+        openRouterApiKey: 'secret-key',
+      });
+      render(<OptionsApp />);
+      const exportBtn = await screen.findByRole('button', { name: 'エクスポート' });
+      fireEvent.click(exportBtn);
+      const blob = getExportedBlob();
+      const text = await readBlobText(blob);
+      const json = JSON.parse(text);
+      expect(json.aiSettings.openRouterApiKey).toBe('');
+    });
+
+    it('settingsTransfer 抽出後もインポートボタンが存在する', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue(baseAiSettings);
+      render(<OptionsApp />);
+      const importBtn = await screen.findByRole('button', { name: 'インポート' });
+      expect(importBtn).toBeInTheDocument();
+    });
+
+    it('useConnectionTest 抽出後も接続テストボタンが testConnection を呼ぶ', async () => {
+      storage.StorageManager.getAiSettings.mockResolvedValue({
+        ...baseAiSettings,
+        openRouterApiKey: 'test-key',
+      });
+      const mockTestConnection = jest.fn().mockResolvedValue({ success: true, message: '接続成功' });
+      OpenRouterClient.mockImplementation(() => ({ testConnection: mockTestConnection }));
+      render(<OptionsApp />);
+      const testBtn = await screen.findByRole('button', { name: '接続テスト' });
+      fireEvent.click(testBtn);
+      await waitFor(() => expect(mockTestConnection).toHaveBeenCalled());
+    });
+  });
 });

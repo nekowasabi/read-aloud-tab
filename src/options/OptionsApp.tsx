@@ -1,62 +1,29 @@
-import React, { useEffect, useRef, useState } from 'react';
-import IgnoreListManager from '../popup/components/IgnoreListManager';
+import React, { useRef, useState } from 'react';
+import IgnoreListManager from './components/IgnoreListManager';
 import { StorageManager } from '../shared/utils/storage';
-import { getIgnoredDomains } from '../shared/utils/storage';
-import { STORAGE_KEYS, TTSSettings, AiSettings } from '../shared/types';
-import { OpenRouterClient } from '../shared/services/openrouter';
-import type { ConnectionTestResult } from '../shared/types/ai';
-
-interface ExportPayload {
-  version: number;
-  settings: TTSSettings;
-  ignoredDomains: string[];
-  aiSettings?: AiSettings;
-}
-
-const DEFAULT_SETTINGS: TTSSettings = {
-  rate: 1.0,
-  pitch: 1.0,
-  volume: 1.0,
-  voice: null,
-};
-
-const DEFAULT_AI_SETTINGS: AiSettings = StorageManager.validateAiSettings({});
+import { TTSSettings, AiSettings } from '../shared/types';
+import { useOptionsData } from './hooks/useOptionsData';
+import { useConnectionTest } from './hooks/useConnectionTest';
+import { exportSettings, importSettings, readFileAsText } from './services/settingsTransfer';
 
 export default function OptionsApp() {
-  const [settings, setSettings] = useState<TTSSettings>(DEFAULT_SETTINGS);
-  const [ignoredDomains, setIgnoredDomains] = useState<string[]>([]);
-  const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
+  const {
+    settings,
+    setSettings,
+    ignoredDomains,
+    setIgnoredDomains,
+    aiSettings,
+    setAiSettings,
+    developerMode,
+    setDeveloperMode,
+    isLoading,
+  } = useOptionsData();
+
+  const { isTestingConnection, connectionTestResult, runConnectionTest } = useConnectionTest();
+
   const [message, setMessage] = useState<string | null>(null);
-  const [isTestingConnection, setIsTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [developerMode, setDeveloperMode] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  const loadInitialData = async () => {
-    try {
-      const [loadedSettings, domains, loadedAiSettings, devModeFlag] = await Promise.all([
-        StorageManager.getSettings(),
-        getIgnoredDomains(),
-        StorageManager.getAiSettings(),
-        StorageManager.getDeveloperMode(),
-      ]);
-      setSettings(loadedSettings);
-      setIgnoredDomains(domains);
-      setAiSettings(loadedAiSettings);
-      setDeveloperMode(devModeFlag);
-    } catch (error) {
-      console.error('OptionsApp: failed to load data', error);
-      setMessage('設定の読み込みに失敗しました');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleSettingChange = async (key: keyof TTSSettings, value: number | string | null) => {
     const updated: TTSSettings = {
@@ -96,25 +63,7 @@ export default function OptionsApp() {
 
   const handleExport = async () => {
     try {
-      const payload: ExportPayload = {
-        version: 2,
-        settings,
-        ignoredDomains,
-        aiSettings: {
-          ...aiSettings,
-          openRouterApiKey: '', // セキュリティのためAPIキーは除外
-        },
-      };
-      const json = JSON.stringify(payload, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'read-aloud-tab-settings.json';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      await exportSettings(settings, ignoredDomains, aiSettings);
       setMessage('設定ファイルをダウンロードしました');
     } catch (error) {
       console.error('OptionsApp: failed to export data', error);
@@ -136,7 +85,13 @@ export default function OptionsApp() {
 
     try {
       const content = await readFileAsText(file);
-      await importFromJson(content);
+      const result = await importSettings(content);
+      setSettings(result.settings);
+      setIgnoredDomains(result.ignoredDomains);
+      if (result.aiSettings) {
+        setAiSettings(result.aiSettings);
+      }
+      setMessage('インポートが完了しました');
     } catch (error) {
       console.error('OptionsApp: failed to import data', error);
       setMessage('インポートに失敗しました。データ形式を確認してください');
@@ -144,34 +99,6 @@ export default function OptionsApp() {
       setIsImporting(false);
       event.target.value = '';
     }
-  };
-
-  const importFromJson = async (raw: string) => {
-    const parsed = JSON.parse(raw) as ExportPayload;
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Invalid data');
-    }
-
-    if (!parsed.settings || typeof parsed.settings !== 'object') {
-      throw new Error('Invalid settings data');
-    }
-
-    if (!Array.isArray(parsed.ignoredDomains)) {
-      throw new Error('Invalid ignored domains');
-    }
-
-    await StorageManager.saveSettings(parsed.settings);
-    await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
-
-    if (parsed.aiSettings) {
-      const validatedAi = StorageManager.validateAiSettings(parsed.aiSettings);
-      await StorageManager.saveAiSettings(validatedAi);
-      setAiSettings(validatedAi);
-    }
-
-    setSettings(parsed.settings);
-    setIgnoredDomains(parsed.ignoredDomains);
-    setMessage('インポートが完了しました');
   };
 
   const handleIgnoreListChange = (domains: string[]) => {
@@ -189,34 +116,6 @@ export default function OptionsApp() {
       setDeveloperMode(!enabled);
     }
   };
-
-  const handleConnectionTest = async () => {
-    if (!aiSettings.openRouterApiKey) {
-      setConnectionTestResult({
-        success: false,
-        error: 'APIキーを入力してください',
-      });
-      return;
-    }
-
-    setIsTestingConnection(true);
-    setConnectionTestResult(null);
-
-    try {
-      const client = new OpenRouterClient(aiSettings.openRouterApiKey, aiSettings.openRouterModel, aiSettings.openRouterProvider);
-      const result = await client.testConnection();
-      setConnectionTestResult(result);
-    } catch (error) {
-      console.error('OptionsApp: connection test failed', error);
-      setConnectionTestResult({
-        success: false,
-        error: error instanceof Error ? error.message : '接続テストに失敗しました',
-      });
-    } finally {
-      setIsTestingConnection(false);
-    }
-  };
-
 
   return (
     <div className="options-container">
@@ -418,7 +317,7 @@ export default function OptionsApp() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={handleConnectionTest}
+            onClick={() => runConnectionTest(aiSettings)}
             disabled={isTestingConnection || !aiSettings.openRouterApiKey}
           >
             接続テスト
@@ -489,12 +388,3 @@ export default function OptionsApp() {
     </div>
   );
 }
-
-const readFileAsText = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
-    reader.readAsText(file);
-  });
-};
