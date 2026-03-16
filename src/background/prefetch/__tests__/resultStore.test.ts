@@ -32,7 +32,13 @@ describe('PrefetchResultStoreImpl', () => {
 
   it('saves and retrieves results', async () => {
     const store = createStore();
-    await store.save({ tabId: 1, url: 'https://example.com/1', summary: 's', translation: 't', generatedAt: now() });
+    await store.save({
+      tabId: 1,
+      url: 'https://example.com/1',
+      summary: 's',
+      translation: 't',
+      generatedAt: now(),
+    });
     const saved = mockStorage.set.mock.calls[0][0].prefetch_results.results[0];
     expect(saved.tabId).toBe(1);
   });
@@ -46,7 +52,12 @@ describe('PrefetchResultStoreImpl', () => {
       ],
     });
 
-    await store.save({ tabId: 4, url: 'https://example.com/4', summary: 'new', generatedAt: now() });
+    await store.save({
+      tabId: 4,
+      url: 'https://example.com/4',
+      summary: 'new',
+      generatedAt: now(),
+    });
     const calls = mockStorage.set.mock.calls;
     const saved = calls[calls.length - 1]?.[0].prefetch_results.results;
     expect(saved).toHaveLength(3);
@@ -98,5 +109,46 @@ describe('PrefetchResultStoreImpl', () => {
     const result = await store.get(1);
     expect(result).not.toBeNull();
     expect(result?.summary).toBe('cached');
+  });
+
+  describe('clearAll()', () => {
+    it('clears in-memory cache and persists empty results to storage', async () => {
+      const store = createStore({
+        results: [
+          { tabId: 1, url: 'https://example.com/1', summary: 'cached', generatedAt: now() },
+          { tabId: 2, url: 'https://example.com/2', summary: 'cached2', generatedAt: now() },
+        ],
+      });
+
+      // Warm up cache
+      await store.get(1);
+
+      await store.clearAll();
+
+      // In-memory cache should be empty
+      expect((store as any).cache).toEqual([]);
+
+      // Storage should be updated with empty results
+      const lastSetCall = mockStorage.set.mock.calls[mockStorage.set.mock.calls.length - 1];
+      expect(lastSetCall[0]).toEqual({ prefetch_results: { results: [] } });
+    });
+
+    it('returns null after clearAll for previously cached entry', async () => {
+      const store = createStore({
+        results: [
+          { tabId: 1, url: 'https://example.com/page', summary: 'cached', generatedAt: now() },
+        ],
+      });
+
+      // Warm up cache
+      await store.get(1);
+
+      await store.clearAll();
+
+      // Subsequent get should return null (cache is empty, storage returns empty)
+      mockStorage.get.mockImplementation(async () => ({ prefetch_results: { results: [] } }));
+      const result = await store.get(1);
+      expect(result).toBeNull();
+    });
   });
 });

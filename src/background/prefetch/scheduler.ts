@@ -64,7 +64,7 @@ export class PrefetchScheduler {
     }
 
     const targets = this.collectTargets(payload);
-    this.reconcileSchedule(targets.map((tab) => tab.tabId));
+    this.reconcileSchedule(targets.map(tab => tab.tabId));
 
     targets.forEach((tab, index) => {
       // Only enqueue if not already scheduled and not in cooldown
@@ -97,6 +97,14 @@ export class PrefetchScheduler {
     this.cancelPrefetchForTab(tabId);
     this.enqueueJob({ tabId, priority: 0 });
     this.scheduled.add(tabId);
+  }
+
+  /**
+   * Reset all scheduling state (called on queue completion / full reset)
+   */
+  reset(): void {
+    this.scheduled.clear();
+    this.cooldownMap.clear();
   }
 
   /**

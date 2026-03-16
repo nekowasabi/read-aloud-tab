@@ -28,17 +28,21 @@ describe('PrefetchWorker', () => {
   } as AiSettings;
 
   const createWorker = () => {
-    const fetchTab = jest.fn<Promise<TabInfo | null>, [number]>
-      ((tabId) => Promise.resolve(makeTab({ tabId, content: `content-${tabId}` })));
+    const fetchTab = jest.fn<Promise<TabInfo | null>, [number]>(tabId =>
+      Promise.resolve(makeTab({ tabId, content: `content-${tabId}` }))
+    );
     const requestContent = jest.fn().mockResolvedValue(undefined);
     const getSettings = jest.fn<Promise<AiSettings>, []>(() => Promise.resolve(baseSettings));
-    const summarize = jest.fn<Promise<string>, [string]>(async (content) => `summary:${content}`);
-    const translate = jest.fn<Promise<string>, [string, string]>(async (text) => `translation:${text}`);
+    const summarize = jest.fn<Promise<string>, [string]>(async content => `summary:${content}`);
+    const translate = jest.fn<Promise<string>, [string, string]>(
+      async text => `translation:${text}`
+    );
     const resultStore = {
       save: jest.fn().mockResolvedValue(undefined),
       get: jest.fn().mockResolvedValue(null),
       delete: jest.fn().mockResolvedValue(undefined),
       prune: jest.fn().mockResolvedValue(undefined),
+      clearAll: jest.fn().mockResolvedValue(undefined),
     };
     const emitStatus = jest.fn();
     const applyUpdates = jest.fn().mockResolvedValue(undefined);
@@ -56,7 +60,17 @@ describe('PrefetchWorker', () => {
       translationTarget: 'en',
     });
 
-    return { worker, fetchTab, requestContent, getSettings, summarize, translate, resultStore, emitStatus, applyUpdates };
+    return {
+      worker,
+      fetchTab,
+      requestContent,
+      getSettings,
+      summarize,
+      translate,
+      resultStore,
+      emitStatus,
+      applyUpdates,
+    };
   };
 
   it('processes jobs sequentially and saves summary/translation', async () => {
@@ -70,9 +84,19 @@ describe('PrefetchWorker', () => {
     expect(summarize).toHaveBeenNthCalledWith(1, 'content-1');
     expect(translate).toHaveBeenNthCalledWith(1, 'summary:content-1', 'en');
     expect(summarize).toHaveBeenNthCalledWith(2, 'content-2');
-    expect(resultStore.save).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1, summary: 'summary:content-1' }));
-    expect(resultStore.save).toHaveBeenCalledWith(expect.objectContaining({ tabId: 2, summary: 'summary:content-2' }));
-    expect(applyUpdates).toHaveBeenCalledWith(1, expect.objectContaining({ summary: 'summary:content-1', translation: 'translation:summary:content-1' }));
+    expect(resultStore.save).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 1, summary: 'summary:content-1' })
+    );
+    expect(resultStore.save).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 2, summary: 'summary:content-2' })
+    );
+    expect(applyUpdates).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        summary: 'summary:content-1',
+        translation: 'translation:summary:content-1',
+      })
+    );
   });
 
   it('requests content when missing and retries after fetch', async () => {
@@ -102,5 +126,39 @@ describe('PrefetchWorker', () => {
     await worker.waitForIdle();
 
     expect(summarize).not.toHaveBeenCalled();
+  });
+
+  describe('reset()', () => {
+    it('clears queue and cancelled set, sets processing to false', () => {
+      const { worker } = createWorker();
+
+      // Add items to cancelled via cancel()
+      worker.cancel(30);
+      worker.cancel(31);
+
+      // reset should clear everything
+      worker.reset();
+
+      // After reset, cancelled items should not block new enqueue
+      // (we verify by checking that the worker is in a clean state)
+      expect((worker as any).queue).toHaveLength(0);
+      expect((worker as any).cancelled.size).toBe(0);
+      expect((worker as any).processing).toBe(false);
+    });
+
+    it('allows new jobs to be enqueued after reset without stale cancelled state', async () => {
+      const { worker } = createWorker();
+
+      // Cancel tabs to populate the cancelled set
+      worker.cancel(40);
+      worker.cancel(41);
+      expect((worker as any).cancelled.size).toBe(2);
+
+      // reset clears cancelled set so previously cancelled tabIds can run again
+      worker.reset();
+
+      expect((worker as any).cancelled.size).toBe(0);
+      expect((worker as any).queue).toHaveLength(0);
+    });
   });
 });

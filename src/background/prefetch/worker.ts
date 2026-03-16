@@ -15,6 +15,7 @@ export interface PrefetchResultStore {
   get(tabId: number, url?: string): Promise<PrefetchResult | null>;
   delete(tabId: number): Promise<void>;
   prune(): Promise<void>;
+  clearAll(): Promise<void>;
 }
 
 export type PrefetchState = 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
@@ -80,14 +81,23 @@ export class PrefetchWorker {
 
   cancel(tabId: number): void {
     this.cancelled.add(tabId);
-    this.queue.splice(0, this.queue.length, ...this.queue.filter((entry) => entry.tabId !== tabId));
+    this.queue.splice(0, this.queue.length, ...this.queue.filter(entry => entry.tabId !== tabId));
+  }
+
+  /**
+   * Reset all worker state (called on queue completion / full reset)
+   */
+  reset(): void {
+    this.queue.splice(0, this.queue.length);
+    this.cancelled.clear();
+    this.processing = false;
   }
 
   async waitForIdle(): Promise<void> {
     if (!this.processing && this.queue.length === 0) {
       return;
     }
-    await new Promise<void>((resolve) => this.idleResolvers.push(resolve));
+    await new Promise<void>(resolve => this.idleResolvers.push(resolve));
   }
 
   private resolveIdle(): void {
@@ -119,9 +129,13 @@ export class PrefetchWorker {
         }
         await this.runJob(next);
       })
-      .catch((error) => {
+      .catch(error => {
         this.logger.error('PrefetchWorker: job failed', error);
-        this.emitStatus({ tabId: next.tabId, state: 'failed', error: error instanceof Error ? error.message : String(error) });
+        this.emitStatus({
+          tabId: next.tabId,
+          state: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
       })
       .finally(() => {
         this.processing = false;

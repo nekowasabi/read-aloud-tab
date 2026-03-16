@@ -55,7 +55,10 @@ export class AiPrefetcher {
   private cachedSettingsTimestamp = 0;
   private clientCacheKey: string | null = null;
   private clientInstance: OpenRouterClient | null = null;
-  private storageChangeListener?: (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void;
+  private storageChangeListener?: (
+    changes: Record<string, chrome.storage.StorageChange>,
+    areaName: string
+  ) => void;
 
   constructor(options: AiPrefetcherOptions) {
     this.tabManager = options.tabManager;
@@ -65,13 +68,15 @@ export class AiPrefetcher {
     this.translationMaxTokens = options.translationMaxTokens ?? DEFAULT_TRANSLATION_MAX_TOKENS;
     this.translationTarget = options.translationTarget ?? 'ja';
     this.settingsTtlMs = options.settingsTtlMs ?? DEFAULT_SETTINGS_TTL;
-    this.broadcast = options.broadcast ?? ((message) => {
-      try {
-        chrome.runtime?.sendMessage?.(message);
-      } catch (error) {
-        this.logger.warn('AiPrefetcher: failed to broadcast status', error);
-      }
-    });
+    this.broadcast =
+      options.broadcast ??
+      (message => {
+        try {
+          chrome.runtime?.sendMessage?.(message);
+        } catch (error) {
+          this.logger.warn('AiPrefetcher: failed to broadcast status', error);
+        }
+      });
     this.storage = options.storage ?? chrome.storage;
 
     this.setupStorageChangeListener();
@@ -87,21 +92,21 @@ export class AiPrefetcher {
     });
 
     const worker = new PrefetchWorker({
-      fetchTab: async (tabId) => this.tabManager.getTabById(tabId),
-      requestContent: (tabId) => this.tabManager.requestContentForPrefetch(tabId),
+      fetchTab: async tabId => this.tabManager.getTabById(tabId),
+      requestContent: tabId => this.tabManager.requestContentForPrefetch(tabId),
       getSettings: () => this.ensureSettings(),
-      summarize: (content) => this.summarize(content),
+      summarize: content => this.summarize(content),
       translate: (text, target) => this.translate(text, target),
       resultStore,
-      emitStatus: (update) => this.handleStatusUpdate(update),
+      emitStatus: update => this.handleStatusUpdate(update),
       applyUpdates: (tabId, updates) => this.applyUpdates(tabId, updates),
       logger: this.logger,
       translationTarget: this.translationTarget,
     });
 
     const scheduler = new PrefetchScheduler({
-      enqueue: (job) => worker.enqueue(job),
-      cancel: (tabId) => worker.cancel(tabId),
+      enqueue: job => worker.enqueue(job),
+      cancel: tabId => worker.cancel(tabId),
       maxPrefetchAhead: this.maxPrefetchAhead,
       logger: this.logger,
     });
@@ -120,15 +125,19 @@ export class AiPrefetcher {
 
     this.unsubscribeStatus = this.tabManager.addStatusListener((payload: QueueStatusPayload) => {
       this.scheduler?.handleStatusUpdate(payload);
-      this.pruneStatusMap(payload);
+      if (payload.status === 'idle' && payload.tabs.length === 0) {
+        this.fullReset();
+      } else {
+        this.pruneStatusMap(payload);
+      }
     });
 
-    this.storage.local.get?.('prefetch_status', (items) => {
+    this.storage.local.get?.('prefetch_status', items => {
       const snapshot = items?.prefetch_status as PrefetchStatusSnapshot | undefined;
       if (!snapshot) {
         return;
       }
-      this.statusMap = new Map(snapshot.statuses.map((status) => [status.tabId, status]));
+      this.statusMap = new Map(snapshot.statuses.map(status => [status.tabId, status]));
       this.keepAliveDiagnostics = snapshot.diagnostics ?? null;
     });
   }
@@ -139,7 +148,11 @@ export class AiPrefetcher {
     this.scheduler = null;
     this.worker = null;
     this.statusMap.clear();
-    if (this.storageChangeListener && typeof chrome !== 'undefined' && chrome.storage?.onChanged?.removeListener) {
+    if (
+      this.storageChangeListener &&
+      typeof chrome !== 'undefined' &&
+      chrome.storage?.onChanged?.removeListener
+    ) {
       chrome.storage.onChanged.removeListener(this.storageChangeListener);
     }
   }
@@ -170,7 +183,9 @@ export class AiPrefetcher {
         this.clientInstance = null;
         this.clientCacheKey = null;
 
-        const newValue = changes[STORAGE_KEYS.AI_SETTINGS]?.newValue as { summaryWaitMode?: 'wait' | 'skip' } | undefined;
+        const newValue = changes[STORAGE_KEYS.AI_SETTINGS]?.newValue as
+          | { summaryWaitMode?: 'wait' | 'skip' }
+          | undefined;
         if (newValue?.summaryWaitMode === 'wait' || newValue?.summaryWaitMode === 'skip') {
           this.scheduler?.setSummaryWaitMode(newValue.summaryWaitMode);
         }
@@ -294,10 +309,14 @@ export class AiPrefetcher {
 
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(resolve, 100);
-          abortController.signal.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(new Error('aborted'));
-          }, { once: true });
+          abortController.signal.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(new Error('aborted'));
+            },
+            { once: true }
+          );
         });
       }
     } catch (err) {
@@ -317,7 +336,11 @@ export class AiPrefetcher {
 
   private async ensureSettings(): Promise<AiSettings> {
     const now = Date.now();
-    if (!this.cachedSettings || this.settingsTtlMs === 0 || now - this.cachedSettingsTimestamp > this.settingsTtlMs) {
+    if (
+      !this.cachedSettings ||
+      this.settingsTtlMs === 0 ||
+      now - this.cachedSettingsTimestamp > this.settingsTtlMs
+    ) {
       this.cachedSettings = await StorageManager.getAiSettings();
       this.cachedSettingsTimestamp = now;
     }
@@ -329,7 +352,11 @@ export class AiPrefetcher {
     if (this.clientInstance && this.clientCacheKey === cacheKey) {
       return this.clientInstance;
     }
-    const client = new OpenRouterClient(settings.openRouterApiKey, settings.openRouterModel, settings.openRouterProvider);
+    const client = new OpenRouterClient(
+      settings.openRouterApiKey,
+      settings.openRouterModel,
+      settings.openRouterProvider
+    );
     this.clientInstance = client;
     this.clientCacheKey = cacheKey;
     return client;
@@ -351,7 +378,12 @@ export class AiPrefetcher {
       return text;
     }
     const client = await this.getClient(settings);
-    const result = await client.translate(text, target, this.translationMaxTokens, settings.translationPrompt);
+    const result = await client.translate(
+      text,
+      target,
+      this.translationMaxTokens,
+      settings.translationPrompt
+    );
     return result.trim();
   }
 
@@ -386,6 +418,22 @@ export class AiPrefetcher {
     }
   }
 
+  /**
+   * Full reset of all prefetch state on queue completion (status=idle, tabs=[]).
+   * Why: fullReset rather than pruneStatusMap — pruneStatusMap skips empty-queue payloads
+   * to preserve re-add scenarios, so a dedicated reset path is needed for genuine completion.
+   */
+  private fullReset(): void {
+    this.statusMap.clear();
+    this.scheduler?.reset();
+    this.worker?.reset();
+    void this.resultStore?.clearAll().catch(error => {
+      this.logger.warn('[AiPrefetcher] Failed to clear result store on full reset', error);
+    });
+    this.logger.info('[AiPrefetcher] Full reset completed (queue idle with no tabs)');
+    this.persistStatus();
+  }
+
   private pruneStatusMap(payload: QueueStatusPayload): void {
     // Skip pruning when queue is empty to preserve statusMap entries for tab re-add scenario
     // This prevents the "entry not found = completed" false positive in isPrefetchComplete
@@ -393,7 +441,7 @@ export class AiPrefetcher {
       return;
     }
 
-    const validIds = new Set(payload.tabs.map((tab) => tab.tabId));
+    const validIds = new Set(payload.tabs.map(tab => tab.tabId));
     for (const tabId of Array.from(this.statusMap.keys())) {
       if (!validIds.has(tabId)) {
         this.statusMap.delete(tabId);

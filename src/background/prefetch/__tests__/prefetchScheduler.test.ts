@@ -323,6 +323,54 @@ describe('PrefetchScheduler', () => {
     });
   });
 
+  describe('reset()', () => {
+    it('clears scheduled and cooldownMap', () => {
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel, maxPrefetchAhead: 1 });
+
+      const status = baseStatus();
+      status.tabs = [makeTab(1), makeTab(2)];
+      status.totalCount = 2;
+
+      scheduler.handleStatusUpdate(status);
+      expect(scheduler.isScheduled(1)).toBe(true);
+      expect(scheduler.isScheduled(2)).toBe(true);
+
+      scheduler.reset();
+
+      expect(scheduler.isScheduled(1)).toBe(false);
+      expect(scheduler.isScheduled(2)).toBe(false);
+    });
+
+    it('allows re-scheduling after reset without cooldown blocking', () => {
+      jest.useFakeTimers();
+
+      const enqueue = jest.fn();
+      const cancel = jest.fn();
+      const scheduler = new PrefetchScheduler({ enqueue, cancel, maxPrefetchAhead: 1 });
+
+      const status = baseStatus();
+      status.tabs = [makeTab(1), makeTab(2)];
+      status.totalCount = 2;
+
+      scheduler.handleStatusUpdate(status);
+      // clearScheduled starts cooldown
+      scheduler.clearScheduled(1);
+      scheduler.clearScheduled(2);
+      enqueue.mockClear();
+
+      // reset should also clear cooldownMap
+      scheduler.reset();
+
+      // Even without advancing timers, tabs should be schedulable again
+      scheduler.handleStatusUpdate(status);
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
+
+      jest.useRealTimers();
+    });
+  });
+
   describe('cooldown after clearScheduled', () => {
     beforeEach(() => {
       jest.useFakeTimers();
@@ -355,9 +403,7 @@ describe('PrefetchScheduler', () => {
 
       // Re-trigger — tab 1 should be blocked by cooldown
       scheduler.handleStatusUpdate(status);
-      expect(enqueue).not.toHaveBeenCalledWith(
-        expect.objectContaining({ tabId: 1 }),
-      );
+      expect(enqueue).not.toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
     });
 
     it('isInCooldown prevents re-scheduling during cooldown window', () => {
@@ -408,12 +454,8 @@ describe('PrefetchScheduler', () => {
       jest.advanceTimersByTime(5000);
 
       scheduler.handleStatusUpdate(status);
-      expect(enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ tabId: 1 }),
-      );
-      expect(enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ tabId: 2 }),
-      );
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 1 }));
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ tabId: 2 }));
     });
   });
 });

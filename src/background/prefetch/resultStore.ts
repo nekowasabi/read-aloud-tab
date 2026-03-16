@@ -37,7 +37,7 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
 
   async save(entry: PrefetchEntry): Promise<void> {
     const results = await this.load();
-    const filtered = results.filter((item) => item.tabId !== entry.tabId);
+    const filtered = results.filter(item => item.tabId !== entry.tabId);
     filtered.unshift(entry);
     this.cache = this.pruneArray(filtered);
     await this.persist();
@@ -45,7 +45,7 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
 
   async get(tabId: number, url?: string): Promise<PrefetchEntry | null> {
     const results = await this.load();
-    const result = results.find((item) => item.tabId === tabId) ?? null;
+    const result = results.find(item => item.tabId === tabId) ?? null;
     if (!result) {
       return null;
     }
@@ -62,7 +62,7 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
 
   async delete(tabId: number): Promise<void> {
     const results = await this.load();
-    const next = results.filter((item) => item.tabId !== tabId);
+    const next = results.filter(item => item.tabId !== tabId);
     if (next.length === results.length) {
       return;
     }
@@ -78,6 +78,14 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
     }
     this.cache = pruned;
     await this.persist();
+  }
+
+  /**
+   * Clear all cached results and remove from storage (called on queue completion / full reset)
+   */
+  async clearAll(): Promise<void> {
+    this.cache = [];
+    await this.storage.set({ [STORAGE_KEY]: { results: [] } satisfies StoredResults });
   }
 
   private async load(): Promise<PrefetchEntry[]> {
@@ -97,7 +105,7 @@ export class PrefetchResultStoreImpl implements PrefetchResultStore {
   }
 
   private pruneArray(entries: PrefetchEntry[]): PrefetchEntry[] {
-    const fresh = entries.filter((item) => !this.isExpired(item));
+    const fresh = entries.filter(item => !this.isExpired(item));
     return fresh.slice(0, this.maxEntries);
   }
 

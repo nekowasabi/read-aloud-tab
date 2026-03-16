@@ -69,7 +69,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     (prefetcher as any).handleStatusUpdate({ tabId: 1, state: 'processing' });
     (prefetcher as any).handleStatusUpdate({ tabId: 1, state: 'completed' });
 
-    const messages = broadcastMock.mock.calls.map((call) => call[0] as PrefetchStatusBroadcast);
+    const messages = broadcastMock.mock.calls.map(call => call[0] as PrefetchStatusBroadcast);
     expect(messages).toHaveLength(2);
     expect(messages[1]).toMatchObject({
       type: 'PREFETCH_STATUS_SYNC',
@@ -177,7 +177,11 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       // statusMap is empty initially; after 200ms it becomes completed
       setTimeout(() => {
-        (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'completed', updatedAt: Date.now() });
+        (prefetcher as any).statusMap.set(42, {
+          tabId: 42,
+          state: 'completed',
+          updatedAt: Date.now(),
+        });
       }, 200);
 
       const result = await prefetcher.waitForPrefetch(42, 2000);
@@ -212,7 +216,11 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
       prefetcher.initialize();
 
       setTimeout(() => {
-        (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'failed', updatedAt: Date.now() });
+        (prefetcher as any).statusMap.set(42, {
+          tabId: 42,
+          state: 'failed',
+          updatedAt: Date.now(),
+        });
       }, 100);
 
       const result = await prefetcher.waitForPrefetch(42, 2000);
@@ -302,7 +310,11 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       // Set completed status after 60s (within 120s extended timeout)
       await jest.advanceTimersByTimeAsync(60000);
-      (prefetcher as any).statusMap.set(42, { tabId: 42, state: 'completed', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(42, {
+        tabId: 42,
+        state: 'completed',
+        updatedAt: Date.now(),
+      });
       await jest.advanceTimersByTimeAsync(200);
 
       const result = await resultPromise;
@@ -324,7 +336,11 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       // Pre-populate statusMap with entries
       (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
-      (prefetcher as any).statusMap.set(2, { tabId: 2, state: 'processing', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(2, {
+        tabId: 2,
+        state: 'processing',
+        updatedAt: Date.now(),
+      });
 
       // Simulate queue status update with empty tabs
       (prefetcher as any).pruneStatusMap({ ...baseStatus(), tabs: [] });
@@ -345,7 +361,11 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
       prefetcher.initialize();
 
       (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
-      (prefetcher as any).statusMap.set(2, { tabId: 2, state: 'processing', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(2, {
+        tabId: 2,
+        state: 'processing',
+        updatedAt: Date.now(),
+      });
       (prefetcher as any).statusMap.set(3, { tabId: 3, state: 'scheduled', updatedAt: Date.now() });
 
       const tabs = [
@@ -424,10 +444,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       // Simulate storage change with summaryWaitMode = 'wait'
       const listener = (chrome.storage.onChanged.addListener as jest.Mock).mock.calls[0][0];
-      listener(
-        { [STORAGE_KEYS.AI_SETTINGS]: { newValue: { summaryWaitMode: 'wait' } } },
-        'sync'
-      );
+      listener({ [STORAGE_KEYS.AI_SETTINGS]: { newValue: { summaryWaitMode: 'wait' } } }, 'sync');
 
       expect(setSummaryWaitModeSpy).toHaveBeenCalledWith('wait');
     });
@@ -445,10 +462,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
       const setSummaryWaitModeSpy = jest.spyOn(scheduler, 'setSummaryWaitMode');
 
       const listener = (chrome.storage.onChanged.addListener as jest.Mock).mock.calls[0][0];
-      listener(
-        { [STORAGE_KEYS.AI_SETTINGS]: { newValue: { summaryWaitMode: 'skip' } } },
-        'sync'
-      );
+      listener({ [STORAGE_KEYS.AI_SETTINGS]: { newValue: { summaryWaitMode: 'skip' } } }, 'sync');
 
       expect(setSummaryWaitModeSpy).toHaveBeenCalledWith('skip');
     });
@@ -467,10 +481,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       const listener = (chrome.storage.onChanged.addListener as jest.Mock).mock.calls[0][0];
       // newValue has no summaryWaitMode field
-      listener(
-        { [STORAGE_KEYS.AI_SETTINGS]: { newValue: { enableAiSummary: true } } },
-        'sync'
-      );
+      listener({ [STORAGE_KEYS.AI_SETTINGS]: { newValue: { enableAiSummary: true } } }, 'sync');
 
       expect(setSummaryWaitModeSpy).not.toHaveBeenCalled();
     });
@@ -531,4 +542,134 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     });
   });
 
+  describe('fullReset on queue completion', () => {
+    const makeStorageWithClearAll = () => {
+      const clearAll = jest.fn().mockResolvedValue(undefined);
+      const resultStore = {
+        save: jest.fn().mockResolvedValue(undefined),
+        get: jest.fn().mockResolvedValue(null),
+        delete: jest.fn().mockResolvedValue(undefined),
+        prune: jest.fn().mockResolvedValue(undefined),
+        clearAll,
+      };
+      return { resultStore, clearAll };
+    };
+
+    it('clears statusMap and calls reset on scheduler/worker when status=idle and tabs=[]', () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      // Pre-populate statusMap
+      (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
+      (prefetcher as any).statusMap.set(2, { tabId: 2, state: 'failed', updatedAt: Date.now() });
+
+      const scheduler = (prefetcher as any).scheduler;
+      const worker = (prefetcher as any).worker;
+      const schedulerResetSpy = jest.spyOn(scheduler, 'reset');
+      const workerResetSpy = jest.spyOn(worker, 'reset');
+
+      // Inject mock resultStore with clearAll
+      const { resultStore, clearAll } = makeStorageWithClearAll();
+      (prefetcher as any).resultStore = resultStore;
+
+      // Trigger via status listener: idle + empty tabs
+      statusListener!({ ...baseStatus(), status: 'idle', tabs: [], totalCount: 0 });
+
+      expect((prefetcher as any).statusMap.size).toBe(0);
+      expect(schedulerResetSpy).toHaveBeenCalled();
+      expect(workerResetSpy).toHaveBeenCalled();
+      expect(clearAll).toHaveBeenCalled();
+    });
+
+    it('does NOT reset when status=reading with tabs present', () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      (prefetcher as any).statusMap.set(1, {
+        tabId: 1,
+        state: 'processing',
+        updatedAt: Date.now(),
+      });
+
+      const scheduler = (prefetcher as any).scheduler;
+      const worker = (prefetcher as any).worker;
+      const schedulerResetSpy = jest.spyOn(scheduler, 'reset');
+      const workerResetSpy = jest.spyOn(worker, 'reset');
+
+      const { resultStore, clearAll } = makeStorageWithClearAll();
+      (prefetcher as any).resultStore = resultStore;
+
+      // Trigger with reading status and non-empty tabs
+      statusListener!({
+        ...baseStatus(),
+        status: 'reading',
+        tabs: [
+          {
+            tabId: 1,
+            url: 'https://example.com',
+            title: 'T',
+            isIgnored: false,
+            extractedAt: new Date().toISOString(),
+          },
+        ],
+        totalCount: 1,
+      });
+
+      expect(schedulerResetSpy).not.toHaveBeenCalled();
+      expect(workerResetSpy).not.toHaveBeenCalled();
+      expect(clearAll).not.toHaveBeenCalled();
+    });
+
+    it('does NOT reset when status=idle but tabs are still present', () => {
+      const prefetcher = new AiPrefetcher({
+        tabManager: tabManagerMock as TabManager,
+        broadcast: broadcastMock,
+        storage: { local: { set: storageLocalSet } } as unknown as typeof chrome.storage,
+      });
+
+      prefetcher.initialize();
+
+      (prefetcher as any).statusMap.set(1, { tabId: 1, state: 'completed', updatedAt: Date.now() });
+
+      const scheduler = (prefetcher as any).scheduler;
+      const worker = (prefetcher as any).worker;
+      const schedulerResetSpy = jest.spyOn(scheduler, 'reset');
+      const workerResetSpy = jest.spyOn(worker, 'reset');
+
+      const { resultStore, clearAll } = makeStorageWithClearAll();
+      (prefetcher as any).resultStore = resultStore;
+
+      // idle but tabs.length > 0
+      statusListener!({
+        ...baseStatus(),
+        status: 'idle',
+        tabs: [
+          {
+            tabId: 1,
+            url: 'https://example.com',
+            title: 'T',
+            isIgnored: false,
+            extractedAt: new Date().toISOString(),
+          },
+        ],
+        totalCount: 1,
+      });
+
+      expect(schedulerResetSpy).not.toHaveBeenCalled();
+      expect(workerResetSpy).not.toHaveBeenCalled();
+      expect(clearAll).not.toHaveBeenCalled();
+      // statusMap should still have entry (pruned to valid tabs only)
+      expect((prefetcher as any).statusMap.has(1)).toBe(true);
+    });
+  });
 });
