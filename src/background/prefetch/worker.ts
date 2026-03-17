@@ -44,6 +44,10 @@ interface QueueEntry extends PrefetchJob {
 }
 
 export class PrefetchWorker {
+  // Why: class-level constant instead of shared constants.ts — this limit is
+  // internal worker behaviour and has no cross-module consumers yet.
+  private static readonly MAX_CONTENT_RETRIES = 5;
+
   private readonly fetchTab: (tabId: number) => Promise<TabInfo | null>;
   private readonly requestContent: (tabId: number) => Promise<void>;
   private readonly getSettings: () => Promise<AiSettings>;
@@ -59,6 +63,9 @@ export class PrefetchWorker {
   private readonly cancelled = new Set<number>();
   private processing = false;
   private idleResolvers: Array<() => void> = [];
+  // Why: per-tab retry map instead of a single counter — multiple tabs can be
+  // queued concurrently and each must exhaust its own retry budget independently.
+  private readonly contentRetryMap = new Map<number, number>();
 
   constructor(options: PrefetchWorkerOptions) {
     this.fetchTab = options.fetchTab;
@@ -90,6 +97,7 @@ export class PrefetchWorker {
   reset(): void {
     this.queue.splice(0, this.queue.length);
     this.cancelled.clear();
+    this.contentRetryMap.clear();
     this.processing = false;
   }
 
@@ -165,7 +173,38 @@ export class PrefetchWorker {
     }
 
     if (!tab.content || tab.content.trim().length === 0) {
-      await this.requestContent(job.tabId);
+      // Phase A: enforce retry limit to prevent infinite pending→processing loop
+      // when Content Script is not injected (tabs.sendMessage always fails).
+      const retryCount = (this.contentRetryMap.get(job.tabId) ?? 0) + 1;
+      this.contentRetryMap.set(job.tabId, retryCount);
+
+      if (retryCount >= PrefetchWorker.MAX_CONTENT_RETRIES) {
+        this.contentRetryMap.delete(job.tabId);
+        this.logger.warn(
+          `[PrefetchWorker] Content extraction failed after ${retryCount} retries for tab ${job.tabId}, giving up`
+        );
+        this.emitStatus({
+          tabId: job.tabId,
+          state: 'failed',
+          error: `Content extraction failed after ${retryCount} retries`,
+        });
+        return;
+      }
+
+      // Why: do not fast-fail on "Receiving end does not exist" —
+      // handleCommandEvent now delegates to emitContentRequest which performs
+      // Phase C (dynamic CS injection via executeScript). The CS injection may
+      // complete asynchronously, so we fall through to the normal retry loop
+      // (500ms re-enqueue, up to MAX_CONTENT_RETRIES) instead of giving up immediately.
+      try {
+        await this.requestContent(job.tabId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Log the error but continue — the retry loop below will re-enqueue and
+        // pick up the content once CS injection completes.
+        this.logger.warn(`[PrefetchWorker] requestContent error for tab ${job.tabId}: ${msg}`);
+      }
+
       tab = await this.fetchTab(job.tabId);
       if (!tab || !tab.content || tab.content.trim().length === 0) {
         this.emitStatus({ tabId: job.tabId, state: 'pending' });
@@ -176,6 +215,9 @@ export class PrefetchWorker {
         }, 500);
         return;
       }
+
+      // Content obtained successfully — clear the retry counter
+      this.contentRetryMap.delete(job.tabId);
     }
 
     const summaryNeeded = settings.enableAiSummary !== false;

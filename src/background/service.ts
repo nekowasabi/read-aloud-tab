@@ -19,7 +19,12 @@ import {
 import { AiPrefetcher } from './aiPrefetcher';
 import { AiProcessor } from './aiProcessor';
 import { TabManager, LoggerLike } from './tabManager';
-import { KeepAliveController, KeepAliveConfig, KeepAliveEvent, RuntimePort } from './keepAliveController';
+import {
+  KeepAliveController,
+  KeepAliveConfig,
+  KeepAliveEvent,
+  RuntimePort,
+} from './keepAliveController';
 import { StorageManager } from '../shared/utils/storage';
 import { BrowserAdapter } from '../shared/utils/browser';
 import { getIgnoredDomains } from '../shared/utils/storage';
@@ -30,7 +35,9 @@ import { createContentResolver } from './contentResolver';
 
 interface ChromeRuntimePort {
   name: string;
-  postMessage: (message: QueueBroadcastMessage | PrefetchBroadcastMessage | Record<string, unknown>) => void;
+  postMessage: (
+    message: QueueBroadcastMessage | PrefetchBroadcastMessage | Record<string, unknown>
+  ) => void;
   onMessage: { addListener: (listener: (message: QueueCommandMessage | unknown) => void) => void };
   onDisconnect: { addListener: (listener: () => void) => void };
 }
@@ -38,7 +45,9 @@ interface ChromeRuntimePort {
 interface ChromeRuntimeLike {
   onMessage: { addListener: (listener: RuntimeMessageListener) => void };
   onConnect: { addListener: (listener: (port: ChromeRuntimePort) => void) => void };
-  sendMessage: (message: QueueBroadcastMessage | Record<string, unknown>) => Promise<unknown> | void;
+  sendMessage: (
+    message: QueueBroadcastMessage | Record<string, unknown>
+  ) => Promise<unknown> | void;
   lastError?: chrome.runtime.LastError | null;
   connect?: (options: { name: string }) => ChromeRuntimePort;
 }
@@ -53,16 +62,24 @@ interface ChromeTabsLike {
 
 interface ChromeAlarmsLike {
   create: (name: string, alarmInfo: { delayInMinutes?: number; periodInMinutes?: number }) => void;
-  clear: (name: string, callback?: (wasCleared: boolean) => void) => void | Promise<boolean> | boolean;
+  clear: (
+    name: string,
+    callback?: (wasCleared: boolean) => void
+  ) => void | Promise<boolean> | boolean;
   onAlarm: {
     addListener: (listener: (alarm: { name: string }) => void) => void;
     removeListener?: (listener: (alarm: { name: string }) => void) => void;
   };
 }
 
+interface ChromeScriptingLike {
+  executeScript: (injection: { target: { tabId: number }; files: string[] }) => Promise<unknown>;
+}
+
 interface ChromeLike {
   runtime: ChromeRuntimeLike;
   tabs: ChromeTabsLike;
+  scripting?: ChromeScriptingLike;
   commands?: {
     onCommand: {
       addListener: (listener: (command: string) => void) => void;
@@ -74,7 +91,7 @@ interface ChromeLike {
 type RuntimeMessageListener = (
   message: QueueCommandMessage | unknown,
   sender: chrome.runtime.MessageSender,
-  sendResponse: (response: any) => void,
+  sendResponse: (response: any) => void
 ) => void;
 
 interface BackgroundOrchestratorOptions {
@@ -107,7 +124,9 @@ export class BackgroundOrchestrator {
     fallbackCount: 0,
   };
   private lastOffscreenHeartbeatAt: number | null = null;
-  private readonly routeRuntimeCommand: (message: QueueCommandMessage) => Promise<RuntimeCommandResult>;
+  private readonly routeRuntimeCommand: (
+    message: QueueCommandMessage
+  ) => Promise<RuntimeCommandResult>;
   private readonly offscreenBridge!: OffscreenBridge;
   private readonly lifecycleSupervisor!: LifecycleSupervisor;
 
@@ -118,12 +137,13 @@ export class BackgroundOrchestrator {
     this.logger = options.logger || console;
     this.prefetcher = options.prefetcher ?? null;
     this.aiProcessor = options.aiProcessor ?? null;
-    this.keepAliveController = options.keepAliveController || this.createKeepAliveController(options.keepAliveConfig);
+    this.keepAliveController =
+      options.keepAliveController || this.createKeepAliveController(options.keepAliveConfig);
     this.routeRuntimeCommand = createRuntimeCommandRouter({
       tabManager: this.tabManager,
-      handleAddCommand: (payload) => this.handleAddCommand(payload),
-      handleControlCommand: (action) => this.handleControlCommand(action),
-      handleUpdateSettings: (settings) => this.handleUpdateSettings(settings),
+      handleAddCommand: payload => this.handleAddCommand(payload),
+      handleControlCommand: action => this.handleControlCommand(action),
+      handleUpdateSettings: settings => this.handleUpdateSettings(settings),
       prefetcher: this.prefetcher,
     });
 
@@ -134,7 +154,7 @@ export class BackgroundOrchestrator {
     // OffscreenBridge: encapsulates Chrome Offscreen Document communication
     this.offscreenBridge = new OffscreenBridge({
       runtime: {
-        sendMessage: (msg) => this.chrome.runtime.sendMessage(msg as any),
+        sendMessage: msg => this.chrome.runtime.sendMessage(msg as any),
       },
       logger: this.logger,
     });
@@ -145,28 +165,27 @@ export class BackgroundOrchestrator {
       runtime: this.chrome.runtime as any,
       commands: this.chrome.commands ?? null,
       alarms: this.chrome.alarms ?? null,
-      storage: (typeof chrome !== 'undefined' && chrome.storage?.onChanged)
-        ? (chrome.storage as any)
-        : null,
+      storage:
+        typeof chrome !== 'undefined' && chrome.storage?.onChanged ? (chrome.storage as any) : null,
       tabManager: this.tabManager,
       onRuntimeMessage: this.handleRuntimeMessage,
       onRuntimeConnect: (port: any) => this.handleRuntimePort(port),
-      onStatusUpdate: (payload) => this.handleStatusUpdate(payload),
-      onProgressUpdate: (payload) => this.broadcastProgress(payload),
-      onError: (payload) => this.broadcastError(payload),
-      onCommandEvent: (event) => this.handleCommandEvent(event),
-      onAlarm: (alarm) => {
-        void this.keepAliveController?.handleAlarm(alarm.name).catch((error) => {
+      onStatusUpdate: payload => this.handleStatusUpdate(payload),
+      onProgressUpdate: payload => this.broadcastProgress(payload),
+      onError: payload => this.broadcastError(payload),
+      onCommandEvent: event => this.handleCommandEvent(event),
+      onAlarm: alarm => {
+        void this.keepAliveController?.handleAlarm(alarm.name).catch(error => {
           this.logger.warn('BackgroundOrchestrator: keep-alive alarm handling failed', error);
         });
       },
-      onShortcutCommand: (command) => {
-        this.handleShortcutCommand(command).catch((error) => {
+      onShortcutCommand: command => {
+        this.handleShortcutCommand(command).catch(error => {
           this.logger.error('BackgroundOrchestrator: shortcut command failed', error);
         });
       },
       onDeveloperModeChanged: () => {
-        this.refreshDeveloperMode().catch((error) => {
+        this.refreshDeveloperMode().catch(error => {
           this.logger.warn('BackgroundOrchestrator: failed to refresh developer mode', error);
         });
       },
@@ -179,16 +198,38 @@ export class BackgroundOrchestrator {
         prefetcher: this.prefetcher,
         aiProcessor: this.aiProcessor,
         tabLookup: this.tabManager,
-        emitContentRequest: (tabId) => this.emitContentRequest(tabId, 'missing'),
-      }),
+        emitContentRequest: tabId => this.emitContentRequest(tabId, 'missing'),
+      })
     );
   }
 
-  private emitContentRequest(tabId: number, _reason: 'missing' | 'stale'): void {
+  private async emitContentRequest(tabId: number, _reason: 'missing' | 'stale'): Promise<void> {
     try {
-      this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
+      await this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
     } catch (error) {
-      this.logger.error('[BackgroundOrchestrator] Failed to request content extraction', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('Receiving end does not exist')) {
+        // Why: dynamic injection instead of silent failure — when Content Script
+        // is not present (background tab, freshly opened page), retrying
+        // sendMessage alone will never succeed; injecting content.js first
+        // enables the retry to land.
+        if (this.chrome.scripting) {
+          try {
+            await this.chrome.scripting.executeScript({
+              target: { tabId },
+              files: ['content.js'],
+            });
+            await this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
+          } catch (injectError) {
+            this.logger.warn(
+              `[BackgroundOrchestrator] Failed to inject content script into tab ${tabId}`,
+              injectError instanceof Error ? injectError : new Error(String(injectError))
+            );
+          }
+        }
+      } else {
+        this.logger.error('[BackgroundOrchestrator] Failed to request content extraction', error);
+      }
     }
   }
 
@@ -205,13 +246,17 @@ export class BackgroundOrchestrator {
     // Check if playback needs to be resumed after Service Worker restart
     const snapshot = this.tabManager.getSnapshot();
     if (snapshot.status === 'reading') {
-      this.logger.info('[BackgroundOrchestrator] Service Worker restarted during playback, attempting to resume...');
+      this.logger.info(
+        '[BackgroundOrchestrator] Service Worker restarted during playback, attempting to resume...'
+      );
 
       // For Chrome with Offscreen API, ensure offscreen document is available
       if (this.offscreenBridge.isAvailable()) {
         const hasOffscreen = await this.offscreenBridge.ensure();
         if (!hasOffscreen) {
-          this.logger.warn('[BackgroundOrchestrator] Cannot resume: offscreen document unavailable');
+          this.logger.warn(
+            '[BackgroundOrchestrator] Cannot resume: offscreen document unavailable'
+          );
           // TabManager will handle state sync in resumePlaybackIfNeeded
         } else {
           this.logger.info('[BackgroundOrchestrator] Offscreen document ready for resume');
@@ -220,7 +265,7 @@ export class BackgroundOrchestrator {
     }
 
     // Resume playback if needed
-    this.tabManager.resumePlaybackIfNeeded().catch((error) => {
+    this.tabManager.resumePlaybackIfNeeded().catch(error => {
       this.logger.warn('BackgroundOrchestrator: failed to resume playback', error);
     });
 
@@ -234,11 +279,11 @@ export class BackgroundOrchestrator {
       return;
     }
     if (payload.status === 'reading') {
-      void this.keepAliveController.startHeartbeat('queue').catch((error) => {
+      void this.keepAliveController.startHeartbeat('queue').catch(error => {
         this.logger.warn('BackgroundOrchestrator: failed to start keep-alive heartbeat', error);
       });
     } else {
-      void this.keepAliveController.stopHeartbeat('queue').catch((error) => {
+      void this.keepAliveController.stopHeartbeat('queue').catch(error => {
         this.logger.warn('BackgroundOrchestrator: failed to stop keep-alive heartbeat', error);
       });
     }
@@ -317,7 +362,7 @@ export class BackgroundOrchestrator {
         create: (name, info) => {
           this.chrome.alarms?.create(name, info);
         },
-        clear: (name) => {
+        clear: name => {
           if (!this.chrome.alarms?.clear) {
             return false;
           }
@@ -333,11 +378,12 @@ export class BackgroundOrchestrator {
         },
       },
       runtime: {
-        sendMessage: (message) => {
+        sendMessage: message => {
           const maybePromise = this.chrome.runtime.sendMessage?.(message as any);
           return maybePromise instanceof Promise ? maybePromise : Promise.resolve(maybePromise);
         },
-        connect: (options) => (this.chrome.runtime.connect?.(options) as unknown as RuntimePort | undefined),
+        connect: options =>
+          this.chrome.runtime.connect?.(options) as unknown as RuntimePort | undefined,
       },
       logger: this.logger,
       onKeepAlive: async () => {
@@ -347,7 +393,9 @@ export class BackgroundOrchestrator {
           if (snapshot.status === 'reading') {
             const hasOffscreen = await this.offscreenBridge.ensure();
             if (!hasOffscreen) {
-              this.logger.error('[KeepAlive] Offscreen document missing during reading state, pausing playback');
+              this.logger.error(
+                '[KeepAlive] Offscreen document missing during reading state, pausing playback'
+              );
               this.tabManager.pause();
             }
           }
@@ -357,7 +405,7 @@ export class BackgroundOrchestrator {
         this.broadcastStatus(snapshot);
       },
       config: resolvedConfig,
-      onEvent: (event) => this.handleKeepAliveEvent(event),
+      onEvent: event => this.handleKeepAliveEvent(event),
     });
   }
 
@@ -403,7 +451,7 @@ export class BackgroundOrchestrator {
     }
 
     this.processCommand(message)
-      .then((result) => sendResponse(result))
+      .then(result => sendResponse(result))
       .catch((error: Error) => {
         this.logger.error('BackgroundOrchestrator: command processing failed', error);
         sendResponse({ success: false, error: error.message });
@@ -416,7 +464,7 @@ export class BackgroundOrchestrator {
     // Handle keep-alive port from Offscreen Document
     if (port.name === 'offscreen-keepalive') {
       this.logger.info('[BackgroundOrchestrator] Offscreen keep-alive port connected');
-      
+
       port.onMessage.addListener((message: unknown) => {
         if (typeof message === 'object' && message !== null && 'type' in message) {
           const msg = message as { type: string; timestamp?: number };
@@ -428,12 +476,18 @@ export class BackgroundOrchestrator {
             if (this.lastOffscreenHeartbeatAt !== null) {
               const gap = now - this.lastOffscreenHeartbeatAt;
               if (gap > 30000) {
-                this.logger.warn(`[BackgroundOrchestrator] Heartbeat gap detected: ${gap}ms (>30s threshold)`);
+                this.logger.warn(
+                  `[BackgroundOrchestrator] Heartbeat gap detected: ${gap}ms (>30s threshold)`
+                );
               } else {
-                this.logger.debug?.(`[BackgroundOrchestrator] Heartbeat received (gap: ${gap}ms, timestamp: ${timestamp})`);
+                this.logger.debug?.(
+                  `[BackgroundOrchestrator] Heartbeat received (gap: ${gap}ms, timestamp: ${timestamp})`
+                );
               }
             } else {
-              this.logger.info(`[BackgroundOrchestrator] First heartbeat received (timestamp: ${timestamp})`);
+              this.logger.info(
+                `[BackgroundOrchestrator] First heartbeat received (timestamp: ${timestamp})`
+              );
             }
 
             this.lastOffscreenHeartbeatAt = now;
@@ -452,7 +506,9 @@ export class BackgroundOrchestrator {
     // Handle regular ports (popup, options, etc.)
     this.ports.add(port);
 
-    const handlePortMessage = async (message: QueueCommandMessage | PrefetchCommandMessage | unknown) => {
+    const handlePortMessage = async (
+      message: QueueCommandMessage | PrefetchCommandMessage | unknown
+    ) => {
       if (isPrefetchCommandMessage(message)) {
         this.handlePrefetchCommand(message, () => undefined);
         return;
@@ -463,7 +519,10 @@ export class BackgroundOrchestrator {
       }
       try {
         const result = await this.processCommand(message);
-        port.postMessage({ type: 'QUEUE_COMMAND_RESULT', payload: { command: message.type, result } });
+        port.postMessage({
+          type: 'QUEUE_COMMAND_RESULT',
+          payload: { command: message.type, result },
+        });
       } catch (error) {
         const err = error instanceof Error ? error : new Error('Unknown command error');
         port.postMessage({
@@ -489,7 +548,10 @@ export class BackgroundOrchestrator {
     return this.routeRuntimeCommand(message);
   }
 
-  private handlePrefetchCommand(message: PrefetchCommandMessage, sendResponse: (response: unknown) => void): void {
+  private handlePrefetchCommand(
+    message: PrefetchCommandMessage,
+    sendResponse: (response: unknown) => void
+  ): void {
     if (!this.prefetcher) {
       sendResponse({ success: false, error: 'Prefetch not available' });
       return;
@@ -535,7 +597,7 @@ export class BackgroundOrchestrator {
     if (!this.prefetcher) {
       return;
     }
-    this.ports.forEach((port) => this.sendPrefetchSnapshotToPort(port));
+    this.ports.forEach(port => this.sendPrefetchSnapshotToPort(port));
   }
 
   private async handleAddCommand(payload: QueueAddPayload): Promise<void> {
@@ -564,7 +626,7 @@ export class BackgroundOrchestrator {
     const queueSnapshot = snapshot ?? this.tabManager.getSnapshot();
 
     // 既に読み上げ対象のタブが存在する場合は何もしない
-    const hasReadableTabs = queueSnapshot.tabs.some((tab) => !tab.isIgnored);
+    const hasReadableTabs = queueSnapshot.tabs.some(tab => !tab.isIgnored);
     if (hasReadableTabs) {
       return null;
     }
@@ -600,7 +662,10 @@ export class BackgroundOrchestrator {
         autoStart: false, // processNext()で手動で開始する
       });
 
-      this.logger.info('BackgroundOrchestrator: added active tab to queue', { tabId, url: activeTab.url });
+      this.logger.info('BackgroundOrchestrator: added active tab to queue', {
+        tabId,
+        url: activeTab.url,
+      });
       return tabId;
     } catch (error) {
       this.logger.error('BackgroundOrchestrator: failed to add active tab to queue', error);
@@ -625,7 +690,9 @@ export class BackgroundOrchestrator {
       const tab = this.tabManager.getTabById(tabId);
 
       if (tab && tab.content && tab.content.trim().length > 0) {
-        this.logger.info(`[BackgroundOrchestrator] Content extracted for tab ${tabId} after ${Date.now() - startTime}ms`);
+        this.logger.info(
+          `[BackgroundOrchestrator] Content extracted for tab ${tabId} after ${Date.now() - startTime}ms`
+        );
         return true;
       }
 
@@ -634,7 +701,9 @@ export class BackgroundOrchestrator {
       delay = Math.min(delay * 1.5, 500);
     }
 
-    this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${tabId} after ${timeoutMs}ms`);
+    this.logger.warn(
+      `[BackgroundOrchestrator] Content extraction timeout for tab ${tabId} after ${timeoutMs}ms`
+    );
     return false;
   }
 
@@ -644,10 +713,14 @@ export class BackgroundOrchestrator {
       if (action === 'start') {
         const addedTabId = await this.ensureActiveTabInQueue();
         if (addedTabId !== null) {
-          this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
+          this.logger.info(
+            `[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`
+          );
           const contentReady = await this.waitForTabContent(addedTabId);
           if (!contentReady) {
-            this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
+            this.logger.warn(
+              `[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`
+            );
             return;
           }
         }
@@ -687,10 +760,14 @@ export class BackgroundOrchestrator {
       case 'start': {
         const addedTabId = await this.ensureActiveTabInQueue();
         if (addedTabId !== null) {
-          this.logger.info(`[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`);
+          this.logger.info(
+            `[BackgroundOrchestrator] New tab ${addedTabId} added, waiting for content extraction...`
+          );
           const contentReady = await this.waitForTabContent(addedTabId);
           if (!contentReady) {
-            this.logger.warn(`[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`);
+            this.logger.warn(
+              `[BackgroundOrchestrator] Content extraction timeout for tab ${addedTabId}, will auto-resume when ready`
+            );
             return;
           }
         }
@@ -726,7 +803,10 @@ export class BackgroundOrchestrator {
         }
         this.logger.info('[BackgroundOrchestrator] Forwarded settings update to offscreen');
       } catch (error) {
-        this.logger.error('[BackgroundOrchestrator] Failed to forward settings to offscreen', error);
+        this.logger.error(
+          '[BackgroundOrchestrator] Failed to forward settings to offscreen',
+          error
+        );
         // Don't throw - log error and continue
       }
     }
@@ -759,7 +839,10 @@ export class BackgroundOrchestrator {
     }
   }
 
-  private async handleTextExtracted(message: { type: 'TEXT_EXTRACTED'; content: any }): Promise<void> {
+  private async handleTextExtracted(message: {
+    type: 'TEXT_EXTRACTED';
+    content: any;
+  }): Promise<void> {
     const { content } = message;
     if (!content || typeof content.tabId !== 'number') {
       this.logger.warn('BackgroundOrchestrator: invalid TEXT_EXTRACTED message', message);
@@ -775,9 +858,14 @@ export class BackgroundOrchestrator {
         content: text,
         extractedAt: extractedAt || Date.now(),
       });
-      this.logger.info(`BackgroundOrchestrator: content extracted for tab ${tabId}, length: ${text?.length || 0}`);
+      this.logger.info(
+        `BackgroundOrchestrator: content extracted for tab ${tabId}, length: ${text?.length || 0}`
+      );
     } catch (error) {
-      this.logger.error('BackgroundOrchestrator: failed to update tab with extracted content', error);
+      this.logger.error(
+        'BackgroundOrchestrator: failed to update tab with extracted content',
+        error
+      );
     }
   }
 
@@ -787,11 +875,10 @@ export class BackgroundOrchestrator {
     }
 
     const { tabId } = event.payload;
-    try {
-      await this.chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_TEXT', tabId });
-    } catch (error) {
-      this.logger.error('BackgroundOrchestrator: failed to request content extraction', error);
-    }
+    // Why: delegate to emitContentRequest instead of direct sendMessage —
+    // emitContentRequest contains Phase C (dynamic CS injection via executeScript)
+    // which is required when Content Script is not yet present in the tab.
+    await this.emitContentRequest(tabId, 'missing');
   }
 
   private async handleShortcutCommand(command: string): Promise<void> {
@@ -808,7 +895,7 @@ export class BackgroundOrchestrator {
           this.tabManager.resume();
         } else {
           this.logger.info('Toggling: Starting read aloud...');
-          const hasReadableTabs = snapshot.tabs.some((tab) => !tab.isIgnored);
+          const hasReadableTabs = snapshot.tabs.some(tab => !tab.isIgnored);
           if (!hasReadableTabs && snapshot.totalCount === 0) {
             await this.ensureActiveTabInQueue(snapshot);
           }
@@ -835,10 +922,11 @@ export class BackgroundOrchestrator {
 
     // Support callback-based and promise-based variants
     if (queryFn.length >= 2) {
-      return new Promise<any[]>((resolve) => {
+      return new Promise<any[]>(resolve => {
         try {
-          (queryFn as (queryInfo: any, callback: (tabs: any[]) => void) => void)(queryInfo, (tabs: any[]) =>
-            resolve(Array.isArray(tabs) ? tabs : []),
+          (queryFn as (queryInfo: any, callback: (tabs: any[]) => void) => void)(
+            queryInfo,
+            (tabs: any[]) => resolve(Array.isArray(tabs) ? tabs : [])
           );
         } catch (error) {
           this.logger.error('BackgroundOrchestrator: tabs.query callback variant failed', error);
@@ -868,8 +956,14 @@ export class BackgroundOrchestrator {
       return false;
     }
 
-    const invalidPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'moz-extension://'];
-    if (invalidPrefixes.some((prefix) => tab.url.startsWith(prefix))) {
+    const invalidPrefixes = [
+      'chrome://',
+      'chrome-extension://',
+      'about:',
+      'edge://',
+      'moz-extension://',
+    ];
+    if (invalidPrefixes.some(prefix => tab.url.startsWith(prefix))) {
       return false;
     }
 
@@ -879,7 +973,10 @@ export class BackgroundOrchestrator {
         return false;
       }
     } catch (error) {
-      this.logger.debug('BackgroundOrchestrator: skipping tab due to invalid URL', { url: tab.url, error });
+      this.logger.debug('BackgroundOrchestrator: skipping tab due to invalid URL', {
+        url: tab.url,
+        error,
+      });
       return false;
     }
 
@@ -899,7 +996,7 @@ export class BackgroundOrchestrator {
     } catch (error) {
       this.logger.warn('BackgroundOrchestrator: failed to load ignored domains', error);
     }
-    const ignoredSet = new Set(ignoredDomains.map((domain) => domain.toLowerCase()));
+    const ignoredSet = new Set(ignoredDomains.map(domain => domain.toLowerCase()));
 
     let addedCount = 0;
     for (const tab of tabs) {
