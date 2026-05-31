@@ -1,0 +1,18 @@
+{
+  "task_id": "T-20260531-queue-repeat-loop-addendum-reflection",
+  "purpose": "Critical Review Addendum の8 Blocker+追加発見を PLAN.md/process-01〜11.md へ反映",
+  "status": "all_done",
+  "created": "2026-05-31",
+  "constant_decision": "DEFAULT_LOOP_ENABLEDのみ採用。PLAYBACK_TEXT_CACHE_KEY/MAX_LOOP_GUARD_COUNTは作らず参照削除(playbackTextはTabInfoフィールド、ループ終端はfindNextReadableIndex -1停止)",
+  "agents": [
+    { "id": "E1-plan-p04", "files": ["PLAN.md", "plan/process-04.md"], "blockers": ["5", "scope", "Constants", "Addendum"], "status": "done" },
+    { "id": "E2-p01-p11", "files": ["plan/process-01.md", "plan/process-11.md"], "blockers": ["1", "2", "7"], "status": "done" },
+    { "id": "E3-p02-p03", "files": ["plan/process-02.md", "plan/process-03.md"], "blockers": ["3", "4"], "status": "done" },
+    { "id": "E4-p05-p10", "files": ["plan/process-05.md", "plan/process-10.md"], "blockers": ["6", "8", "3-test"], "status": "done" }
+  ],
+  "parent_followups": [
+    "PLAN.md L42 ファイル数 11→13 訂正(scope追加の波及)",
+    "PLAN.md L96 Risks節 '既存4テスト'→'既存全テスト' 訂正"
+  ],
+  "result": "8 Blocker全件 + 追加発見4件をPLAN.md/process-01/02/03/04/05/10/11へ反映完了。docドキュメントのみ変更でコードは未変更"
+}

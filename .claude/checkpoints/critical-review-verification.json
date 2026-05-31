@@ -1,0 +1,18 @@
+{
+  "task_id": "T-20260531-queue-repeat-loop-critical-review-verification",
+  "purpose": "PLAN.md Critical Review Addendum の8 Blocker指摘の妥当性を一次ソース照合で検証",
+  "status": "all_done",
+  "created": "2026-05-31",
+  "verdict_summary": "8件中7件=完全に妥当(True), 1件(Blocker3)=部分的に妥当. 構造的所見: PLAN本体のRequired Plan Fixesは既に修正方針を記述済みだが配下process-01/02/03/04/05/10/11.md本文へ未反映",
+  "agents": [
+    { "id": "A-constants-tests", "scope": "Blocker1/7/8", "status": "done", "verdict": "1=True,7=True,8=True" },
+    { "id": "B-tabmanager", "scope": "Blocker2/3/4", "status": "done", "verdict": "2=True,3=部分的,4=True" },
+    { "id": "C-frontend-scheduler", "scope": "Blocker5/6", "status": "done", "verdict": "5=True,6=True" }
+  ],
+  "additional_findings": [
+    "process-04 パス誤記: src/popup/App.tsx 実在は src/popup/components/App.tsx",
+    "既存テスト件数は4ではなく5 (tabManagerPlaybackEnd.test.ts) — PLAN:122が既に是正済み",
+    "QUEUE_SCHEMA_VERSION は名前付き定数ではなく STORAGE_KEYS.SCHEMA_VERSION + storage.ts:185 のリテラル2",
+    "Blocker6 は COOLDOWN(5s)/scheduledSet で部分緩和されるが恒久保証には !current.playbackText が必須"
+  ]
+}
