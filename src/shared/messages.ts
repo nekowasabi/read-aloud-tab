@@ -75,6 +75,7 @@ export type QueueCommandMessage =
   | { type: 'QUEUE_UPDATE_SETTINGS'; payload: QueueSettingsUpdatePayload }
   | { type: 'QUEUE_CLEAR' }
   | { type: 'REQUEST_QUEUE_STATE' }
+  | { type: 'QUEUE_SET_LOOP'; payload: { enabled: boolean } }
   | SetSummaryWaitModeMessage
   | SkipSummaryWaitMessage;
 
@@ -86,6 +87,7 @@ export interface QueueStatusPayload {
   tabs: SerializedTabInfo[];
   settings: TTSSettings;
   updatedAt: number;
+  loopEnabled?: boolean;
 }
 
 export interface QueueProgressPayload {
@@ -178,6 +180,14 @@ export function isQueueCommandMessage(message: unknown): message is QueueCommand
     case 'SET_SUMMARY_WAIT_MODE':
     case 'SKIP_SUMMARY_WAIT':
       return true;
+    case 'QUEUE_SET_LOOP': {
+      const loopMsg = candidate as { type: string; payload?: { enabled?: unknown } };
+      return (
+        typeof loopMsg.payload === 'object' &&
+        loopMsg.payload !== null &&
+        typeof loopMsg.payload.enabled === 'boolean'
+      );
+    }
     default:
       return false;
   }

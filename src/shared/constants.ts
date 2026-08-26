@@ -120,5 +120,13 @@ export const TTS_CONFIG = {
 /** デフォルトの優先性別 */
 export const DEFAULT_PREFERRED_GENDER = 'female' as const;
 
+/**
+ * === Queue Loop Constants ===
+ * キュー全体ループ再生に関する定数（process-02）
+ */
+
+/** ループ再生のデフォルト値（後方互換のため false） */
+export const DEFAULT_LOOP_ENABLED = false;
+
 /** デフォルトの優先言語 */
 export const DEFAULT_PREFERRED_LANGUAGE = 'ja' as const;

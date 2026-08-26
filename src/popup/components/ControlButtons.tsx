@@ -6,6 +6,8 @@ interface Props {
   onToggle: () => void;
   onStop: () => void;
   disabled?: boolean;
+  loopEnabled?: boolean;
+  onLoopToggle?: () => void;
 }
 
 export default function ControlButtons({
@@ -13,7 +15,9 @@ export default function ControlButtons({
   isPaused,
   onToggle,
   onStop,
-  disabled = false
+  disabled = false,
+  loopEnabled = false,
+  onLoopToggle,
 }: Props) {
   // 状態判定
   const isIdle = !isReading && !isPaused;
@@ -43,6 +47,21 @@ export default function ControlButtons({
           <span className="btn-icon">⏹️</span>
           停止
         </button>
+
+        {/* ループトグルボタン */}
+        {onLoopToggle && (
+          <button
+            className={`btn btn-secondary${loopEnabled ? ' btn-active' : ''}`}
+            onClick={onLoopToggle}
+            disabled={disabled}
+            title={loopEnabled ? "ループ解除" : "ループ再生"}
+            aria-pressed={loopEnabled}
+            aria-label={loopEnabled ? "ループ再生オン" : "ループ再生オフ"}
+          >
+            <span className="btn-icon">🔁</span>
+            {loopEnabled ? 'ループ中' : 'ループ'}
+          </button>
+        )}
       </div>
     </div>
   );

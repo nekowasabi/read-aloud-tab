@@ -32,6 +32,7 @@ export interface UseTabQueueResult {
   skipPrevious: () => Promise<void>;
   control: (action: ControlAction) => Promise<void>;
   updateSettings: (settings: Partial<TTSSettings>) => Promise<void>;
+  setLoop: (enabled: boolean) => Promise<void>;
 }
 
 export default function useTabQueue(): UseTabQueueResult {

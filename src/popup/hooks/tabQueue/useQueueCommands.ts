@@ -29,6 +29,7 @@ export interface UseQueueCommandsResult {
   skipPrevious: () => Promise<void>;
   control: (action: ControlAction) => Promise<void>;
   updateSettings: (settings: Partial<TTSSettings>) => Promise<void>;
+  setLoop: (enabled: boolean) => Promise<void>;
 }
 
 export function useQueueCommands(
@@ -86,5 +87,11 @@ export function useQueueCommands(
     [sendCommand],
   );
 
-  return { addTab, removeTab, clearQueue, reorderTabs, skipNext, skipPrevious, control, updateSettings };
+  const setLoop = useCallback(
+    (enabled: boolean): Promise<void> =>
+      sendCommand({ type: 'QUEUE_SET_LOOP', payload: { enabled } }),
+    [sendCommand],
+  );
+
+  return { addTab, removeTab, clearQueue, reorderTabs, skipNext, skipPrevious, control, updateSettings, setLoop };
 }

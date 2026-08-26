@@ -18,6 +18,7 @@ interface RuntimeCommandRouterTabManager {
   skipTab: (direction: 'next' | 'previous') => Promise<void>;
   clearQueue: () => Promise<void>;
   getSnapshot: () => unknown;
+  setLoopEnabled: (enabled: boolean) => void;
 }
 
 interface RuntimeCommandRouterDeps {
@@ -64,6 +65,9 @@ export function createRuntimeCommandRouter(deps: RuntimeCommandRouterDeps) {
       }
       case 'SKIP_SUMMARY_WAIT':
         deps.prefetcher?.cancelWait(message.tabId);
+        return { success: true };
+      case 'QUEUE_SET_LOOP':
+        deps.tabManager.setLoopEnabled(message.payload.enabled);
         return { success: true };
       default:
         return { success: false, error: 'Unknown command' };

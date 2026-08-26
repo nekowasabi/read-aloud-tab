@@ -32,6 +32,7 @@ export default function App() {
     skipPrevious,
     control,
     updateSettings,
+    setLoop,
   } = useTabQueue();
 
   const {
@@ -295,6 +296,13 @@ export default function App() {
         onToggle={handleToggle}
         onStop={() => handleControl('stop')}
         disabled={!isConnected}
+        loopEnabled={queueState?.loopEnabled ?? false}
+        onLoopToggle={() => {
+          setLoop(!(queueState?.loopEnabled ?? false)).catch((commandError) => {
+            const message = commandError instanceof Error ? commandError.message : 'ループ設定の変更に失敗しました';
+            setError(message);
+          });
+        }}
       />
 
       <SummaryControl

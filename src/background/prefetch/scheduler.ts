@@ -146,7 +146,9 @@ export class PrefetchScheduler {
     const targets: SerializedTabInfo[] = [];
 
     const current = payload.tabs[payload.currentIndex] ?? null;
-    if (current && !current.isIgnored) {
+    // Why: 確定テキスト済みタブは2周目に再生経路で即再生されるためプリフェッチ不要。
+    //      current/candidate 両側で除外し、先回り API を抑止して「API実行ゼロ」を完全保証する。
+    if (current && !current.isIgnored && !current.playbackText) {
       targets.push(current);
     }
 
@@ -157,7 +159,9 @@ export class PrefetchScheduler {
     let collected = 0;
     for (let index = payload.currentIndex + 1; index < payload.tabs.length; index += 1) {
       const candidate = payload.tabs[index];
-      if (!candidate || candidate.isIgnored) {
+      // Why: 確定テキスト済みタブは2周目に再生経路で即再生されるためプリフェッチ不要。
+      //      current/candidate 両側で除外し、先回り API を抑止して「API実行ゼロ」を完全保証する。
+      if (!candidate || candidate.isIgnored || candidate.playbackText) {
         continue;
       }
       targets.push(candidate);

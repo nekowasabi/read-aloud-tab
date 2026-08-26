@@ -21,6 +21,7 @@ import {
   QUEUE_CONTENT_CHAR_BUDGET,
   QUEUE_PERSIST_DEBOUNCE_MS,
   QUEUE_CONTENT_RESERVE_ACTIVE,
+  DEFAULT_LOOP_ENABLED,
 } from '../shared/constants';
 import { createExtensionError, formatErrorLog } from '../shared/errors';
 
@@ -166,6 +167,7 @@ export class TabManager {
     this.progressByTab = { ...(this.queue.progressByTab ?? {}) };
     this.pruneProgressByTabs();
     this.queue.persistedAt = this.queue.persistedAt ?? this.now();
+    this.queue.loopEnabled = this.queue.loopEnabled ?? DEFAULT_LOOP_ENABLED;
 
     if (this.fetchIgnoredDomains) {
       try {
@@ -309,6 +311,9 @@ export class TabManager {
     await this.stopInternal(true);
     this.queue.tabs = [];
     this.queue.currentIndex = 0;
+    // Why: loopEnabled も初期値へ戻す。tabs/currentIndex だけリセットすると
+    // キュークリア後もループ設定が残り、次セッションへ意図せず波及する状態リークになる
+    this.queue.loopEnabled = DEFAULT_LOOP_ENABLED;
 
     await this.persistQueue();
     this.emitStatus();
@@ -422,6 +427,12 @@ export class TabManager {
       return;
     }
 
+    // Why: write-once。常時上書きせず1周目の確定結果のみ固定する。
+    // 2周目は selectPlaybackContent ガードが先に return するためここは実行されない
+    if (playbackText && !tab.playbackText) {
+      tab.playbackText = playbackText;
+    }
+
     this.queue.currentIndex = targetIndex;
     this.queue.status = 'reading';
     this.queue.pausedByUser = false;  // 再生開始時にリセット
@@ -530,6 +541,9 @@ export class TabManager {
       tab.content = undefined;
       tab.summary = undefined;
       tab.translation = undefined;
+      // Why: write-once キャッシュは「同一 URL の確定テキスト」前提。reload で
+      // コンテンツが変わるため content/summary/translation と同じ箇所で破棄する
+      tab.playbackText = undefined;
     }
 
     await this.persistQueue();
@@ -552,6 +566,9 @@ export class TabManager {
         tab.summary = undefined;
         tab.translation = undefined;
         tab.content = undefined;
+        // Why: write-once キャッシュは「同一 URL の確定テキスト」前提。URL 変更で
+        // コンテンツが変わるため content/summary/translation と同じ箇所で破棄する
+        tab.playbackText = undefined;
       }
       tab.url = update.url;
       tab.isIgnored = this.isDomainIgnored(update.url);
@@ -678,6 +695,18 @@ export class TabManager {
       StorageManager.saveSettings(validated),
     ]);
 
+    this.emitStatus();
+  }
+
+  // Why: ReadingQueue 所属。TTSSettings 不可（validateSettings が rate/pitch/volume/voice 以外を除去するため）。
+  //      broadcast 直呼びではなく emitStatus() を使う。broadcast は BackgroundOrchestrator（service.ts）所属で
+  //      TabManager には存在しない。状態通知の正経路は emitStatus()→createStatusPayload()→status listener。
+  //      永続化は pause()/resume() と同じく persistQueue().catch(...) で fire-and-forget する。
+  setLoopEnabled(enabled: boolean): void {
+    this.queue.loopEnabled = enabled;
+    this.persistQueue().catch((error) => {
+      this.logError('QUEUE_PERSIST_FAILED', 'TabManager: failed to persist queue after setLoopEnabled', error);
+    });
     this.emitStatus();
   }
 
@@ -821,6 +850,7 @@ export class TabManager {
       tabs,
       settings: this.queue.settings,
       updatedAt: this.now(),
+      loopEnabled: this.queue.loopEnabled ?? DEFAULT_LOOP_ENABLED,
     };
   }
 
@@ -864,8 +894,31 @@ export class TabManager {
       return;
     }
 
-    // 完了したタブをキューから除去
     const completedIndex = this.queue.currentIndex;
+
+    // Why: loop=true のとき splice せずキューを維持し、先頭への wrap で周回再生する。
+    //      loop=false/undefined のときは既存挙動（splice→idle）を完全に維持する（後方互換）。
+    if (this.queue.loopEnabled) {
+      let nextIndex = this.findNextReadableIndex(completedIndex + 1);
+      if (nextIndex === -1) {
+        // 末尾到達: 先頭へ wrap して再走査
+        nextIndex = this.findNextReadableIndex(0);
+      }
+      if (nextIndex === -1) {
+        // 全タブが無視状態 → idle（無限空ループ防止）
+        this.stopInternal(false)
+          .then(() => this.persistQueue())
+          .then(() => this.emitStatus())
+          .catch((error) => this.logError('QUEUE_STOP_FAILED', 'TabManager: failed to stop queue on loop', error));
+        return;
+      }
+      this.processNext(nextIndex).catch((error) => {
+        this.logError('QUEUE_ADVANCE_FAILED', 'TabManager: failed to advance to next tab on loop', error);
+      });
+      return;
+    }
+
+    // loop=false: 既存挙動（splice除去）を維持
     if (completedIndex >= 0 && completedIndex < this.queue.tabs.length) {
       this.queue.tabs.splice(completedIndex, 1);
       this.pruneProgressByTabs();
@@ -1005,6 +1058,12 @@ export class TabManager {
       return false;
     }
 
+    // Why: playbackText が設定済みなら resolveContent（抽出+API）を完全スキップし
+    // 2周目以降のAPI実行ゼロを保証する（write-once キャッシュの短絡点）
+    if (tab.playbackText) {
+      return true;
+    }
+
     // Always call resolveContent if available, even if content exists
     // This allows waiting for AI summary/translation before playback
     if (this.resolveContent) {
@@ -1068,6 +1127,12 @@ export class TabManager {
   }
 
   private selectPlaybackContent(tab: TabInfo): string | null {
+    // Why: 2周目は「1周目に実際に流した確定テキスト」をそのまま返し、
+    // translation再優先による文ズレを防止する（write-once キャッシュの優先返却点）
+    if (tab.playbackText) {
+      return tab.playbackText;
+    }
+
     const translation = tab.translation?.trim();
     if (translation && translation.length > 0) {
       return translation;

@@ -11,6 +11,7 @@ export interface ReadingQueue {
   progressByTab?: Record<number, number>;
   persistedAt?: number;
   pausedByUser?: boolean;
+  loopEnabled?: boolean;
 }
 
 export interface QueueSnapshot extends ReadingQueue {

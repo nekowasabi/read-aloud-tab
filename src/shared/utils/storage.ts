@@ -1,5 +1,6 @@
 import { TTSSettings, STORAGE_KEYS, ReadingQueue, TabInfo, AiSettings } from '../types';
 import { BrowserAdapter } from './browser';
+import { DEFAULT_LOOP_ENABLED } from '../constants';
 
 export class StorageManager {
   private static readonly DEFAULT_SETTINGS: TTSSettings = {
@@ -24,6 +25,7 @@ export class StorageManager {
     },
     progressByTab: {},
     persistedAt: 0,
+    loopEnabled: DEFAULT_LOOP_ENABLED,
   };
 
   private static readonly DEFAULT_AI_SETTINGS: AiSettings = {
@@ -216,6 +218,7 @@ export async function loadQueue(): Promise<ReadingQueue> {
       }));
       queue.progressByTab = queue.progressByTab ?? {};
       queue.persistedAt = queue.persistedAt ?? Date.now();
+      queue.loopEnabled = queue.loopEnabled ?? DEFAULT_LOOP_ENABLED;
       return queue;
     }
 
