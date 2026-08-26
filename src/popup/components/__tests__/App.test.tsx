@@ -49,6 +49,7 @@ jest.mock('../../hooks/useTabQueue', () => ({
     skipPrevious: jest.fn().mockResolvedValue(undefined),
     control: mockControl,
     updateSettings: jest.fn().mockResolvedValue(undefined),
+    setLoop: jest.fn().mockResolvedValue(undefined),
   }),
 }));
 
@@ -142,7 +143,7 @@ describe('App integration', () => {
   test('再生コントロールが control を呼び出す', async () => {
     render(<App />);
 
-    const playButton = await screen.findByRole('button', { name: /再生/ });
+    const playButton = await screen.findByTitle('再生');
     fireEvent.click(playButton);
 
     expect(mockControl).toHaveBeenCalledWith('start');
@@ -275,7 +276,7 @@ describe('App integration', () => {
 
     it('再生コントロールが useQueueCommands 抽出後も control(start) を呼ぶ', async () => {
       render(<App />);
-      const playBtn = await screen.findByRole('button', { name: /再生/ });
+      const playBtn = await screen.findByTitle('再生');
       fireEvent.click(playBtn);
       expect(mockControl).toHaveBeenCalledWith('start');
     });

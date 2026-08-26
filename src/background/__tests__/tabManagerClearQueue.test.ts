@@ -2,6 +2,7 @@ import { TabManager } from '../tabManager';
 import type { PlaybackController } from '../tabManager';
 import type { TabInfo, ReadingQueue, TTSSettings } from '../../shared/types';
 import { loadQueue, saveQueue } from '../../shared/utils/storage';
+import { DEFAULT_LOOP_ENABLED } from '../../shared/constants';
 
 jest.mock('../aiProcessor', () => ({
   AiProcessor: jest.fn().mockImplementation(() => ({
@@ -123,5 +124,17 @@ describe('TabManager.clearQueue', () => {
 
     expect(playback.stop).not.toHaveBeenCalled();
     expect(mockedSaveQueue).not.toHaveBeenCalled();
+  });
+
+  test('loopEnabled が DEFAULT_LOOP_ENABLED にリセットされる（状態リーク防止）', async () => {
+    mockedLoadQueue.mockResolvedValue({ ...initialQueue, loopEnabled: true });
+
+    await manager.initialize();
+    expect(manager.getSnapshot().loopEnabled).toBe(true);
+
+    await manager.clearQueue();
+    await manager.flushPersistence();
+
+    expect(manager.getSnapshot().loopEnabled).toBe(DEFAULT_LOOP_ENABLED);
   });
 });
