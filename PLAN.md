@@ -51,18 +51,18 @@ commit_mode: manual
 # Progress Map
 | Process | Title | Status | Disjoint | Type | File |
 |---|---|---|---|---|---|
-| 01 | playbackText キャッシュ | ☐ | n | 変換 | [→ plan/process-01.md](plan/process-01.md) |
-| 02 | キュー全体ループ | ☐ | n | react | [→ plan/process-02.md](plan/process-02.md) |
-| 03 | QUEUE_SET_LOOP 経路 | ☐ | y | - | [→ plan/process-03.md](plan/process-03.md) |
-| 04 | popup UI トグル | ☐ | y | react | [→ plan/process-04.md](plan/process-04.md) |
-| 05 | scheduler 抑止 | ☐ | y | 変換 | [→ plan/process-05.md](plan/process-05.md) |
-| 10 | ループ制御テスト | ☐ | y | - | [→ plan/process-10.md](plan/process-10.md) |
-| 11 | キャッシュ短絡テスト | ☐ | y | - | [→ plan/process-11.md](plan/process-11.md) |
-| 200 | ドキュメント整備 | ☐ | n.a. | - | [→ plan/process-200.md](plan/process-200.md) |
-| 300 | OODA レトロ | ☐ | n.a. | - | [→ plan/process-300.md](plan/process-300.md) |
+| 01 | playbackText キャッシュ | ☑ | n | 変換 | [→ plan/process-01.md](plan/process-01.md) |
+| 02 | キュー全体ループ | ☑ | n | react | [→ plan/process-02.md](plan/process-02.md) |
+| 03 | QUEUE_SET_LOOP 経路 | ☑ | y | - | [→ plan/process-03.md](plan/process-03.md) |
+| 04 | popup UI トグル | ☑ | y | react | [→ plan/process-04.md](plan/process-04.md) |
+| 05 | scheduler 抑止 | ☑ | y | 変換 | [→ plan/process-05.md](plan/process-05.md) |
+| 10 | ループ制御テスト | ☑ | y | - | [→ plan/process-10.md](plan/process-10.md) |
+| 11 | キャッシュ短絡テスト | ☑ | y | - | [→ plan/process-11.md](plan/process-11.md) |
+| 200 | ドキュメント整備 | ☑ | n.a. | - | [→ plan/process-200.md](plan/process-200.md) |
+| 300 | OODA レトロ | ☑ | n.a. | - | [→ plan/process-300.md](plan/process-300.md) |
 **凡例**: Type=変換(transformation)/react(reactive)/-(scope:false)。Disjoint=y(symbol非重複・wave並列可)/n(tabManager.ts を P01・P02 共有→serial化)/n.a.(doc-only)。
 **DAG**: `P01→{P02,P05,P11}; P02→{P03,P10}; P03→P04; {P04,P05,P10,P11}→P200→P300`（`{}`=並列, `→`=順序）
-**Overall**: ☐ 0/9 completed
+**Overall**: ☑ 9/9 completed
 # Conflict Matrix
 | Process | Symbols (file:symbol) | Disjoint | Conf | Evidence |
 |---|---|---|---|---|

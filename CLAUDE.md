@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `queue-keepalive-plan`: ブラウザ非アクティブ時の読み上げ継続を支える keep-alive 戦略とポート再接続/状態復元の実装計画。
 - `queue-prefetch-summary`: 読み上げ中に次キューの翻訳・要約を先行実行して切り替え待機時間を解消する事前処理機能。
+- `queue-repeat-loop`: キュー全体ループ＋確定テキストキャッシュにより 2 周目以降の API 実行をゼロにする機能。
 
 ## 開発環境セットアップ
 
@@ -331,6 +332,33 @@ private selectPlaybackContent(tab: TabInfo): string {
 - プリフェッチ失敗時: exponential backoff (2s, 4s, 8s) で最大3回再試行
 - API呼び出し失敗時: ジョブをfailed状態へ、Popup UIから手動再試行可能
 - Storage容量超過時: TTL と FIFO削除で自動的にスペース確保
+
+### 6. キューリピート＋確定テキストキャッシュ
+
+**概要**: loopEnabled トグルでキュー全体を繰り返し再生し、1 周目の再生コンテンツを playbackText
+としてキャッシュすることで 2 周目以降の API 呼び出しをゼロにする機能。
+
+**主要コンポーネント**:
+- TabInfo.playbackText: 確定テキストキャッシュ（storage.local 永続化）
+- ReadingQueue.loopEnabled: ループ有効フラグ（TTSSettings 不可: validateSettings が除去するため）
+- QUEUE_SET_LOOP コマンド: loopEnabled のトグル
+
+**playbackText 書込点（processNext write-once）**:
+1 周目の selectPlaybackContent 直後に tab.playbackText へ代入し、persistQueue で永続化。
+
+**ensureTabReady / selectPlaybackContent 短絡**:
+- ensureTabReady: playbackText が存在すれば即 return（API・プリフェッチ経路へ進まない）
+- selectPlaybackContent: playbackText を最優先で返す
+
+**handlePlaybackEnd loop 分岐**:
+loopEnabled === true かつ末尾到達時、splice を実行せず currentIndex = 0 に巻き戻す。
+全タブが isIgnored=true の場合は無限ループ防止のため idle 停止。
+
+**scheduler プリフェッチ抑止（Process 05 連携）**:
+collectTargets にて candidate.playbackText が存在するタブを除外。
+再生経路とプリフェッチ経路の両方で「API実行ゼロ」を完全保証。
+
+**詳細設計**: docs/requirements/queue-repeat-loop.md 参照
 
 ## 実装優先度と段階的リリース計画
 
