@@ -1,10 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import {
-  QueueCommandMessage,
-  QueueProgressPayload,
-  QueueStatusPayload,
-  QueueTabInput,
-} from '../../shared/messages';
+import { QueueProgressPayload, QueueStatusPayload, QueueTabInput } from '../../shared/messages';
 import { TTSSettings } from '../../shared/types';
 import { filterProgressByTabs, parseQueueMessage } from './tabQueue/queueMessageReducer';
 import { useQueuePort } from './tabQueue/useQueuePort';
@@ -54,12 +49,12 @@ export default function useTabQueue(): UseTabQueueResult {
       case 'STATUS_UPDATE': {
         const payload = action.payload as QueueStatusPayload;
         setState(payload);
-        setProgressByTab((prev) => filterProgressByTabs(prev, payload));
+        setProgressByTab(prev => filterProgressByTabs(prev, payload));
         break;
       }
       case 'PROGRESS_UPDATE': {
         const payload = action.payload as QueueProgressPayload;
-        setProgressByTab((prev) => ({
+        setProgressByTab(prev => ({
           ...prev,
           [payload.tabId]: payload.progress,
         }));

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { TTSSettings } from '../../shared/types';
 import IgnoreListManager from './IgnoreListManager';
 // === process5 sub4: UI改善（設定パネルに性別フィルター追加）===
-import { filterVoices, getVoiceGender, VoiceFilter } from '../../shared/utils/voiceSelector';
+import { filterVoices } from '../../shared/utils/voiceSelector';
 
 interface Props {
   settings: TTSSettings;
@@ -11,7 +11,10 @@ interface Props {
 }
 
 // Debounce function to prevent rapid successive calls
-function debounce<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): (...args: Parameters<T>) => void {
   let timeoutId: NodeJS.Timeout | null = null;
   return (...args: Parameters<T>) => {
     if (timeoutId) {
@@ -67,17 +70,13 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
     return filterVoices(voices, { language: 'ja' });
   };
 
-  const getAllVoices = (): SpeechSynthesisVoice[] => {
-    const japaneseVoices = getJapaneseVoices();
-    const otherVoices = voices.filter(voice => !japaneseVoices.includes(voice));
-    return [...japaneseVoices, ...otherVoices];
-  };
-
   return (
     <div className="settings-panel">
       <div className="settings-header">
         <h3>設定</h3>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <button className="close-btn" onClick={onClose}>
+          ×
+        </button>
       </div>
 
       <div className="settings-content">
@@ -93,7 +92,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
                 max="3"
                 step="0.1"
                 value={localSettings.rate}
-                onChange={(e) => handleSettingChange('rate', parseFloat(e.target.value))}
+                onChange={e => handleSettingChange('rate', parseFloat(e.target.value))}
                 className="range-input"
               />
               <div className="range-labels">
@@ -106,16 +105,14 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
 
           <div className="setting-item">
             <label>
-              <span className="setting-label">
-                音量: {Math.round(localSettings.volume * 100)}%
-              </span>
+              <span className="setting-label">音量: {Math.round(localSettings.volume * 100)}%</span>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.1"
                 value={localSettings.volume}
-                onChange={(e) => handleSettingChange('volume', parseFloat(e.target.value))}
+                onChange={e => handleSettingChange('volume', parseFloat(e.target.value))}
                 className="range-input"
               />
               <div className="range-labels">
@@ -128,16 +125,14 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
 
           <div className="setting-item">
             <label>
-              <span className="setting-label">
-                音の高さ: {formatValue(localSettings.pitch)}
-              </span>
+              <span className="setting-label">音の高さ: {formatValue(localSettings.pitch)}</span>
               <input
                 type="range"
                 min="0"
                 max="2"
                 step="0.1"
                 value={localSettings.pitch}
-                onChange={(e) => handleSettingChange('pitch', parseFloat(e.target.value))}
+                onChange={e => handleSettingChange('pitch', parseFloat(e.target.value))}
                 className="range-input"
               />
               <div className="range-labels">
@@ -154,7 +149,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
               <span className="setting-label">性別フィルター</span>
               <select
                 value={localSettings.preferredGender || 'female'}
-                onChange={(e) => handleSettingChange('preferredGender', e.target.value)}
+                onChange={e => handleSettingChange('preferredGender', e.target.value)}
                 className="voice-select"
               >
                 <option value="any">すべて</option>
@@ -169,7 +164,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
               <span className="setting-label">音声</span>
               <select
                 value={localSettings.voice || ''}
-                onChange={(e) => handleSettingChange('voice', e.target.value)}
+                onChange={e => handleSettingChange('voice', e.target.value)}
                 className="voice-select"
               >
                 <option value="">デフォルト</option>
@@ -184,11 +179,13 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
                 )}
                 {voices.filter(voice => !getJapaneseVoices().includes(voice)).length > 0 && (
                   <optgroup label="その他の音声">
-                    {voices.filter(voice => !getJapaneseVoices().includes(voice)).map(voice => (
-                      <option key={voice.name} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
+                    {voices
+                      .filter(voice => !getJapaneseVoices().includes(voice))
+                      .map(voice => (
+                        <option key={voice.name} value={voice.name}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))}
                   </optgroup>
                 )}
               </select>
@@ -202,14 +199,8 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
         </div>
 
         <div className="settings-info">
-          <p className="info-text">
-            💡 設定は自動的に保存されます
-          </p>
-          {voices.length === 0 && (
-            <p className="warning-text">
-              ⚠️ 音声リストを読み込み中です...
-            </p>
-          )}
+          <p className="info-text">💡 設定は自動的に保存されます</p>
+          {voices.length === 0 && <p className="warning-text">⚠️ 音声リストを読み込み中です...</p>}
         </div>
       </div>
     </div>

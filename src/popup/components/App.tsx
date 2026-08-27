@@ -70,9 +70,10 @@ export default function App() {
   // surface as error toasts via sendCommand's rejection path.  Only fully
   // disable controls when the connection has been given up entirely.
   const isConnected = connectionState !== 'disconnected';
-  const manifestVersion = typeof chrome !== 'undefined' && chrome.runtime?.getManifest
-    ? chrome.runtime.getManifest().version
-    : undefined;
+  const manifestVersion =
+    typeof chrome !== 'undefined' && chrome.runtime?.getManifest
+      ? chrome.runtime.getManifest().version
+      : undefined;
   const appVersion = manifestVersion || __APP_VERSION__;
 
   const { handleAddCurrentTab, handleAddAllTabs } = useAddTabsActions(addTab);
@@ -108,11 +109,12 @@ export default function App() {
       try {
         await removeTab(tabId);
       } catch (commandError) {
-        const message = commandError instanceof Error ? commandError.message : 'キューからの削除に失敗しました';
+        const message =
+          commandError instanceof Error ? commandError.message : 'キューからの削除に失敗しました';
         setError(message);
       }
     },
-    [removeTab],
+    [removeTab]
   );
 
   const handleReorder = useCallback(
@@ -120,23 +122,13 @@ export default function App() {
       try {
         await reorderTabs(from, to);
       } catch (commandError) {
-        const message = commandError instanceof Error ? commandError.message : 'キューの並び替えに失敗しました';
+        const message =
+          commandError instanceof Error ? commandError.message : 'キューの並び替えに失敗しました';
         setError(message);
       }
     },
-    [reorderTabs],
+    [reorderTabs]
   );
-
-  const handleResetQueue = useCallback(async () => {
-    try {
-      await clearQueue();
-      setError('キューをリセットしました');
-      setTimeout(() => setError(null), 3000);
-    } catch (commandError) {
-      const message = commandError instanceof Error ? commandError.message : 'キューのリセットに失敗しました';
-      setError(message);
-    }
-  }, [clearQueue]);
 
   const handleControl = useCallback(
     async (action: 'start' | 'pause' | 'resume' | 'stop') => {
@@ -147,7 +139,7 @@ export default function App() {
         setError(message);
       }
     },
-    [control],
+    [control]
   );
 
   const handleSettingsChange = useCallback(
@@ -169,17 +161,19 @@ export default function App() {
             await updateSettings(validated);
           } catch (saveError) {
             console.error('Failed to save settings:', saveError);
-            const message = saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
+            const message =
+              saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
             setError(message);
           }
         }, SETTINGS_DEBOUNCE_MS);
       } catch (validationError) {
         console.error('Failed to validate settings:', validationError);
-        const message = validationError instanceof Error ? validationError.message : '設定の検証に失敗しました';
+        const message =
+          validationError instanceof Error ? validationError.message : '設定の検証に失敗しました';
         setError(message);
       }
     },
-    [updateSettings, setSettings],
+    [updateSettings, setSettings]
   );
 
   const clearError = useCallback(() => setError(null), []);
@@ -188,32 +182,32 @@ export default function App() {
     chrome.runtime?.sendMessage?.({ type: 'PREFETCH_RETRY', payload: { tabId } });
   }, []);
 
-  const handleSummaryWaitModeChange = useCallback((mode: 'wait' | 'skip') => {
-    setSummaryWaitMode(mode);
-    chrome.runtime?.sendMessage?.({ type: 'SET_SUMMARY_WAIT_MODE', mode });
-  }, [setSummaryWaitMode]);
+  const handleSummaryWaitModeChange = useCallback(
+    (mode: 'wait' | 'skip') => {
+      setSummaryWaitMode(mode);
+      chrome.runtime?.sendMessage?.({ type: 'SET_SUMMARY_WAIT_MODE', mode });
+    },
+    [setSummaryWaitMode]
+  );
 
   const queueStatus = queueState?.status ?? 'idle';
   const queueTabs = queueState?.tabs ?? [];
   const queueIndex = queueState?.currentIndex ?? 0;
 
-  const handleToggle = useCallback(
-    async () => {
-      try {
-        if (queueStatus === 'reading') {
-          await control('pause');
-        } else if (queueStatus === 'paused') {
-          await control('resume');
-        } else {
-          await control('start');
-        }
-      } catch (commandError) {
-        const message = commandError instanceof Error ? commandError.message : '操作に失敗しました';
-        setError(message);
+  const handleToggle = useCallback(async () => {
+    try {
+      if (queueStatus === 'reading') {
+        await control('pause');
+      } else if (queueStatus === 'paused') {
+        await control('resume');
+      } else {
+        await control('start');
       }
-    },
-    [queueStatus, control],
-  );
+    } catch (commandError) {
+      const message = commandError instanceof Error ? commandError.message : '操作に失敗しました';
+      setError(message);
+    }
+  }, [queueStatus, control]);
 
   if (isLoading) {
     return (
@@ -233,10 +227,12 @@ export default function App() {
         <button
           className="settings-toggle"
           onClick={() => {
-            BrowserAdapter.getInstance().runtime.openOptionsPage().catch((err) => {
-              console.error('Failed to open options page:', err);
-              setError('設定画面を開けませんでした');
-            });
+            BrowserAdapter.getInstance()
+              .runtime.openOptionsPage()
+              .catch(err => {
+                console.error('Failed to open options page:', err);
+                setError('設定画面を開けませんでした');
+              });
           }}
           title="設定"
         >
@@ -255,7 +251,9 @@ export default function App() {
       {error && (
         <div className="error-message" role="alert">
           <span>{error}</span>
-          <button onClick={clearError} className="error-close">×</button>
+          <button onClick={clearError} className="error-close">
+            ×
+          </button>
         </div>
       )}
 
@@ -268,11 +266,7 @@ export default function App() {
         >
           キューに追加
         </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={handleAddAllTabsWithError}
-        >
+        <button type="button" className="btn btn-secondary" onClick={handleAddAllTabsWithError}>
           すべてのタブを追加
         </button>
       </div>
@@ -285,10 +279,7 @@ export default function App() {
         connectionState={connectionState}
       />
 
-      <QuickControls
-        settings={settings}
-        onChange={handleSettingsChange}
-      />
+      <QuickControls settings={settings} onChange={handleSettingsChange} />
 
       <ControlButtons
         isReading={queueStatus === 'reading' || queueStatus === 'paused'}
@@ -298,8 +289,11 @@ export default function App() {
         disabled={!isConnected}
         loopEnabled={queueState?.loopEnabled ?? false}
         onLoopToggle={() => {
-          setLoop(!(queueState?.loopEnabled ?? false)).catch((commandError) => {
-            const message = commandError instanceof Error ? commandError.message : 'ループ設定の変更に失敗しました';
+          setLoop(!(queueState?.loopEnabled ?? false)).catch(commandError => {
+            const message =
+              commandError instanceof Error
+                ? commandError.message
+                : 'ループ設定の変更に失敗しました';
             setError(message);
           });
         }}
@@ -318,20 +312,29 @@ export default function App() {
         onRemoveTab={handleRemoveTab}
         onReorder={handleReorder}
         onSkipNext={() => {
-          skipNext().catch((commandError) => {
-            const message = commandError instanceof Error ? commandError.message : '次のタブへの移動に失敗しました';
+          skipNext().catch(commandError => {
+            const message =
+              commandError instanceof Error
+                ? commandError.message
+                : '次のタブへの移動に失敗しました';
             setError(message);
           });
         }}
         onSkipPrevious={() => {
-          skipPrevious().catch((commandError) => {
-            const message = commandError instanceof Error ? commandError.message : '前のタブへの移動に失敗しました';
+          skipPrevious().catch(commandError => {
+            const message =
+              commandError instanceof Error
+                ? commandError.message
+                : '前のタブへの移動に失敗しました';
             setError(message);
           });
         }}
         onClearQueue={() => {
-          clearQueue().catch((commandError) => {
-            const message = commandError instanceof Error ? commandError.message : 'キューのリセットに失敗しました';
+          clearQueue().catch(commandError => {
+            const message =
+              commandError instanceof Error
+                ? commandError.message
+                : 'キューのリセットに失敗しました';
             setError(message);
           });
         }}

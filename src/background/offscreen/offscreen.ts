@@ -8,11 +8,7 @@
 
 import { TTSEngine } from '../ttsEngine';
 import { TabInfo, TTSSettings } from '../../shared/types';
-import {
-  OffscreenCommandMessage,
-  OffscreenBroadcastMessage,
-  isOffscreenCommandMessage,
-} from '../../shared/messages';
+import { OffscreenBroadcastMessage, isOffscreenCommandMessage } from '../../shared/messages';
 
 /**
  * Performance metrics for keep-alive monitoring
@@ -80,7 +76,7 @@ class OffscreenTTSController {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.handleMessage(message)
         .then(() => sendResponse({ success: true }))
-        .catch((error) => {
+        .catch(error => {
           this.logger.error('[OffscreenTTS] Message handling error', error);
           this.broadcastError('MESSAGE_HANDLING_ERROR', error.message, error);
           sendResponse({ success: false, error: error.message });
@@ -133,10 +129,10 @@ class OffscreenTTSController {
           this.broadcastEnd();
           this.broadcastStatus('idle');
         },
-        onError: (error) => {
+        onError: error => {
           this.broadcastError('TTS_PLAYBACK_ERROR', error.message, error);
         },
-        onProgress: (progress) => {
+        onProgress: progress => {
           this.broadcastProgress(progress);
         },
       });
@@ -243,7 +239,7 @@ class OffscreenTTSController {
   }
 
   private sendToServiceWorker(message: OffscreenBroadcastMessage): void {
-    chrome.runtime.sendMessage(message).catch((error) => {
+    chrome.runtime.sendMessage(message).catch(error => {
       this.logger.warn('[OffscreenTTS] Failed to send message to service worker', error);
     });
   }
@@ -328,7 +324,7 @@ class OffscreenTTSController {
   private updateMetrics(success: boolean): void {
     if (success) {
       this.metrics.totalHeartbeatsSent++;
-      
+
       // Track heartbeat gap
       if (this.lastHeartbeatAt !== null) {
         this.metrics.lastHeartbeatGap = Date.now() - this.lastHeartbeatAt;
@@ -357,17 +353,11 @@ class OffscreenTTSController {
 
     // High success rate (>95%): can increase interval slightly
     if (successRate >= 0.95) {
-      newInterval = Math.min(
-        this.heartbeatIntervalMs + 2000,
-        this.config.maxIntervalMs
-      );
+      newInterval = Math.min(this.heartbeatIntervalMs + 2000, this.config.maxIntervalMs);
     }
     // Low success rate (<80%): decrease interval for reliability
     else if (successRate < 0.8) {
-      newInterval = Math.max(
-        this.heartbeatIntervalMs - 2000,
-        this.config.minIntervalMs
-      );
+      newInterval = Math.max(this.heartbeatIntervalMs - 2000, this.config.minIntervalMs);
     }
 
     // If gap is dangerously close to 30s timeout, decrease interval
@@ -390,7 +380,7 @@ class OffscreenTTSController {
    */
   updateConfig(config: Partial<KeepAliveConfig>): void {
     this.config = { ...this.config, ...config };
-    
+
     // If heartbeat interval changed, restart heartbeat
     if (config.heartbeatIntervalMs !== undefined) {
       this.heartbeatIntervalMs = config.heartbeatIntervalMs;
@@ -437,7 +427,9 @@ class OffscreenTTSController {
     const delay = Math.min(500 * Math.pow(2, this.reconnectAttempts), 5000);
     this.reconnectAttempts++;
 
-    this.logger.info(`[OffscreenTTS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    this.logger.info(
+      `[OffscreenTTS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+    );
 
     this.reconnectTimer = setTimeout(() => {
       this.setupKeepAlivePort();

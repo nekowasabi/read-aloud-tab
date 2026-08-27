@@ -52,7 +52,7 @@ const DEFAULT_MIN_CHUNK_SIZE = 50;
  * Sentence boundary patterns for splitting text
  * Includes Japanese and English sentence terminators
  */
-const SENTENCE_BOUNDARIES = /[。！？\.!\?]+[\s\n]*/g;
+const SENTENCE_BOUNDARIES = /[。！？.!?]+[\s\n]*/g;
 
 /**
  * Split long text into chunks suitable for TTS synthesis
