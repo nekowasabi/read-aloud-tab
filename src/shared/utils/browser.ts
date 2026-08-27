@@ -13,7 +13,7 @@ export class BrowserAdapter implements BrowserAPI {
 
   tabs = {
     query: async (queryInfo: any): Promise<any[]> => {
-      return new Promise((resolve) => {
+      return new Promise(resolve => {
         if (typeof chrome !== 'undefined' && chrome.tabs) {
           chrome.tabs.query(queryInfo, resolve);
         } else if (typeof browser !== 'undefined' && browser.tabs) {
@@ -27,7 +27,7 @@ export class BrowserAdapter implements BrowserAPI {
     sendMessage: async (tabId: number, message: any): Promise<any> => {
       return new Promise((resolve, reject) => {
         if (typeof chrome !== 'undefined' && chrome.tabs) {
-          chrome.tabs.sendMessage(tabId, message, (response) => {
+          chrome.tabs.sendMessage(tabId, message, response => {
             if (chrome.runtime.lastError) {
               reject(chrome.runtime.lastError);
             } else {
@@ -46,7 +46,7 @@ export class BrowserAdapter implements BrowserAPI {
   storage = {
     sync: {
       get: async (keys?: string | string[] | null): Promise<any> => {
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
           if (typeof chrome !== 'undefined' && chrome.storage) {
             chrome.storage.sync.get(keys || {}, resolve);
           } else if (typeof browser !== 'undefined' && browser.storage) {
@@ -93,13 +93,39 @@ export class BrowserAdapter implements BrowserAPI {
         });
       },
     },
+    local: {
+      get: async (keys?: string | string[] | null): Promise<any> => {
+        return new Promise((resolve, reject) => {
+          if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.get(keys || {}, result => {
+              if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+              else resolve(result);
+            });
+          } else if (typeof browser !== 'undefined' && browser.storage) {
+            browser.storage.local.get(keys).then(resolve).catch(reject);
+          } else resolve({});
+        });
+      },
+      set: async (items: any): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.set(items, () => {
+              if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+              else resolve();
+            });
+          } else if (typeof browser !== 'undefined' && browser.storage)
+            browser.storage.local.set(items).then(resolve).catch(reject);
+          else resolve();
+        });
+      },
+    },
   };
 
   runtime = {
     sendMessage: async (message: any): Promise<any> => {
       return new Promise((resolve, reject) => {
         if (typeof chrome !== 'undefined' && chrome.runtime) {
-          chrome.runtime.sendMessage(message, (response) => {
+          chrome.runtime.sendMessage(message, response => {
             if (chrome.runtime.lastError) {
               reject(chrome.runtime.lastError);
             } else {
@@ -152,7 +178,11 @@ export class BrowserAdapter implements BrowserAPI {
               resolve();
             }
           });
-        } else if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.openOptionsPage) {
+        } else if (
+          typeof browser !== 'undefined' &&
+          browser.runtime &&
+          browser.runtime.openOptionsPage
+        ) {
           browser.runtime.openOptionsPage().then(resolve).catch(reject);
         } else {
           reject(new Error('Browser API not available'));
@@ -175,7 +205,11 @@ export class BrowserAdapter implements BrowserAPI {
 
   // 現在のブラウザを判定
   static getBrowserType(): 'chrome' | 'firefox' | 'unknown' {
-    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getManifest === 'function') {
+    if (
+      typeof chrome !== 'undefined' &&
+      chrome.runtime &&
+      typeof chrome.runtime.getManifest === 'function'
+    ) {
       return 'chrome';
     } else if (typeof browser !== 'undefined' && browser.runtime) {
       return 'firefox';
@@ -184,13 +218,17 @@ export class BrowserAdapter implements BrowserAPI {
   }
 
   // Feature Detection
-  static isFeatureSupported(feature: 'speechSynthesis' | 'storageSync' | 'offscreen' | string): boolean {
+  static isFeatureSupported(
+    feature: 'speechSynthesis' | 'storageSync' | 'offscreen' | string
+  ): boolean {
     switch (feature) {
       case 'speechSynthesis':
         return typeof speechSynthesis !== 'undefined';
       case 'storageSync':
-        return (typeof chrome !== 'undefined' && !!chrome.storage?.sync) ||
-               (typeof browser !== 'undefined' && !!browser.storage?.sync);
+        return (
+          (typeof chrome !== 'undefined' && !!chrome.storage?.sync) ||
+          (typeof browser !== 'undefined' && !!browser.storage?.sync)
+        );
       case 'offscreen':
         return typeof chrome !== 'undefined' && !!chrome.offscreen;
       default:
@@ -199,12 +237,15 @@ export class BrowserAdapter implements BrowserAPI {
   }
 
   // Offscreen Document API (Chrome only)
-  static async createOffscreenDocument(url: string, reasons: chrome.offscreen.Reason[], justification: string): Promise<void> {
+  static async createOffscreenDocument(
+    url: string,
+    reasons: chrome.offscreen.Reason[],
+    justification: string
+  ): Promise<void> {
     if (!this.isFeatureSupported('offscreen')) {
       throw new Error('Offscreen API is not supported in this browser');
     }
 
-    // @ts-ignore - chrome.offscreen is only available in Chrome
     await chrome.offscreen.createDocument({
       url,
       reasons,
@@ -217,7 +258,6 @@ export class BrowserAdapter implements BrowserAPI {
       return; // No-op for browsers without offscreen API
     }
 
-    // @ts-ignore - chrome.offscreen is only available in Chrome
     await chrome.offscreen.closeDocument();
   }
 
@@ -227,11 +267,9 @@ export class BrowserAdapter implements BrowserAPI {
     }
 
     try {
-      // @ts-ignore - chrome.runtime.getContexts and OFFSCREEN_DOCUMENT are only available in Chrome MV3
       const existingContexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT' as any],
       });
-      // @ts-ignore
       return existingContexts.length > 0;
     } catch (error) {
       console.error('Failed to check offscreen document', error);

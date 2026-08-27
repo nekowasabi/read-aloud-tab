@@ -23,12 +23,14 @@ export interface UseOptionsDataResult {
   ignoredDomains: string[];
   aiSettings: AiSettings;
   developerMode: boolean;
+  autoQueueNewTabs: boolean;
   isLoading: boolean;
   loadError: string | null;
   setSettings: React.Dispatch<React.SetStateAction<TTSSettings>>;
   setIgnoredDomains: React.Dispatch<React.SetStateAction<string[]>>;
   setAiSettings: React.Dispatch<React.SetStateAction<AiSettings>>;
   setDeveloperMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setAutoQueueNewTabs: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export function useOptionsData(): UseOptionsDataResult {
@@ -36,6 +38,7 @@ export function useOptionsData(): UseOptionsDataResult {
   const [ignoredDomains, setIgnoredDomains] = useState<string[]>([]);
   const [aiSettings, setAiSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [developerMode, setDeveloperMode] = useState(false);
+  const [autoQueueNewTabs, setAutoQueueNewTabs] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -43,17 +46,20 @@ export function useOptionsData(): UseOptionsDataResult {
     let mounted = true;
     (async () => {
       try {
-        const [loadedSettings, domains, loadedAiSettings, devModeFlag] = await Promise.all([
-          StorageManager.getSettings(),
-          getIgnoredDomains(),
-          StorageManager.getAiSettings(),
-          StorageManager.getDeveloperMode(),
-        ]);
+        const [loadedSettings, domains, loadedAiSettings, devModeFlag, autoQueueFlag] =
+          await Promise.all([
+            StorageManager.getSettings(),
+            getIgnoredDomains(),
+            StorageManager.getAiSettings(),
+            StorageManager.getDeveloperMode(),
+            StorageManager.getAutoQueueNewTabs?.() ?? Promise.resolve(false),
+          ]);
         if (!mounted) return;
         setSettings(loadedSettings);
         setIgnoredDomains(domains);
         setAiSettings(loadedAiSettings);
         setDeveloperMode(devModeFlag);
+        setAutoQueueNewTabs(autoQueueFlag);
       } catch (error) {
         console.error('[useOptionsData] failed to load data', error);
         if (mounted) setLoadError('設定の読み込みに失敗しました');
@@ -61,7 +67,9 @@ export function useOptionsData(): UseOptionsDataResult {
         if (mounted) setIsLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return {
@@ -75,5 +83,7 @@ export function useOptionsData(): UseOptionsDataResult {
     setIgnoredDomains,
     setAiSettings,
     setDeveloperMode,
+    autoQueueNewTabs,
+    setAutoQueueNewTabs,
   };
 }

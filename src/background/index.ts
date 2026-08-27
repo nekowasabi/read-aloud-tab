@@ -3,6 +3,7 @@ import { TabManager } from './tabManager';
 import { BackgroundOrchestrator } from './service';
 import { AiPrefetcher } from './aiPrefetcher';
 import { TabInfo } from '../shared/types';
+import { AutoQueueManager } from './autoQueueManager';
 
 const ttsEngine = new TTSEngine();
 
@@ -23,7 +24,11 @@ const orchestrator = new BackgroundOrchestrator({
 
 aiPrefetcher.initialize();
 
-orchestrator.initialize().catch((error) => {
+const autoQueueManager = new AutoQueueManager(tabManager, (tab, ignored) =>
+  orchestrator.isTabQueueCandidate(tab, ignored)
+);
+
+orchestrator.initialize().catch(error => {
   console.error('Failed to initialize Read Aloud Tab background service', error);
 });
 
@@ -35,10 +40,20 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+if (chrome.runtime.onStartup)
+  chrome.runtime.onStartup.addListener(() => autoQueueManager.onStartup());
+
 // Listen for storage changes to refresh ignored domains (Chrome/Firefox)
 const handleStorageChange = (changes: any, areaName: string) => {
+  if (
+    areaName === 'sync' &&
+    changes.autoQueueNewTabs &&
+    typeof changes.autoQueueNewTabs.newValue === 'boolean'
+  ) {
+    autoQueueManager.onSettingChanged(changes.autoQueueNewTabs.newValue);
+  }
   if (areaName === 'sync' && changes.ignoredDomains) {
-    tabManager.refreshIgnoredDomains().catch((error) => {
+    tabManager.refreshIgnoredDomains().catch(error => {
       console.warn('Failed to refresh ignored domains on change', error);
     });
   }
@@ -50,19 +65,18 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
   browser.storage.onChanged.addListener(handleStorageChange);
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  tabManager.onTabClosed(tabId).catch((error) => {
-    console.warn('Failed to handle tab removal', error);
-  });
+chrome.tabs.onRemoved.addListener(tabId => {
+  autoQueueManager.onRemoved(tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  autoQueueManager.onUpdated(tabId, { ...tab, url: changeInfo.url ?? tab.url });
   if (!tab.url) {
     return;
   }
 
   if (changeInfo.status === 'loading') {
-    tabManager.onTabLoading(tabId).catch((error) => {
+    tabManager.onTabLoading(tabId).catch(error => {
       console.warn('Failed to handle tab loading', error);
     });
   }
@@ -76,10 +90,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 
   if (changeInfo.status === 'complete') {
-    tabManager.onTabUpdated(tabId, update).catch((error) => {
+    tabManager.onTabUpdated(tabId, update).catch(error => {
       console.warn('Failed to handle tab update', error);
     });
   }
 });
+
+chrome.tabs.onCreated.addListener(tab => autoQueueManager.onCreated(tab));
 
 export {}; // Keep the file as a module

@@ -1,6 +1,6 @@
 import { TTSSettings, STORAGE_KEYS, ReadingQueue, TabInfo, AiSettings } from '../types';
 import { BrowserAdapter } from './browser';
-import { DEFAULT_LOOP_ENABLED } from '../constants';
+import { DEFAULT_AUTO_QUEUE_NEW_TABS, DEFAULT_LOOP_ENABLED } from '../constants';
 
 export class StorageManager {
   private static readonly DEFAULT_SETTINGS: TTSSettings = {
@@ -33,8 +33,10 @@ export class StorageManager {
     openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
     enableAiSummary: false,
     enableAiTranslation: false,
-    summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
-    translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+    summaryPrompt:
+      'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+    translationPrompt:
+      'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
     openRouterProvider: '',
     summaryWaitMode: 'wait',
   };
@@ -114,22 +116,31 @@ export class StorageManager {
 
   static validateAiSettings(settings: Partial<AiSettings>): AiSettings {
     return {
-      openRouterApiKey: (settings.openRouterApiKey ?? this.DEFAULT_AI_SETTINGS.openRouterApiKey).trim(),
-      openRouterModel: (settings.openRouterModel ?? this.DEFAULT_AI_SETTINGS.openRouterModel).trim(),
+      openRouterApiKey: (
+        settings.openRouterApiKey ?? this.DEFAULT_AI_SETTINGS.openRouterApiKey
+      ).trim(),
+      openRouterModel: (
+        settings.openRouterModel ?? this.DEFAULT_AI_SETTINGS.openRouterModel
+      ).trim(),
       enableAiSummary: settings.enableAiSummary ?? this.DEFAULT_AI_SETTINGS.enableAiSummary,
-      enableAiTranslation: settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
-      summaryPrompt: typeof settings.summaryPrompt === 'string'
-        ? settings.summaryPrompt.trim()
-        : this.DEFAULT_AI_SETTINGS.summaryPrompt,
-      translationPrompt: typeof settings.translationPrompt === 'string'
-        ? settings.translationPrompt.trim()
-        : this.DEFAULT_AI_SETTINGS.translationPrompt,
-      openRouterProvider: typeof settings.openRouterProvider === 'string'
-        ? settings.openRouterProvider.trim()
-        : this.DEFAULT_AI_SETTINGS.openRouterProvider,
-      summaryWaitMode: settings.summaryWaitMode === 'wait' || settings.summaryWaitMode === 'skip'
-        ? settings.summaryWaitMode
-        : this.DEFAULT_AI_SETTINGS.summaryWaitMode,
+      enableAiTranslation:
+        settings.enableAiTranslation ?? this.DEFAULT_AI_SETTINGS.enableAiTranslation,
+      summaryPrompt:
+        typeof settings.summaryPrompt === 'string'
+          ? settings.summaryPrompt.trim()
+          : this.DEFAULT_AI_SETTINGS.summaryPrompt,
+      translationPrompt:
+        typeof settings.translationPrompt === 'string'
+          ? settings.translationPrompt.trim()
+          : this.DEFAULT_AI_SETTINGS.translationPrompt,
+      openRouterProvider:
+        typeof settings.openRouterProvider === 'string'
+          ? settings.openRouterProvider.trim()
+          : this.DEFAULT_AI_SETTINGS.openRouterProvider,
+      summaryWaitMode:
+        settings.summaryWaitMode === 'wait' || settings.summaryWaitMode === 'skip'
+          ? settings.summaryWaitMode
+          : this.DEFAULT_AI_SETTINGS.summaryWaitMode,
     };
   }
 
@@ -162,6 +173,26 @@ export class StorageManager {
       console.error('Failed to update developer mode flag:', error);
       throw error;
     }
+  }
+
+  static async getAutoQueueNewTabs(): Promise<boolean> {
+    try {
+      const result = await BrowserAdapter.getInstance().storage.sync.get(
+        STORAGE_KEYS.AUTO_QUEUE_NEW_TABS
+      );
+      return typeof result?.[STORAGE_KEYS.AUTO_QUEUE_NEW_TABS] === 'boolean'
+        ? result[STORAGE_KEYS.AUTO_QUEUE_NEW_TABS]
+        : DEFAULT_AUTO_QUEUE_NEW_TABS;
+    } catch (error) {
+      console.error('Failed to load auto queue setting:', error);
+      return DEFAULT_AUTO_QUEUE_NEW_TABS;
+    }
+  }
+
+  static async setAutoQueueNewTabs(enabled: boolean): Promise<void> {
+    await BrowserAdapter.getInstance().storage.sync.set({
+      [STORAGE_KEYS.AUTO_QUEUE_NEW_TABS]: enabled,
+    });
   }
 }
 
@@ -209,7 +240,7 @@ export async function loadQueue(): Promise<ReadingQueue> {
       return await migrateStorageSchema(result);
     }
 
-  if (result && result[STORAGE_KEYS.READING_QUEUE]) {
+    if (result && result[STORAGE_KEYS.READING_QUEUE]) {
       // Convert Date strings back to Date objects
       const queue = result[STORAGE_KEYS.READING_QUEUE] as ReadingQueue;
       queue.tabs = queue.tabs.map(tab => ({
@@ -246,6 +277,30 @@ export async function clearQueue(): Promise<void> {
     console.error('Failed to clear reading queue:', error);
     throw error;
   }
+}
+
+export async function getPendingAutoQueueTabIds(): Promise<number[]> {
+  try {
+    const result = await BrowserAdapter.getInstance().storage.local.get(
+      STORAGE_KEYS.PENDING_AUTO_QUEUE_TAB_IDS
+    );
+    const ids = result?.[STORAGE_KEYS.PENDING_AUTO_QUEUE_TAB_IDS];
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== 'number' || !Number.isFinite(id)))
+      return [];
+    return [...new Set(ids)];
+  } catch (error) {
+    console.error('Failed to load pending auto queue tabs:', error);
+    return [];
+  }
+}
+
+export async function setPendingAutoQueueTabIds(tabIds: number[]): Promise<void> {
+  const normalized = [
+    ...new Set(tabIds.filter(id => typeof id === 'number' && Number.isFinite(id))),
+  ];
+  await BrowserAdapter.getInstance().storage.local.set({
+    [STORAGE_KEYS.PENDING_AUTO_QUEUE_TAB_IDS]: normalized,
+  });
 }
 
 // Ignored domains management

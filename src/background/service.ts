@@ -1,4 +1,4 @@
-import { TabInfo, STORAGE_KEYS, KeepAliveDiagnostics } from '../shared/types';
+import { TabInfo, KeepAliveDiagnostics } from '../shared/types';
 import {
   QueueCommandMessage,
   QueueBroadcastMessage,
@@ -7,7 +7,6 @@ import {
   QueueErrorPayload,
   QueueAddPayload,
   isQueueCommandMessage,
-  OffscreenCommandMessage,
   OffscreenBroadcastMessage,
   isOffscreenBroadcastMessage,
   PrefetchCommandMessage,
@@ -951,7 +950,7 @@ export class BackgroundOrchestrator {
     }
   }
 
-  private isTabQueueCandidate(tab: any, ignoredDomains: Set<string>): boolean {
+  isTabQueueCandidate(tab: any, ignoredDomains: Set<string>): boolean {
     if (!tab || typeof tab.id !== 'number' || !tab.url) {
       return false;
     }

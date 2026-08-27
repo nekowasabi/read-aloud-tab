@@ -16,6 +16,8 @@ export default function OptionsApp() {
     setAiSettings,
     developerMode,
     setDeveloperMode,
+    autoQueueNewTabs,
+    setAutoQueueNewTabs,
     isLoading,
   } = useOptionsData();
 
@@ -63,7 +65,7 @@ export default function OptionsApp() {
 
   const handleExport = async () => {
     try {
-      await exportSettings(settings, ignoredDomains, aiSettings);
+      await exportSettings(settings, ignoredDomains, aiSettings, autoQueueNewTabs);
       setMessage('設定ファイルをダウンロードしました');
     } catch (error) {
       console.error('OptionsApp: failed to export data', error);
@@ -91,6 +93,8 @@ export default function OptionsApp() {
       if (result.aiSettings) {
         setAiSettings(result.aiSettings);
       }
+      if (typeof result.autoQueueNewTabs === 'boolean')
+        setAutoQueueNewTabs(result.autoQueueNewTabs);
       setMessage('インポートが完了しました');
     } catch (error) {
       console.error('OptionsApp: failed to import data', error);
@@ -117,6 +121,18 @@ export default function OptionsApp() {
     }
   };
 
+  const handleAutoQueueChange = async (enabled: boolean) => {
+    setAutoQueueNewTabs(enabled);
+    try {
+      await StorageManager.setAutoQueueNewTabs?.(enabled);
+      setMessage('設定を保存しました');
+    } catch (error) {
+      console.error('OptionsApp: failed to update auto queue setting', error);
+      setAutoQueueNewTabs(!enabled);
+      setMessage('設定の保存に失敗しました');
+    }
+  };
+
   return (
     <div className="options-container">
       <header className="options-header">
@@ -137,253 +153,288 @@ export default function OptionsApp() {
       )}
 
       {isLoading ? null : (
-      <>
-      <section className="options-section">
-        <h2>音声設定</h2>
-        <div className="setting-item">
-          <label htmlFor="rate">読み上げ速度</label>
-          <input
-            id="rate"
-            type="number"
-            min={0.5}
-            max={3}
-            step={0.1}
-            value={settings.rate}
-            onChange={(event) => handleSettingChange('rate', parseFloat(event.target.value))}
-          />
-        </div>
-        <div className="setting-item">
-          <label htmlFor="pitch">音の高さ</label>
-          <input
-            id="pitch"
-            type="number"
-            min={0}
-            max={2}
-            step={0.1}
-            value={settings.pitch}
-            onChange={(event) => handleSettingChange('pitch', parseFloat(event.target.value))}
-          />
-        </div>
-        <div className="setting-item">
-          <label htmlFor="volume">音量</label>
-          <input
-            id="volume"
-            type="number"
-            min={0}
-            max={1}
-            step={0.1}
-            value={settings.volume}
-            onChange={(event) => handleSettingChange('volume', parseFloat(event.target.value))}
-          />
-        </div>
-      </section>
+        <>
+          <section className="options-section">
+            <h2>音声設定</h2>
+            <div className="setting-item">
+              <label htmlFor="rate">読み上げ速度</label>
+              <input
+                id="rate"
+                type="number"
+                min={0.5}
+                max={3}
+                step={0.1}
+                value={settings.rate}
+                onChange={event => handleSettingChange('rate', parseFloat(event.target.value))}
+              />
+            </div>
+            <div className="setting-item">
+              <label htmlFor="pitch">音の高さ</label>
+              <input
+                id="pitch"
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
+                value={settings.pitch}
+                onChange={event => handleSettingChange('pitch', parseFloat(event.target.value))}
+              />
+            </div>
+            <div className="setting-item">
+              <label htmlFor="volume">音量</label>
+              <input
+                id="volume"
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                value={settings.volume}
+                onChange={event => handleSettingChange('volume', parseFloat(event.target.value))}
+              />
+            </div>
+          </section>
 
-      <section className="options-section">
-        <h2>開発者向け</h2>
-        <div className="setting-item">
-          <label htmlFor="developer-mode">
-            <input
-              id="developer-mode"
-              type="checkbox"
-              checked={developerMode}
-              onChange={(event) => handleDeveloperModeChange(event.target.checked)}
-            />
-            開発者モードを有効にする
-          </label>
-          <p className="setting-help">
-            再接続ログや heartbeat メトリクスなどの診断情報をポップアップで表示します。
-          </p>
-        </div>
-      </section>
+          <section className="options-section">
+            <h2>開発者向け</h2>
+            <div className="setting-item">
+              <label htmlFor="developer-mode">
+                <input
+                  id="developer-mode"
+                  type="checkbox"
+                  checked={developerMode}
+                  onChange={event => handleDeveloperModeChange(event.target.checked)}
+                />
+                開発者モードを有効にする
+              </label>
+              <p className="setting-help">
+                再接続ログや heartbeat メトリクスなどの診断情報をポップアップで表示します。
+              </p>
+            </div>
+          </section>
 
-      <section className="options-section">
-        <h2>無視リスト</h2>
-        <IgnoreListManager initialDomains={ignoredDomains} onChange={handleIgnoreListChange} />
-      </section>
+          <section className="options-section">
+            <h2>自動キュー</h2>
+            <div className="setting-item">
+              <label htmlFor="auto-queue-new-tabs">
+                <input
+                  id="auto-queue-new-tabs"
+                  type="checkbox"
+                  checked={autoQueueNewTabs}
+                  onChange={event => handleAutoQueueChange(event.target.checked)}
+                />
+                新しく開いたタブを自動的にキューへ追加する
+              </label>
+              <p className="setting-help" id="auto-queue-new-tabs-help">
+                空タブは最初の通常ページ遷移時に追加します。内部ページ・除外ドメインは対象外で、自動再生はせず既存プリフェッチ対象になります。
+              </p>
+            </div>
+          </section>
 
-      <section className="options-section">
-        <h2>AI 要約・翻訳設定</h2>
-        <p className="section-description">
-          OpenRouter APIを使用して、長文を要約したり日本語に翻訳して読み上げることができます。
-          両方を有効にすると、要約してから日本語に翻訳して読み上げます。
-        </p>
-        <div className="setting-item">
-          <label htmlFor="enableAiSummary">
-            <input
-              id="enableAiSummary"
-              type="checkbox"
-              checked={aiSettings.enableAiSummary}
-              onChange={(event) => handleAiSettingChange('enableAiSummary', event.target.checked)}
-              aria-label="AI要約を有効化"
-            />
-            AI要約を有効化
-          </label>
-          <p className="setting-description">
-            長文を短く要約して読み上げます。効率的に内容を把握できます。
-          </p>
-        </div>
-        {aiSettings.enableAiSummary && (
-          <div className="setting-item">
-            <label htmlFor="summaryWaitMode">
-              <span className="setting-label">要約待機モード</span>
-              <select
-                id="summaryWaitMode"
-                value={aiSettings.summaryWaitMode || 'wait'}
-                onChange={(e) => handleAiSettingChange('summaryWaitMode', e.target.value)}
-              >
-                <option value="wait">要約完了まで待つ</option>
-                <option value="skip">タイムアウト後スキップ</option>
-              </select>
-            </label>
-            <p className="setting-description">
-              「要約完了まで待つ」を選ぶと、要約が完了するまで次のタブの読み上げを待機します。
+          <section className="options-section">
+            <h2>無視リスト</h2>
+            <IgnoreListManager initialDomains={ignoredDomains} onChange={handleIgnoreListChange} />
+          </section>
+
+          <section className="options-section">
+            <h2>AI 要約・翻訳設定</h2>
+            <p className="section-description">
+              OpenRouter APIを使用して、長文を要約したり日本語に翻訳して読み上げることができます。
+              両方を有効にすると、要約してから日本語に翻訳して読み上げます。
             </p>
-          </div>
-        )}
-        <div className="setting-item">
-          <label htmlFor="summaryPrompt">要約プロンプト</label>
-          <textarea
-            id="summaryPrompt"
-            value={aiSettings.summaryPrompt}
-            onChange={(event) => handleAiSettingChange('summaryPrompt', event.target.value)}
-            rows={4}
-            className="settings-textarea"
-            placeholder="要約結果のトーンや構成を指示するプロンプトを入力"
-          />
-          <p className="setting-hint">例: 箇条書きで 3 行以内の日本語要約を生成するよう指示します。</p>
-        </div>
-        <div className="setting-item">
-          <label htmlFor="enableAiTranslation">
-            <input
-              id="enableAiTranslation"
-              type="checkbox"
-              checked={aiSettings.enableAiTranslation}
-              onChange={(event) => handleAiSettingChange('enableAiTranslation', event.target.checked)}
-              aria-label="AI翻訳を有効化"
-            />
-            AI翻訳を有効化
-          </label>
-          <p className="setting-description">
-            外国語のコンテンツを日本語に翻訳して読み上げます。
-          </p>
-        </div>
-        <div className="setting-item">
-          <label htmlFor="translationPrompt">翻訳プロンプト</label>
-          <textarea
-            id="translationPrompt"
-            value={aiSettings.translationPrompt}
-            onChange={(event) => handleAiSettingChange('translationPrompt', event.target.value)}
-            rows={4}
-            className="settings-textarea"
-            placeholder="翻訳スタイルや注意点を指示するプロンプト。{{targetLanguage}} プレースホルダーが利用できます"
-          />
-          <p className="setting-hint">{'例: 「{{targetLanguage}} で自然な文章になるように訳し、機械翻訳の不自然さを避ける」など。'}</p>
-        </div>
-        <div className="setting-item">
-          <label htmlFor="openRouterApiKey">OpenRouter APIキー</label>
-          <input
-            id="openRouterApiKey"
-            type="password"
-            value={aiSettings.openRouterApiKey}
-            onChange={(event) => handleAiSettingChange('openRouterApiKey', event.target.value)}
-            placeholder="sk-or-..."
-            aria-label="OpenRouter APIキー"
-          />
-        </div>
-        <div className="setting-item">
-          <label htmlFor="openRouterModel">OpenRouterモデル名</label>
-          <input
-            id="openRouterModel"
-            type="text"
-            value={aiSettings.openRouterModel}
-            onChange={(event) => handleAiSettingChange('openRouterModel', event.target.value)}
-            placeholder="meta-llama/llama-3.2-1b-instruct"
-            aria-label="OpenRouterモデル名"
-          />
-        </div>
-        <div className="setting-item">
-          <label htmlFor="openRouterProvider">プロバイダ指定（オプション）</label>
-          <input
-            id="openRouterProvider"
-            type="text"
-            value={aiSettings.openRouterProvider || ''}
-            onChange={(event) => handleAiSettingChange('openRouterProvider', event.target.value)}
-            placeholder="例: DeepInfra, Together, OpenAI"
-            aria-label="OpenRouterプロバイダ"
-          />
-          <p className="setting-hint">特定のプロバイダを優先したい場合に指定してください。空欄の場合は自動選択されます。</p>
-        </div>
-        <div className="setting-item">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => runConnectionTest(aiSettings)}
-            disabled={isTestingConnection || !aiSettings.openRouterApiKey}
-          >
-            接続テスト
-          </button>
-          {isTestingConnection && (
-            <span className="connection-test-loading" style={{ marginLeft: '10px' }}>
-              接続テスト中...
-            </span>
-          )}
-        </div>
-        {connectionTestResult && (
-          <div
-            className={`connection-test-result ${connectionTestResult.success ? 'success' : 'error'}`}
-            style={{
-              padding: '10px',
-              marginTop: '10px',
-              borderRadius: '4px',
-              backgroundColor: connectionTestResult.success ? '#d4edda' : '#f8d7da',
-              color: connectionTestResult.success ? '#155724' : '#721c24',
-              border: `1px solid ${connectionTestResult.success ? '#c3e6cb' : '#f5c6cb'}`,
-            }}
-          >
-            {connectionTestResult.success ? (
-              <span>✓ 接続に成功しました</span>
-            ) : (
-              <span>✗ 接続に失敗しました: {connectionTestResult.error}</span>
+            <div className="setting-item">
+              <label htmlFor="enableAiSummary">
+                <input
+                  id="enableAiSummary"
+                  type="checkbox"
+                  checked={aiSettings.enableAiSummary}
+                  onChange={event => handleAiSettingChange('enableAiSummary', event.target.checked)}
+                  aria-label="AI要約を有効化"
+                />
+                AI要約を有効化
+              </label>
+              <p className="setting-description">
+                長文を短く要約して読み上げます。効率的に内容を把握できます。
+              </p>
+            </div>
+            {aiSettings.enableAiSummary && (
+              <div className="setting-item">
+                <label htmlFor="summaryWaitMode">
+                  <span className="setting-label">要約待機モード</span>
+                  <select
+                    id="summaryWaitMode"
+                    value={aiSettings.summaryWaitMode || 'wait'}
+                    onChange={e => handleAiSettingChange('summaryWaitMode', e.target.value)}
+                  >
+                    <option value="wait">要約完了まで待つ</option>
+                    <option value="skip">タイムアウト後スキップ</option>
+                  </select>
+                </label>
+                <p className="setting-description">
+                  「要約完了まで待つ」を選ぶと、要約が完了するまで次のタブの読み上げを待機します。
+                </p>
+              </div>
             )}
-          </div>
-        )}
+            <div className="setting-item">
+              <label htmlFor="summaryPrompt">要約プロンプト</label>
+              <textarea
+                id="summaryPrompt"
+                value={aiSettings.summaryPrompt}
+                onChange={event => handleAiSettingChange('summaryPrompt', event.target.value)}
+                rows={4}
+                className="settings-textarea"
+                placeholder="要約結果のトーンや構成を指示するプロンプトを入力"
+              />
+              <p className="setting-hint">
+                例: 箇条書きで 3 行以内の日本語要約を生成するよう指示します。
+              </p>
+            </div>
+            <div className="setting-item">
+              <label htmlFor="enableAiTranslation">
+                <input
+                  id="enableAiTranslation"
+                  type="checkbox"
+                  checked={aiSettings.enableAiTranslation}
+                  onChange={event =>
+                    handleAiSettingChange('enableAiTranslation', event.target.checked)
+                  }
+                  aria-label="AI翻訳を有効化"
+                />
+                AI翻訳を有効化
+              </label>
+              <p className="setting-description">
+                外国語のコンテンツを日本語に翻訳して読み上げます。
+              </p>
+            </div>
+            <div className="setting-item">
+              <label htmlFor="translationPrompt">翻訳プロンプト</label>
+              <textarea
+                id="translationPrompt"
+                value={aiSettings.translationPrompt}
+                onChange={event => handleAiSettingChange('translationPrompt', event.target.value)}
+                rows={4}
+                className="settings-textarea"
+                placeholder="翻訳スタイルや注意点を指示するプロンプト。{{targetLanguage}} プレースホルダーが利用できます"
+              />
+              <p className="setting-hint">
+                {
+                  '例: 「{{targetLanguage}} で自然な文章になるように訳し、機械翻訳の不自然さを避ける」など。'
+                }
+              </p>
+            </div>
+            <div className="setting-item">
+              <label htmlFor="openRouterApiKey">OpenRouter APIキー</label>
+              <input
+                id="openRouterApiKey"
+                type="password"
+                value={aiSettings.openRouterApiKey}
+                onChange={event => handleAiSettingChange('openRouterApiKey', event.target.value)}
+                placeholder="sk-or-..."
+                aria-label="OpenRouter APIキー"
+              />
+            </div>
+            <div className="setting-item">
+              <label htmlFor="openRouterModel">OpenRouterモデル名</label>
+              <input
+                id="openRouterModel"
+                type="text"
+                value={aiSettings.openRouterModel}
+                onChange={event => handleAiSettingChange('openRouterModel', event.target.value)}
+                placeholder="meta-llama/llama-3.2-1b-instruct"
+                aria-label="OpenRouterモデル名"
+              />
+            </div>
+            <div className="setting-item">
+              <label htmlFor="openRouterProvider">プロバイダ指定（オプション）</label>
+              <input
+                id="openRouterProvider"
+                type="text"
+                value={aiSettings.openRouterProvider || ''}
+                onChange={event => handleAiSettingChange('openRouterProvider', event.target.value)}
+                placeholder="例: DeepInfra, Together, OpenAI"
+                aria-label="OpenRouterプロバイダ"
+              />
+              <p className="setting-hint">
+                特定のプロバイダを優先したい場合に指定してください。空欄の場合は自動選択されます。
+              </p>
+            </div>
+            <div className="setting-item">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => runConnectionTest(aiSettings)}
+                disabled={isTestingConnection || !aiSettings.openRouterApiKey}
+              >
+                接続テスト
+              </button>
+              {isTestingConnection && (
+                <span className="connection-test-loading" style={{ marginLeft: '10px' }}>
+                  接続テスト中...
+                </span>
+              )}
+            </div>
+            {connectionTestResult && (
+              <div
+                className={`connection-test-result ${connectionTestResult.success ? 'success' : 'error'}`}
+                style={{
+                  padding: '10px',
+                  marginTop: '10px',
+                  borderRadius: '4px',
+                  backgroundColor: connectionTestResult.success ? '#d4edda' : '#f8d7da',
+                  color: connectionTestResult.success ? '#155724' : '#721c24',
+                  border: `1px solid ${connectionTestResult.success ? '#c3e6cb' : '#f5c6cb'}`,
+                }}
+              >
+                {connectionTestResult.success ? (
+                  <span>✓ 接続に成功しました</span>
+                ) : (
+                  <span>✗ 接続に失敗しました: {connectionTestResult.error}</span>
+                )}
+              </div>
+            )}
+          </section>
 
-      </section>
+          <section className="options-section">
+            <h2>エクスポート / インポート</h2>
+            <div className="export-actions">
+              <button type="button" className="btn btn-secondary" onClick={handleExport}>
+                エクスポート
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleImportClick}
+                disabled={isImporting}
+              >
+                {isImporting ? 'インポート中…' : 'インポート'}
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                style={{ display: 'none' }}
+                onChange={handleFileImport}
+                data-testid="import-file-input"
+              />
+            </div>
+          </section>
 
-      <section className="options-section">
-        <h2>エクスポート / インポート</h2>
-        <div className="export-actions">
-          <button type="button" className="btn btn-secondary" onClick={handleExport}>
-            エクスポート
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleImportClick}
-            disabled={isImporting}
-          >
-            {isImporting ? 'インポート中…' : 'インポート'}
-          </button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json"
-            style={{ display: 'none' }}
-            onChange={handleFileImport}
-            data-testid="import-file-input"
-          />
-        </div>
-      </section>
-
-      <section className="options-section">
-        <h2>キーボードショートカット</h2>
-        <p>以下のショートカットはブラウザ側の設定画面で変更できます（Chrome: <code>chrome://extensions/shortcuts</code>）。</p>
-        <ul className="shortcut-list">
-          <li><code>Alt+R</code> / <code>Option+R</code>: 読み上げを再生/一時停止</li>
-          <li><code>Ctrl+Shift+Q</code> / <code>Command+Shift+Q</code>: すべてのタブをキューに追加して再生</li>
-        </ul>
-      </section>
-      </>
+          <section className="options-section">
+            <h2>キーボードショートカット</h2>
+            <p>
+              以下のショートカットはブラウザ側の設定画面で変更できます（Chrome:{' '}
+              <code>chrome://extensions/shortcuts</code>）。
+            </p>
+            <ul className="shortcut-list">
+              <li>
+                <code>Alt+R</code> / <code>Option+R</code>: 読み上げを再生/一時停止
+              </li>
+              <li>
+                <code>Ctrl+Shift+Q</code> / <code>Command+Shift+Q</code>:
+                すべてのタブをキューに追加して再生
+              </li>
+            </ul>
+          </section>
+        </>
       )}
     </div>
   );

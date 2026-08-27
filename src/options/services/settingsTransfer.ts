@@ -13,6 +13,7 @@ export interface ExportPayload {
   settings: TTSSettings;
   ignoredDomains: string[];
   aiSettings?: AiSettings;
+  autoQueueNewTabs: boolean;
 }
 
 /**
@@ -23,15 +24,17 @@ export async function exportSettings(
   settings: TTSSettings,
   ignoredDomains: string[],
   aiSettings: AiSettings,
+  autoQueueNewTabs = false
 ): Promise<Blob> {
   const payload: ExportPayload = {
-    version: 2,
+    version: 3,
     settings,
     ignoredDomains,
     aiSettings: {
       ...aiSettings,
       openRouterApiKey: '', // exclude API key for security
     },
+    autoQueueNewTabs,
   };
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -50,6 +53,7 @@ export interface ImportResult {
   settings: TTSSettings;
   ignoredDomains: string[];
   aiSettings?: AiSettings;
+  autoQueueNewTabs?: boolean;
 }
 
 /**
@@ -67,6 +71,10 @@ export async function importSettings(raw: string): Promise<ImportResult> {
   if (!Array.isArray(parsed.ignoredDomains)) {
     throw new Error('Invalid ignored domains');
   }
+  if (parsed.version === 3 && typeof parsed.autoQueueNewTabs !== 'boolean')
+    throw new Error('Invalid auto queue setting');
+  if (parsed.version !== undefined && parsed.version !== 2 && parsed.version !== 3)
+    throw new Error('Unsupported version');
 
   await StorageManager.saveSettings(parsed.settings);
   await chrome.storage.sync.set({ [STORAGE_KEYS.IGNORED_DOMAINS]: parsed.ignoredDomains });
@@ -76,11 +84,14 @@ export async function importSettings(raw: string): Promise<ImportResult> {
     validatedAi = StorageManager.validateAiSettings(parsed.aiSettings);
     await StorageManager.saveAiSettings(validatedAi);
   }
+  if (typeof parsed.autoQueueNewTabs === 'boolean')
+    await StorageManager.setAutoQueueNewTabs(parsed.autoQueueNewTabs);
 
   return {
     settings: parsed.settings,
     ignoredDomains: parsed.ignoredDomains,
     aiSettings: validatedAi,
+    autoQueueNewTabs: parsed.autoQueueNewTabs,
   };
 }
 

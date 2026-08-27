@@ -16,6 +16,10 @@ export interface BrowserAPI {
       set: (items: any) => Promise<void>;
       remove: (keys: string | string[]) => Promise<void>;
     };
+    local: {
+      get: (keys?: string | string[] | null) => Promise<any>;
+      set: (items: any) => Promise<void>;
+    };
   };
   runtime: {
     sendMessage: (message: any) => Promise<any>;
@@ -34,6 +38,8 @@ export const STORAGE_KEYS = {
   SCHEMA_VERSION: 'schemaVersion',
   AI_SETTINGS: 'ai_settings',
   DEVELOPER_MODE: 'developerMode',
+  AUTO_QUEUE_NEW_TABS: 'autoQueueNewTabs',
+  PENDING_AUTO_QUEUE_TAB_IDS: 'pendingAutoQueueTabIds',
 } as const;
 
 export interface KeepAliveDiagnostics {

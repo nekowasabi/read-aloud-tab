@@ -127,6 +127,9 @@ export const DEFAULT_PREFERRED_GENDER = 'female' as const;
 
 /** ループ再生のデフォルト値（後方互換のため false） */
 export const DEFAULT_LOOP_ENABLED = false;
+export const DEFAULT_AUTO_QUEUE_NEW_TABS = false;
+export const AUTO_QUEUE_NEW_TABS_KEY = 'autoQueueNewTabs';
+export const PENDING_AUTO_QUEUE_TAB_IDS_KEY = 'pendingAutoQueueTabIds';
 
 /** デフォルトの優先言語 */
 export const DEFAULT_PREFERRED_LANGUAGE = 'ja' as const;
