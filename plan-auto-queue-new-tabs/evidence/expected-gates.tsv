@@ -1,0 +1,14 @@
+gate_id	required	phase	command	pass_criteria
+P01-VG-01	true	Red	npx jest src/shared/utils/__tests__/storage.test.ts --runInBand	仕様理由によるRed
+P01-VG-02	true	Green	npx jest src/shared/utils/__tests__/storage.test.ts --runInBand	終了コード0
+P01-VG-03	true	Refactor	npm run typecheck && npm run lint && npx jest src/shared/utils/__tests__/storage.test.ts --runInBand && git diff --check	品質ゲート成功
+P02-VG-01	true	Red	npx jest src/options/hooks/__tests__/useOptionsData.test.ts src/options/__tests__/OptionsApp.test.tsx src/options/services/__tests__/settingsTransfer.test.ts --runInBand	仕様理由によるRed
+P02-VG-02	true	Green	npx jest src/options/hooks/__tests__/useOptionsData.test.ts src/options/__tests__/OptionsApp.test.tsx src/options/services/__tests__/settingsTransfer.test.ts --runInBand	終了コード0
+P02-VG-03	true	Refactor	npm run typecheck && npm run lint && git diff --check	品質ゲート成功
+P03-VG-01	true	Red	npm test -- --runInBand src/background/__tests__/autoQueueManager.test.ts	仕様理由によるRed
+P03-VG-02	true	Green	npm test -- --runInBand src/background/__tests__/autoQueueManager.test.ts src/background/__tests__/*backgroundService*.test.ts	終了コード0
+P03-VG-03	true	Refactor	npm run typecheck && npm run lint && npm run format:check	品質ゲート成功
+P100-VG-01	true	unit-integration	npx jest --runInBand src/shared/utils/__tests__/storage.test.ts src/options/hooks/__tests__/useOptionsData.test.ts src/options/__tests__/OptionsApp.test.tsx src/options/services/__tests__/settingsTransfer.test.ts src/background/__tests__/autoQueueManager.test.ts src/background/__tests__/backgroundService.test.ts	終了コード0
+P100-VG-02	true	build-quality	npm run typecheck && npm run lint && npm run build:chrome && npm run build:firefox	両ブラウザービルド成功
+P100-VG-03	true	regression	npm run test	全テスト成功
+P100-VG-04	true	visual-compatibility	executor:human	Chrome/Firefox実機記録

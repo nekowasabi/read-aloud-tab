@@ -1,0 +1,49 @@
+{
+  "task_id": "T-20260827-auto-queue-new-tabs",
+  "schema_version": 3,
+  "constants": {
+    "HOT_FILE_THRESHOLD": 3,
+    "ISOLATION_MIN_DIFF_LINES": 80,
+    "MIN_PARALLEL_DIFF_LINES": 20
+  },
+  "shared_resource_patterns": [],
+  "git_managed": true,
+  "processes": [
+    {
+      "id": "P01",
+      "name": "設定・pending保存",
+      "core_path": "plan-auto-queue-new-tabs/process-01.md",
+      "files": ["src/shared/types/index.ts", "src/shared/constants.ts", "src/shared/utils/storage.ts", "src/shared/utils/__tests__/storage.test.ts"],
+      "symbols": ["STORAGE_KEYS", "DEFAULT_AUTO_QUEUE_NEW_TABS", "StorageManager", "getPendingAutoQueueTabIds", "setPendingAutoQueueTabIds"],
+      "depends_on": [],
+      "est_diff_lines": 80
+    },
+    {
+      "id": "P02",
+      "name": "UI・export/import",
+      "core_path": "plan-auto-queue-new-tabs/process-02.md",
+      "files": ["src/options/hooks/useOptionsData.ts", "src/options/OptionsApp.tsx", "src/options/services/settingsTransfer.ts"],
+      "symbols": ["useOptionsData", "OptionsApp", "exportSettings", "importSettings"],
+      "depends_on": ["P01"],
+      "est_diff_lines": 90
+    },
+    {
+      "id": "P03",
+      "name": "onCreated/onUpdated状態機械",
+      "core_path": "plan-auto-queue-new-tabs/process-03.md",
+      "files": ["src/background/autoQueueManager.ts", "src/background/index.ts", "src/background/service.ts", "src/background/__tests__/autoQueueManager.test.ts"],
+      "symbols": ["AutoQueueManager", "tabs.onCreated", "tabs.onUpdated", "tabs.onRemoved", "runtime.onStartup"],
+      "depends_on": ["P01"],
+      "est_diff_lines": 150
+    },
+    {
+      "id": "P100",
+      "name": "統合検証",
+      "core_path": "plan-auto-queue-new-tabs/process-100.md",
+      "files": ["src/**/__tests__/*", "src/manifest/manifest.chrome.json", "src/manifest/manifest.firefox.json"],
+      "symbols": ["integration gates", "manual compatibility"],
+      "depends_on": ["P02", "P03"],
+      "est_diff_lines": 0
+    }
+  ]
+}

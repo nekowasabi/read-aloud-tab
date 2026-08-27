@@ -1,0 +1,74 @@
+{
+  "conflict_edges": [],
+  "exec_nodes": [
+    {
+      "core_path": "plan-auto-queue-new-tabs/process-01.md",
+      "depends_on": [],
+      "est_diff_lines": 80,
+      "id": "P01",
+      "is_merge": false,
+      "isolation": false,
+      "merges": [],
+      "model": null
+    },
+    {
+      "core_path": "plan-auto-queue-new-tabs/process-02.md",
+      "depends_on": [
+        "P01"
+      ],
+      "est_diff_lines": 90,
+      "id": "P02",
+      "is_merge": false,
+      "isolation": false,
+      "merges": [],
+      "model": null
+    },
+    {
+      "core_path": "plan-auto-queue-new-tabs/process-03.md",
+      "depends_on": [
+        "P01"
+      ],
+      "est_diff_lines": 150,
+      "id": "P03",
+      "is_merge": false,
+      "isolation": false,
+      "merges": [],
+      "model": null
+    },
+    {
+      "core_path": "plan-auto-queue-new-tabs/process-100.md",
+      "depends_on": [
+        "P02",
+        "P03"
+      ],
+      "est_diff_lines": 0,
+      "id": "P100",
+      "is_merge": false,
+      "isolation": false,
+      "merges": [],
+      "model": null
+    }
+  ],
+  "merge_nodes": [],
+  "wave_projection": [
+    {
+      "processes": [
+        "P01"
+      ],
+      "wave": "W01"
+    },
+    {
+      "processes": [
+        "P02",
+        "P03"
+      ],
+      "wave": "W02"
+    },
+    {
+      "processes": [
+        "P100"
+      ],
+      "wave": "W03"
+    }
+  ]
+}
