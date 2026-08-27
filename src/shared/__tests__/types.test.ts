@@ -3,13 +3,7 @@
  * TDD RED Phase: These tests will fail until types are implemented
  */
 
-import {
-  ReadingQueue,
-  TabInfo,
-  QueueMessage,
-  QueueStatus,
-  TTSSettings,
-} from '../types';
+import { ReadingQueue, TabInfo, QueueMessage, QueueStatus } from '../types';
 
 describe('Type Definitions', () => {
   describe('ReadingQueue interface', () => {

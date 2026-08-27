@@ -2,7 +2,7 @@
  * useQueuePort.test.ts
  * Process 100 Red Phase: queue port接続hookのテスト
  */
-import { renderHook, act } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useQueuePort } from '../tabQueue/useQueuePort';
 
 const mockConnect = jest.fn();
@@ -61,8 +61,6 @@ describe('useQueuePort (Process 100)', () => {
     const onMessage = jest.fn();
     const { result } = renderHook(() => useQueuePort(onMessage));
 
-    await expect(
-      result.current.sendCommand({ type: 'QUEUE_CLEAR' }),
-    ).rejects.toThrow();
+    await expect(result.current.sendCommand({ type: 'QUEUE_CLEAR' })).rejects.toThrow();
   });
 });

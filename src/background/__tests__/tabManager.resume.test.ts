@@ -1,6 +1,5 @@
 import { TabManager } from '../tabManager';
 import { QueueStatusPayload } from '../../shared/messages';
-import { StorageManager } from '../../shared/utils/storage';
 
 jest.mock('../../shared/utils/storage', () => {
   const original = jest.requireActual('../../shared/utils/storage');
@@ -76,7 +75,7 @@ describe('TabManager resume capability', () => {
     const { tabManager, playback } = createTabManager();
 
     const statusUpdates: QueueStatusPayload[] = [];
-    tabManager.addStatusListener((payload) => statusUpdates.push(payload));
+    tabManager.addStatusListener(payload => statusUpdates.push(payload));
 
     await tabManager.initialize();
     expect(playback.start).not.toHaveBeenCalled();

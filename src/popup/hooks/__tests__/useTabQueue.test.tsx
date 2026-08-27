@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { render, screen, act, fireEvent, cleanup } from '@testing-library/react';
 import useTabQueue from '../useTabQueue';
 import { QueueStatusPayload } from '../../../shared/messages';
@@ -53,9 +53,7 @@ describe('useTabQueue', () => {
     };
 
     await act(async () => {
-      listeners.forEach((listener) =>
-        listener({ type: 'QUEUE_STATUS_UPDATE', payload }),
-      );
+      listeners.forEach(listener => listener({ type: 'QUEUE_STATUS_UPDATE', payload }));
     });
 
     expect(screen.getByText('reading')).toBeInTheDocument();
@@ -160,7 +158,9 @@ describe('useTabQueue', () => {
 
     expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
     // 次テストへの残留を防ぐため明示的にアンマウント
-    act(() => { unmount(); });
+    act(() => {
+      unmount();
+    });
     jest.useRealTimers();
   });
 
@@ -182,11 +182,17 @@ describe('useTabQueue', () => {
       const { unmount } = render(<TestComponent />);
       // アンマウント前に切断ハンドラを取得（cleanup順序の観点）
       const disconnectHandler = port.onDisconnect.addListener.mock.calls[0]?.[0];
-      act(() => { unmount(); });
+      act(() => {
+        unmount();
+      });
       if (disconnectHandler) {
         // アンマウント後の切断通知で再接続が起きないこと
-        act(() => { disconnectHandler(); });
-        act(() => { jest.advanceTimersByTime(1000); });
+        act(() => {
+          disconnectHandler();
+        });
+        act(() => {
+          jest.advanceTimersByTime(1000);
+        });
       }
       // connect は初回マウント時の1回のみ（再接続なし）
       expect(chrome.runtime.connect).toHaveBeenCalledTimes(1);

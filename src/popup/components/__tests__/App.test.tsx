@@ -60,7 +60,7 @@ jest.mock('../../../shared/utils/storage', () => ({
   StorageManager: {
     getSettings: jest.fn().mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null }),
     saveSettings: jest.fn().mockResolvedValue(undefined),
-    validateSettings: jest.fn((settings) => settings),
+    validateSettings: jest.fn(settings => settings),
     getDeveloperMode: jest.fn().mockResolvedValue(false),
   },
   getIgnoredDomains: jest.fn().mockResolvedValue([]),
@@ -84,7 +84,11 @@ jest.mock('../../../shared/utils/browser', () => ({
   },
 }));
 
-const storage = require('../../../shared/utils/storage');
+const storage = jest.mocked(
+  jest.requireMock(
+    '../../../shared/utils/storage'
+  ) as typeof import('../../../shared/utils/storage')
+);
 
 describe('App integration', () => {
   beforeEach(() => {
@@ -94,7 +98,9 @@ describe('App integration', () => {
     storage.getIgnoredDomains.mockResolvedValue([]);
 
     // Mock BrowserAdapter methods
-    mockBrowserQuery.mockResolvedValue([{ id: 99, url: 'https://active.com', title: 'Active Tab' }]);
+    mockBrowserQuery.mockResolvedValue([
+      { id: 99, url: 'https://active.com', title: 'Active Tab' },
+    ]);
     mockBrowserGetStorage.mockResolvedValue({
       tts_settings: { rate: 1, pitch: 1, volume: 1, voice: null },
     });
@@ -256,7 +262,9 @@ describe('App integration', () => {
       fireEvent.click(btn);
       await screen.findByText(/1個のタブをキューに追加しました/);
       expect(mockAddTab).toHaveBeenCalledTimes(1);
-      expect(mockAddTab).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://valid.com' }));
+      expect(mockAddTab).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://valid.com' })
+      );
     });
 
     it('ignored domains フィルタリングが usePopupBootstrap 抽出後も動作する', async () => {

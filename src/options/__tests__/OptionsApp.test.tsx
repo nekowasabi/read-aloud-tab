@@ -9,7 +9,7 @@ jest.mock('../../shared/utils/storage', () => ({
     saveSettings: jest.fn(),
     getAiSettings: jest.fn(),
     saveAiSettings: jest.fn(),
-    validateAiSettings: jest.fn((settings) => ({
+    validateAiSettings: jest.fn(settings => ({
       openRouterApiKey: (settings?.openRouterApiKey || '').trim(),
       openRouterModel: settings?.openRouterModel || 'meta-llama/llama-3.2-1b-instruct',
       enableAiSummary: settings?.enableAiSummary ?? false,
@@ -29,8 +29,14 @@ jest.mock('../../shared/services/openrouter', () => ({
   })),
 }));
 
-const storage = require('../../shared/utils/storage');
-const { OpenRouterClient } = require('../../shared/services/openrouter');
+type StorageMock = {
+  StorageManager: Record<string, jest.Mock>;
+  getIgnoredDomains: jest.Mock;
+};
+const storage = jest.requireMock('../../shared/utils/storage') as StorageMock;
+const { OpenRouterClient } = jest.requireMock('../../shared/services/openrouter') as {
+  OpenRouterClient: jest.Mock;
+};
 
 const mockCreateObjectURL = jest.fn(() => 'blob:mock-url');
 const mockRevokeObjectURL = jest.fn();
@@ -92,7 +98,12 @@ describe('OptionsApp', () => {
   });
 
   test('初期表示で設定値と無視リストをロードしてフォームに反映する', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1.2, pitch: 1.0, volume: 0.8, voice: 'Test Voice' });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1.2,
+      pitch: 1.0,
+      volume: 0.8,
+      voice: 'Test Voice',
+    });
     storage.getIgnoredDomains.mockResolvedValue(['example.com']);
 
     render(<OptionsApp />);
@@ -103,7 +114,12 @@ describe('OptionsApp', () => {
   });
 
   test('エクスポートボタンで設定と無視リストをJSONファイルとしてダウンロードする', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue(['foo.com']);
 
     render(<OptionsApp />);
@@ -121,7 +137,12 @@ describe('OptionsApp', () => {
   });
 
   test('インポートボタンでJSONファイルを読み込み、設定と無視リストを保存する', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
 
     render(<OptionsApp />);
@@ -145,12 +166,19 @@ describe('OptionsApp', () => {
 
     await waitFor(() => {
       expect(storage.StorageManager.saveSettings).toHaveBeenCalledWith(payload.settings);
-      expect(chrome.storage.sync.set).toHaveBeenCalledWith({ [STORAGE_KEYS.IGNORED_DOMAINS]: payload.ignoredDomains });
+      expect(chrome.storage.sync.set).toHaveBeenCalledWith({
+        [STORAGE_KEYS.IGNORED_DOMAINS]: payload.ignoredDomains,
+      });
     });
   });
 
   test('AI設定UIがレンダリングされる', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
     storage.StorageManager.getAiSettings.mockResolvedValue({
       ...baseAiSettings,
@@ -173,7 +201,12 @@ describe('OptionsApp', () => {
   });
 
   test('AI設定を変更すると保存される', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
     storage.StorageManager.saveAiSettings.mockResolvedValue(undefined);
 
@@ -199,7 +232,12 @@ describe('OptionsApp', () => {
   });
 
   test('開発者モードを切り替えると保存される', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
 
     render(<OptionsApp />);
@@ -213,7 +251,12 @@ describe('OptionsApp', () => {
   });
 
   test('エクスポートにAI設定が含まれる（APIキーは除外）', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
     storage.StorageManager.getAiSettings.mockResolvedValue({
       ...baseAiSettings,
@@ -242,7 +285,12 @@ describe('OptionsApp', () => {
   });
 
   test('インポートでAI設定が復元される', async () => {
-    storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
     storage.getIgnoredDomains.mockResolvedValue([]);
 
     render(<OptionsApp />);
@@ -273,7 +321,12 @@ describe('OptionsApp', () => {
   describe('接続テスト機能', () => {
     beforeEach(() => {
       jest.clearAllMocks();
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
     });
 
@@ -361,7 +414,7 @@ describe('OptionsApp', () => {
       });
 
       let resolveTestConnection: (value: any) => void;
-      const testConnectionPromise = new Promise((resolve) => {
+      const testConnectionPromise = new Promise(resolve => {
         resolveTestConnection = resolve;
       });
       const mockTestConnection = jest.fn().mockReturnValue(testConnectionPromise);
@@ -396,7 +449,7 @@ describe('OptionsApp', () => {
       });
 
       let resolveTestConnection: (value: any) => void;
-      const testConnectionPromise = new Promise((resolve) => {
+      const testConnectionPromise = new Promise(resolve => {
         resolveTestConnection = resolve;
       });
       const mockTestConnection = jest.fn().mockReturnValue(testConnectionPromise);
@@ -426,7 +479,12 @@ describe('OptionsApp', () => {
 
   describe('OpenRouter接続テスト', () => {
     test('接続テストボタンが表示される', async () => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
 
       render(<OptionsApp />);
@@ -436,7 +494,12 @@ describe('OptionsApp', () => {
     });
 
     test('APIキー未入力の場合、接続テストボタンが無効化される', async () => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
       storage.StorageManager.getAiSettings.mockResolvedValue({
         openRouterApiKey: '',
@@ -452,7 +515,12 @@ describe('OptionsApp', () => {
     });
 
     test('接続テストが成功した場合、成功メッセージが表示される', async () => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
       storage.StorageManager.getAiSettings.mockResolvedValue({
         openRouterApiKey: 'test-key',
@@ -484,7 +552,12 @@ describe('OptionsApp', () => {
     });
 
     test('接続テストが失敗した場合、エラーメッセージが表示される', async () => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
       storage.StorageManager.getAiSettings.mockResolvedValue({
         openRouterApiKey: 'invalid-key',
@@ -512,7 +585,12 @@ describe('OptionsApp', () => {
     });
 
     test('接続テスト実行中はボタンが無効化され、ローディング表示になる', async () => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
       storage.StorageManager.getAiSettings.mockResolvedValue({
         openRouterApiKey: 'test-key',
@@ -522,7 +600,7 @@ describe('OptionsApp', () => {
       });
 
       let resolveTestConnection: (value: any) => void;
-      const testConnectionPromise = new Promise((resolve) => {
+      const testConnectionPromise = new Promise(resolve => {
         resolveTestConnection = resolve;
       });
 
@@ -553,7 +631,12 @@ describe('OptionsApp', () => {
 
   describe('Process 100 Red prep', () => {
     beforeEach(() => {
-      storage.StorageManager.getSettings.mockResolvedValue({ rate: 1, pitch: 1, volume: 1, voice: null });
+      storage.StorageManager.getSettings.mockResolvedValue({
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+        voice: null,
+      });
       storage.getIgnoredDomains.mockResolvedValue([]);
     });
 
@@ -583,7 +666,9 @@ describe('OptionsApp', () => {
         ...baseAiSettings,
         openRouterApiKey: 'test-key',
       });
-      const mockTestConnection = jest.fn().mockResolvedValue({ success: true, message: '接続成功' });
+      const mockTestConnection = jest
+        .fn()
+        .mockResolvedValue({ success: true, message: '接続成功' });
       OpenRouterClient.mockImplementation(() => ({ testConnection: mockTestConnection }));
       render(<OptionsApp />);
       const testBtn = await screen.findByRole('button', { name: '接続テスト' });

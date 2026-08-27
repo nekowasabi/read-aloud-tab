@@ -2,7 +2,7 @@
  * TabManager AI統合のユニットテスト
  */
 import { TabManager } from '../tabManager';
-import type { TabInfo, AiSettings, ReadingQueue, TTSSettings } from '../../shared/types';
+import type { TabInfo, AiSettings, TTSSettings } from '../../shared/types';
 import type { PlaybackController } from '../tabManager';
 import { StorageManager } from '../../shared/utils/storage';
 
@@ -15,7 +15,7 @@ const MockedAiProcessor = AiProcessor as jest.MockedClass<typeof AiProcessor>;
 // StorageManagerをモック化
 jest.mock('../../shared/utils/storage', () => ({
   StorageManager: {
-    validateSettings: jest.fn((settings) => settings),
+    validateSettings: jest.fn(settings => settings),
     saveSettings: jest.fn(),
     getAiSettings: jest.fn(),
   },
@@ -76,7 +76,10 @@ describe('TabManager AI統合', () => {
       translationPrompt: '',
     });
 
-    const { loadQueue, saveQueue } = require('../../shared/utils/storage');
+    const { loadQueue, saveQueue } = jest.requireMock('../../shared/utils/storage') as {
+      loadQueue: jest.Mock;
+      saveQueue: jest.Mock;
+    };
     (loadQueue as jest.Mock).mockResolvedValue({
       tabs: [],
       currentIndex: 0,
@@ -143,7 +146,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれている
@@ -184,7 +187,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれている
@@ -226,7 +229,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれている
@@ -258,7 +261,7 @@ describe('TabManager AI統合', () => {
       await manager.processNext(0);
 
       // Wait for async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       // Assert
       expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
@@ -291,7 +294,7 @@ describe('TabManager AI統合', () => {
       await manager.processNext(0);
 
       // Wait for async operations (AI processing takes time)
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Assert - エラーが発生してもplaybackが開始される
       expect(mockPlayback.start).toHaveBeenCalled();
@@ -330,7 +333,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれてsummaryを取得している
@@ -372,7 +375,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれてtranslationを取得している
@@ -417,7 +420,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれている
@@ -465,7 +468,7 @@ describe('TabManager AI統合', () => {
       // タブを追加してsummaryを設定
       await newManager.addTab(mockTab);
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       let snapshot = newManager.getSnapshot();
       expect(snapshot.tabs[0].summary).toBe(prefetchedSummary);
@@ -505,7 +508,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       // resolveContentが呼ばれている
@@ -538,7 +541,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       expect(mockResolveContent).toHaveBeenCalled();
@@ -564,7 +567,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       // Assert
       expect(commandListener).toHaveBeenCalledWith(
@@ -588,7 +591,9 @@ describe('TabManager AI統合', () => {
       });
 
       // モックgetIgnoredDomainsを設定
-      const { getIgnoredDomains } = require('../../shared/utils/storage');
+      const { getIgnoredDomains } = jest.requireMock('../../shared/utils/storage') as {
+        getIgnoredDomains: jest.Mock;
+      };
       (getIgnoredDomains as jest.Mock).mockResolvedValue(['ignored-domain.example.com']);
 
       const newManager = new TabManager({
@@ -602,7 +607,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       // Assert
       // resolveContentは呼ばれない
@@ -631,7 +636,7 @@ describe('TabManager AI統合', () => {
       // 後からsetContentResolverで設定
       newManager.setContentResolver(mockResolveContent);
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       expect(mockResolveContent).toHaveBeenCalled();
@@ -659,7 +664,7 @@ describe('TabManager AI統合', () => {
 
       // Act
       await newManager.processNext(0);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Assert
       const snapshot = newManager.getSnapshot();

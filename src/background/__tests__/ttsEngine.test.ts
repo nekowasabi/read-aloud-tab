@@ -46,7 +46,7 @@ describe('TTSEngine (PlaybackController)', () => {
     utterance.onend?.();
 
     // Wait for async playNextChunk to complete
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise(resolve => setTimeout(resolve, 10));
 
     expect(hooks.onEnd).toHaveBeenCalled();
     expect(hooks.onError).not.toHaveBeenCalled();
@@ -66,21 +66,21 @@ describe('TTSEngine (PlaybackController)', () => {
     utterance1.onerror?.({ error: 'network' });
 
     // Wait for first retry (100ms delay)
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     // Trigger error on first retry
     const utterance2 = (SpeechSynthesisUtterance as jest.Mock).mock.results[1].value;
     utterance2.onerror?.({ error: 'network' });
 
     // Wait for second retry (100ms delay)
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     // Trigger error on second retry (this is the 3rd attempt, max retries = 2)
     const utterance3 = (SpeechSynthesisUtterance as jest.Mock).mock.results[2].value;
     utterance3.onerror?.({ error: 'network' });
 
     // Wait for error handling to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(hooks.onError).toHaveBeenCalled();
     expect(hooks.onEnd).not.toHaveBeenCalled();
@@ -181,7 +181,6 @@ describe('TTSEngine (PlaybackController)', () => {
   // 理由: engine.start()を呼び出すテストがタイムアウトする問題があり、
   // TDDの原則である素早いフィードバックループを阻害するため。
   // これらの機能は実装済みで、process1, process2の個別テストでカバーされています。
-
 
   // process1: 音声設定の初期化改善
   describe('音声設定の初期化改善 (process1)', () => {
@@ -441,9 +440,9 @@ describe('TTSEngine (PlaybackController)', () => {
         expect(selectedVoice).toBeDefined();
         expect(
           selectedVoice.lang.startsWith('ja') ||
-          selectedVoice.lang.includes('JP') ||
-          selectedVoice.name.includes('Japanese') ||
-          selectedVoice.name.includes('日本')
+            selectedVoice.lang.includes('JP') ||
+            selectedVoice.name.includes('Japanese') ||
+            selectedVoice.name.includes('日本')
         ).toBe(true);
       });
     });
@@ -779,7 +778,6 @@ describe('TTSEngine (PlaybackController)', () => {
 
       test('チャンク実行時間は_chunkStartTimeから計算される', () => {
         // actualDuration = Date.now() - chunkStartTime
-        const chunkStartTime = Date.now();
         // Simulate 50ms of execution
         const actualDuration = 50;
 
@@ -975,7 +973,9 @@ describe('TTSEngine (PlaybackController)', () => {
 
         // Verify extractErrorType method correctly categorizes errors
         expect((engine as any).extractErrorType(new Error('network error'))).toBe('network_error');
-        expect((engine as any).extractErrorType(new Error('timeout occurred'))).toBe('timeout_error');
+        expect((engine as any).extractErrorType(new Error('timeout occurred'))).toBe(
+          'timeout_error'
+        );
         expect((engine as any).extractErrorType(new Error('voice not found'))).toBe('voice_error');
         expect((engine as any).extractErrorType(new Error('audio error'))).toBe('audio_error');
         expect((engine as any).extractErrorType(new Error('unknown'))).toBe('unknown_error');
@@ -995,9 +995,21 @@ describe('TTSEngine (PlaybackController)', () => {
         };
 
         const mockVoices = [
-          { name: 'Male Voice', lang: 'ja-JP', localService: true, default: false, voiceURI: 'male' },
+          {
+            name: 'Male Voice',
+            lang: 'ja-JP',
+            localService: true,
+            default: false,
+            voiceURI: 'male',
+          },
           { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' },
-          { name: 'Female Voice JP', lang: 'ja-JP', localService: true, default: false, voiceURI: 'female-jp' },
+          {
+            name: 'Female Voice JP',
+            lang: 'ja-JP',
+            localService: true,
+            default: false,
+            voiceURI: 'female-jp',
+          },
         ] as SpeechSynthesisVoice[];
 
         const engine = new TTSEngine({
@@ -1032,7 +1044,13 @@ describe('TTSEngine (PlaybackController)', () => {
         };
 
         const mockVoices = [
-          { name: 'Male Voice', lang: 'ja-JP', localService: true, default: false, voiceURI: 'male' },
+          {
+            name: 'Male Voice',
+            lang: 'ja-JP',
+            localService: true,
+            default: false,
+            voiceURI: 'male',
+          },
           { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' },
           { name: 'Ichiro', lang: 'ja-JP', localService: true, default: false, voiceURI: 'ichiro' },
         ] as SpeechSynthesisVoice[];
@@ -1068,7 +1086,13 @@ describe('TTSEngine (PlaybackController)', () => {
         };
 
         const mockVoices = [
-          { name: 'Male Voice', lang: 'ja-JP', localService: true, default: false, voiceURI: 'male' },
+          {
+            name: 'Male Voice',
+            lang: 'ja-JP',
+            localService: true,
+            default: false,
+            voiceURI: 'male',
+          },
           { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' },
         ] as SpeechSynthesisVoice[];
 
@@ -1103,7 +1127,13 @@ describe('TTSEngine (PlaybackController)', () => {
         };
 
         const mockVoices = [
-          { name: 'Male Voice', lang: 'ja-JP', localService: true, default: false, voiceURI: 'male' },
+          {
+            name: 'Male Voice',
+            lang: 'ja-JP',
+            localService: true,
+            default: false,
+            voiceURI: 'male',
+          },
           { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' },
         ] as SpeechSynthesisVoice[];
 
@@ -1157,22 +1187,16 @@ describe('TTSEngine (PlaybackController)', () => {
           processedContent: processedContent,
         });
 
-        const hooks = {
-          onEnd: jest.fn(),
-          onError: jest.fn(),
-          onProgress: jest.fn(),
-        };
-
         // Note: start()がタイムアウトするため、直接Content analysis部分をテスト
         // このテストは警告ログが出力されることを確認
-        const textToSpeak = tab.processedContent || tab.content;
-
         // Warning log should be emitted when processed content is less than 10% of original
         if (tab.processedContent && tab.content) {
           const ratio = tab.processedContent.length / tab.content.length;
           if (ratio < 0.1) {
             // This simulates the warning that should be logged
-            mockLogger.warn(`[TTSEngine] AI処理により大幅に短縮されました: ${(ratio * 100).toFixed(1)}% (元: ${tab.content.length}文字 → ${tab.processedContent.length}文字)`);
+            mockLogger.warn(
+              `[TTSEngine] AI処理により大幅に短縮されました: ${(ratio * 100).toFixed(1)}% (元: ${tab.content.length}文字 → ${tab.processedContent.length}文字)`
+            );
           }
         }
 
@@ -1197,7 +1221,9 @@ describe('TTSEngine (PlaybackController)', () => {
         if (originalContent && processedContent) {
           const ratio = processedContent.length / originalContent.length;
           if (ratio < 0.1) {
-            mockLogger.warn(`[TTSEngine] AI処理により大幅に短縮されました: ${(ratio * 100).toFixed(1)}%`);
+            mockLogger.warn(
+              `[TTSEngine] AI処理により大幅に短縮されました: ${(ratio * 100).toFixed(1)}%`
+            );
           }
         }
 
@@ -1229,5 +1255,4 @@ describe('TTSEngine (PlaybackController)', () => {
       });
     });
   });
-
 });

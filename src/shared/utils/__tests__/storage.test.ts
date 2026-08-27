@@ -3,7 +3,7 @@
  * TDD RED Phase: These tests will fail until storage methods are implemented
  */
 
-import { ReadingQueue, TabInfo, AiSettings } from '../../types';
+import { ReadingQueue, AiSettings } from '../../types';
 import { STORAGE_KEYS } from '../../types';
 
 // Mock BrowserAdapter first
@@ -33,7 +33,6 @@ import {
   migrateStorageSchema,
   StorageManager,
 } from '../storage';
-import { BrowserAdapter } from '../browser';
 
 // Mock chrome.storage for local storage (not using BrowserAdapter yet)
 const mockLocalStorage = {
@@ -43,14 +42,11 @@ const mockLocalStorage = {
   clear: jest.fn(),
 };
 
-// @ts-ignore
 global.chrome = {
-  // @ts-ignore
   storage: {
-    // @ts-ignore
-    local: mockLocalStorage,
+    local: mockLocalStorage as any,
   },
-};
+} as any;
 
 // Helper to get mocked BrowserAdapter storage
 const getMockBrowserStorage = () => mockBrowserStorage;
@@ -140,10 +136,7 @@ describe('Storage Utilities - Queue Management', () => {
 
       const result = await loadQueue();
 
-      expect(mockLocalStorage.get).toHaveBeenCalledWith([
-        'readingQueue',
-        'schemaVersion',
-      ]);
+      expect(mockLocalStorage.get).toHaveBeenCalledWith(['readingQueue', 'schemaVersion']);
       expect(result).toEqual(mockStoredQueue);
     });
 
@@ -457,8 +450,10 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
-        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        summaryPrompt:
+          'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        translationPrompt:
+          'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
         summaryWaitMode: 'wait',
       });
@@ -499,9 +494,7 @@ describe('StorageManager - AI Settings', () => {
 
       mockStorage.sync.set.mockRejectedValue(new Error('Storage error'));
 
-      await expect(StorageManager.saveAiSettings(aiSettings)).rejects.toThrow(
-        'Storage error'
-      );
+      await expect(StorageManager.saveAiSettings(aiSettings)).rejects.toThrow('Storage error');
     });
   });
 
@@ -535,8 +528,10 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: true,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
-        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        summaryPrompt:
+          'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        translationPrompt:
+          'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
         summaryWaitMode: 'wait',
       });
@@ -550,8 +545,10 @@ describe('StorageManager - AI Settings', () => {
         openRouterModel: 'meta-llama/llama-3.2-1b-instruct',
         enableAiSummary: false,
         enableAiTranslation: false,
-        summaryPrompt: 'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
-        translationPrompt: 'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
+        summaryPrompt:
+          'You are an assistant summarizing web articles. Provide a complete and well-structured summary in Japanese with:\\n1. Key points (3-4 bullet points)\\n2. Important details and action items\\n3. A concluding statement that wraps up the article\\n\\nIMPORTANT: Ensure your summary is complete and ends with a proper conclusion.',
+        translationPrompt:
+          'You are an assistant translating content into {{targetLanguage}}. Return only the translated text with natural tone and preserve important details.',
         openRouterProvider: '',
         summaryWaitMode: 'wait',
       });

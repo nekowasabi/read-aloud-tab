@@ -57,6 +57,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
       const { controller } = createController();
       await controller.startHeartbeat('queue-1');
       expect(controller).toBeDefined();
+      controller.dispose();
     });
 
     it('should stop heartbeat', async () => {
@@ -64,6 +65,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
       await controller.startHeartbeat('queue-1');
       await controller.stopHeartbeat('queue-1');
       expect(controller).toBeDefined();
+      controller.dispose();
     });
 
     it('should handle alarm', async () => {
@@ -105,6 +107,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
 
       // Verify alarm.create was called
       expect(mockAlarms.create).toHaveBeenCalled();
+      controller.dispose();
     });
 
     it('should handle missing alarms gracefully', () => {
@@ -144,10 +147,11 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
 
       // Port connection should be available for fallback
       expect(mockRuntime.connect).toBeDefined();
+      controller.dispose();
     });
 
     it('should use runtime.sendMessage as fallback', async () => {
-      const { controller, mockRuntime } = createController();
+      const { mockRuntime } = createController();
 
       expect(mockRuntime.sendMessage).toBeDefined();
     });
@@ -163,8 +167,6 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
       await controller.stopHeartbeat('queue-1');
       await controller.handleAlarm('read-aloud-keepalive');
       controller.dispose();
-
-      expect(controller).toBeDefined();
     });
 
     it('should be compatible with different alarm configurations', () => {
@@ -234,7 +236,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
           fallbackPingIntervalMs: 15000,
           maxMissCount: 3,
         },
-        onEvent: (event) => {
+        onEvent: event => {
           events.push(event);
         },
       });
@@ -242,13 +244,18 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
       await controller.startHeartbeat('queue-1');
       expect(events.length).toBeGreaterThan(0);
       expect(events[0]?.type).toBe('heartbeat-started');
+      controller.dispose();
     });
 
     it('should emit alarm events', async () => {
       const events: any[] = [];
 
       const controller = new KeepAliveController({
-        alarms: { create: jest.fn(), clear: jest.fn(() => true), onAlarm: { addListener: jest.fn() } } as any,
+        alarms: {
+          create: jest.fn(),
+          clear: jest.fn(() => true),
+          onAlarm: { addListener: jest.fn() },
+        } as any,
         runtime: {} as any,
         logger: {
           info: jest.fn(),
@@ -262,7 +269,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
           fallbackPingIntervalMs: 15000,
           maxMissCount: 3,
         },
-        onEvent: (event) => {
+        onEvent: event => {
           events.push(event);
         },
       });
@@ -270,8 +277,9 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
       await controller.startHeartbeat('queue-1');
       await controller.handleAlarm('test-alarm');
 
-      const alarmEvent = events.find((e) => e.type === 'alarm-fired');
+      const alarmEvent = events.find(e => e.type === 'alarm-fired');
       expect(alarmEvent).toBeDefined();
+      controller.dispose();
     });
   });
 
@@ -292,7 +300,7 @@ describe('Keep-Alive Controller: Chrome/Firefox Strategies', () => {
         config,
       });
 
-      expect(controller).toBeDefined();
+      controller.dispose();
     });
   });
 

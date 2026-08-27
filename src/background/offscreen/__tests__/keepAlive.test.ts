@@ -1,7 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-import { TabInfo, TTSSettings } from '../../../shared/types';
 
 describe('Offscreen Keep-Alive Port Connection', () => {
   let mockPort: any;
@@ -26,7 +25,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
     mockChrome = {
       runtime: {
         connect: jest.fn(() => mockPort),
-        sendMessage: jest.fn((message: any) => Promise.resolve()),
+        sendMessage: jest.fn((_message: any) => Promise.resolve()),
         onMessage: {
           addListener: jest.fn(),
         },
@@ -80,7 +79,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       initializeOffscreenDocument();
 
       // Wait for async initialization
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(mockChrome.runtime.connect).toHaveBeenCalledWith({
         name: 'offscreen-keepalive',
@@ -144,8 +143,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       await jest.runOnlyPendingTimersAsync();
 
       // Get the onDisconnect listener
-      const disconnectListener =
-        mockPort.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = mockPort.onDisconnect.addListener.mock.calls[0][0];
 
       // Reset the connect mock to track new calls
       mockChrome.runtime.connect.mockClear();
@@ -171,8 +169,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       // Run pending timers (initialization)
       await jest.runOnlyPendingTimersAsync();
 
-      const disconnectListener =
-        mockPort.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = mockPort.onDisconnect.addListener.mock.calls[0][0];
 
       mockChrome.runtime.connect.mockImplementation(() => {
         // Simulate persistent disconnect
@@ -204,8 +201,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       // Run pending timers (initialization)
       await jest.runOnlyPendingTimersAsync();
 
-      const disconnectListener =
-        mockPort.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = mockPort.onDisconnect.addListener.mock.calls[0][0];
 
       mockChrome.runtime.connect.mockImplementation(() => {
         // Simulate persistent disconnect
@@ -249,8 +245,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       sentMessages = [];
 
       // Get the onDisconnect listener
-      const disconnectListener =
-        mockPort.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = mockPort.onDisconnect.addListener.mock.calls[0][0];
 
       // Trigger disconnection
       disconnectListener();
@@ -262,9 +257,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       jest.advanceTimersByTime(20000);
 
       // No new heartbeat messages should be sent after reconnect attempt
-      const heartbeatMessages = sentMessages.filter(
-        (msg) => msg.type === 'OFFSCREEN_HEARTBEAT'
-      );
+      const heartbeatMessages = sentMessages.filter(msg => msg.type === 'OFFSCREEN_HEARTBEAT');
       // If reconnect fails, no heartbeats should be sent
       expect(heartbeatMessages.length).toBeLessThanOrEqual(1);
     });
@@ -272,10 +265,10 @@ describe('Offscreen Keep-Alive Port Connection', () => {
     it('should disconnect port on cleanup', async () => {
       const { initializeOffscreenDocument } = await import('../offscreen');
 
-      const controller = initializeOffscreenDocument();
+      initializeOffscreenDocument();
 
       // Wait for initialization
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // Simulate page unload - would normally trigger cleanup
       // In this test we just verify the port exists
@@ -337,9 +330,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       // Advance timer by 60 seconds (3 heartbeat cycles of 20s each)
       jest.advanceTimersByTime(60000);
 
-      const heartbeatMessages = sentMessages.filter(
-        (msg) => msg.type === 'OFFSCREEN_HEARTBEAT'
-      );
+      const heartbeatMessages = sentMessages.filter(msg => msg.type === 'OFFSCREEN_HEARTBEAT');
 
       // Should have sent approximately 3 heartbeats (60s / 20s per heartbeat)
       // Note: With fake timers and initialization, may send more heartbeats
@@ -362,9 +353,7 @@ describe('Offscreen Keep-Alive Port Connection', () => {
       // Advance timer by 60 seconds to get multiple heartbeats
       jest.advanceTimersByTime(60000);
 
-      const heartbeatMessages = sentMessages.filter(
-        (msg) => msg.type === 'OFFSCREEN_HEARTBEAT'
-      );
+      const heartbeatMessages = sentMessages.filter(msg => msg.type === 'OFFSCREEN_HEARTBEAT');
 
       // Verify timestamps are increasing or equal (may have same timestamp in fake timers)
       for (let i = 1; i < heartbeatMessages.length; i++) {

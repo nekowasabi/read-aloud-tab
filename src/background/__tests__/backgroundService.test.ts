@@ -18,20 +18,22 @@ jest.mock('../../shared/utils/storage', () => ({
 }));
 
 describe('BackgroundOrchestrator', () => {
+  type TestListener = ((...args: never[]) => unknown) & ((...args: unknown[]) => unknown);
+
   const createTabManagerStub = () => {
-    const listeners: Record<string, Function> = {};
+    const listeners: Record<string, TestListener> = {};
 
     const stub = {
       initialize: jest.fn().mockResolvedValue(undefined),
       setContentResolver: jest.fn(),
       addStatusListener: jest.fn((listener: (payload: QueueStatusPayload) => void) => {
-        listeners.status = listener;
+        listeners.status = listener as TestListener;
         return () => delete listeners.status;
       }),
       addProgressListener: jest.fn(() => () => undefined),
       addErrorListener: jest.fn(() => () => undefined),
       addCommandListener: jest.fn((listener: any) => {
-        listeners.command = listener;
+        listeners.command = listener as TestListener;
         return () => delete listeners.command;
       }),
       getSnapshot: jest.fn().mockReturnValue({
@@ -68,8 +70,8 @@ describe('BackgroundOrchestrator', () => {
   };
 
   const createChromeLike = () => {
-    const runtimeListeners: Function[] = [];
-    const runtimeMessageListeners: Function[] = [];
+    const runtimeListeners: TestListener[] = [];
+    const runtimeMessageListeners: TestListener[] = [];
     const ports: any[] = [];
     let commandListener: ((command: string) => void) | null = null;
     const alarmListeners: Array<(alarm: { name: string }) => void> = [];
@@ -77,10 +79,10 @@ describe('BackgroundOrchestrator', () => {
     const chromeLike = {
       runtime: {
         onConnect: {
-          addListener: jest.fn((listener: Function) => runtimeListeners.push(listener)),
+          addListener: jest.fn((listener: TestListener) => runtimeListeners.push(listener)),
         },
         onMessage: {
-          addListener: jest.fn((listener: Function) => runtimeMessageListeners.push(listener)),
+          addListener: jest.fn((listener: TestListener) => runtimeMessageListeners.push(listener)),
         },
         sendMessage: jest.fn().mockResolvedValue(undefined),
         connect: jest.fn(() => ({
@@ -105,7 +107,9 @@ describe('BackgroundOrchestrator', () => {
         create: jest.fn(),
         clear: jest.fn().mockResolvedValue(true),
         onAlarm: {
-          addListener: jest.fn((listener: (alarm: { name: string }) => void) => alarmListeners.push(listener)),
+          addListener: jest.fn((listener: (alarm: { name: string }) => void) =>
+            alarmListeners.push(listener)
+          ),
           removeListener: jest.fn((listener: (alarm: { name: string }) => void) => {
             const index = alarmListeners.indexOf(listener);
             if (index >= 0) {
@@ -124,14 +128,20 @@ describe('BackgroundOrchestrator', () => {
         postMessage: jest.fn(),
       };
       ports.push(port);
-      runtimeListeners.forEach((listener) => listener(port));
+      runtimeListeners.forEach(listener => listener(port));
       return port;
     };
 
-    const emitRuntimeMessage = async (message: any, sender: any = {}, sendResponse: any = jest.fn()) => {
-      const promises = runtimeMessageListeners.map((listener) => listener(message, sender, sendResponse));
+    const emitRuntimeMessage = async (
+      message: any,
+      sender: any = {},
+      sendResponse: any = jest.fn()
+    ) => {
+      const promises = runtimeMessageListeners.map(listener =>
+        listener(message, sender, sendResponse)
+      );
       await Promise.all(promises);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
       return sendResponse;
     };
 
@@ -139,7 +149,7 @@ describe('BackgroundOrchestrator', () => {
       return commandListener?.(command);
     }
     const emitAlarm = (name: string) => {
-      alarmListeners.forEach((listener) => listener({ name }));
+      alarmListeners.forEach(listener => listener({ name }));
     };
     return { chromeLike, connectPort, emitRuntimeMessage, triggerCommand, ports, emitAlarm };
   };
@@ -191,7 +201,11 @@ describe('BackgroundOrchestrator', () => {
     const keepAlive = createKeepAliveStub();
     const { chromeLike } = createChromeLike();
 
-    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, keepAliveController: keepAlive });
+    const orchestrator = new BackgroundOrchestrator({
+      tabManager: stub,
+      chrome: chromeLike,
+      keepAliveController: keepAlive,
+    });
     await orchestrator.initialize();
 
     const statusListener = listeners.status;
@@ -244,7 +258,7 @@ describe('BackgroundOrchestrator', () => {
     // tabId が正しく転送されることを契約として検証する
     expect(stub.addTab).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 123 }),
-      expect.anything(),
+      expect.anything()
     );
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
   });
@@ -272,7 +286,11 @@ describe('BackgroundOrchestrator', () => {
       cancelWait: jest.fn(),
     } as any;
     const { chromeLike, emitRuntimeMessage } = createChromeLike();
-    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, prefetcher });
+    const orchestrator = new BackgroundOrchestrator({
+      tabManager: stub,
+      chrome: chromeLike,
+      prefetcher,
+    });
     await orchestrator.initialize();
 
     const sendResponse = jest.fn();
@@ -328,13 +346,15 @@ describe('BackgroundOrchestrator', () => {
       currentIndex: 0,
       totalCount: 1,
       activeTabId: 1,
-      tabs: [{
-        tabId: 1,
-        url: 'https://example.com',
-        title: 'Test',
-        isIgnored: false,
-        extractedAt: new Date(),
-      } as any],
+      tabs: [
+        {
+          tabId: 1,
+          url: 'https://example.com',
+          title: 'Test',
+          isIgnored: false,
+          extractedAt: new Date(),
+        } as any,
+      ],
       settings: { rate: 1, pitch: 1, volume: 1, voice: null },
       updatedAt: Date.now(),
     } as QueueStatusPayload;
@@ -360,12 +380,12 @@ describe('BackgroundOrchestrator', () => {
     snapshot.totalCount = 0;
 
     await triggerCommand('read-aloud-toggle');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(chromeLike.tabs.query).toHaveBeenCalledWith({ active: true, currentWindow: true });
     expect(stub.addTab).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 11 }),
-      expect.objectContaining({ position: 'end', autoStart: false }),
+      expect.objectContaining({ position: 'end', autoStart: false })
     );
     expect(stub.processNext).toHaveBeenCalled();
   });
@@ -399,27 +419,29 @@ describe('BackgroundOrchestrator', () => {
     await orchestrator.initialize();
 
     await triggerCommand('read-aloud-queue-all');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(stub.addTab).toHaveBeenCalledTimes(1);
     expect(stub.addTab).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 1, url: 'https://valid.example/article' }),
-      expect.objectContaining({ position: 'end', autoStart: false }),
+      expect.objectContaining({ position: 'end', autoStart: false })
     );
     expect(stub.processNext).toHaveBeenCalled();
 
     snapshot.status = 'paused';
-    snapshot.tabs = [{
-      tabId: 4,
-      url: 'https://second.example/post',
-      title: 'Second',
-      isIgnored: false,
-      extractedAt: new Date().toISOString(),
-    } as any];
+    snapshot.tabs = [
+      {
+        tabId: 4,
+        url: 'https://second.example/post',
+        title: 'Second',
+        isIgnored: false,
+        extractedAt: new Date().toISOString(),
+      } as any,
+    ];
     snapshot.totalCount = 1;
     snapshot.activeTabId = 4;
     await triggerCommand('read-aloud-queue-all');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(stub.resume).toHaveBeenCalled();
   });
 
@@ -432,7 +454,11 @@ describe('BackgroundOrchestrator', () => {
     } as any;
 
     const { chromeLike, connectPort, emitRuntimeMessage } = createChromeLike();
-    const orchestrator = new BackgroundOrchestrator({ tabManager: stub, chrome: chromeLike, prefetcher });
+    const orchestrator = new BackgroundOrchestrator({
+      tabManager: stub,
+      chrome: chromeLike,
+      prefetcher,
+    });
     await orchestrator.initialize();
 
     const port = connectPort();
@@ -498,7 +524,10 @@ describe('BackgroundOrchestrator', () => {
         prefetcher: null,
       });
 
-      const result = await routeCommand({ type: 'QUEUE_REORDER', payload: { fromIndex: 1, toIndex: 3 } });
+      const result = await routeCommand({
+        type: 'QUEUE_REORDER',
+        payload: { fromIndex: 1, toIndex: 3 },
+      });
 
       expect(stub.reorderTabs).toHaveBeenCalledWith(1, 3);
       expect(result).toEqual({ success: true });

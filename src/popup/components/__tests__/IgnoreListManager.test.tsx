@@ -8,7 +8,11 @@ jest.mock('../../../shared/utils/storage', () => ({
   removeIgnoredDomain: jest.fn(),
 }));
 
-const storage = require('../../../shared/utils/storage');
+const storage = jest.mocked(
+  jest.requireMock(
+    '../../../shared/utils/storage'
+  ) as typeof import('../../../shared/utils/storage')
+);
 
 describe('IgnoreListManager', () => {
   beforeEach(() => {

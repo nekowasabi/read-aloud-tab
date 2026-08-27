@@ -88,7 +88,7 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       clearInterval(alarmSchedule);
 
       // Should have at least 1 heartbeat in 30 second window
-      const heartbeats = events.filter((e) => e.event === 'OFFSCREEN_HEARTBEAT');
+      const heartbeats = events.filter(e => e.event === 'OFFSCREEN_HEARTBEAT');
       expect(heartbeats.length).toBeGreaterThanOrEqual(1);
 
       jest.useRealTimers();
@@ -111,7 +111,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
 
       // Simulate heartbeat loop
       const loop = () => {
-        const start = Date.now();
         const interval = setInterval(() => {
           mockPort.postMessage({
             type: 'OFFSCREEN_HEARTBEAT',
@@ -157,7 +156,7 @@ describe('Keep-Alive Integration: Extended Playback', () => {
         },
         windows: {
           onFocusChanged: {
-            addListener: jest.fn((callback) => {
+            addListener: jest.fn(callback => {
               // Simulate focus loss at 15 seconds
               setTimeout(() => {
                 focusLossTime = Date.now();
@@ -170,7 +169,7 @@ describe('Keep-Alive Integration: Extended Playback', () => {
 
       // Register focus listener
       const focusListeners: Array<(windowId: number) => void> = [];
-      mockChrome.windows.onFocusChanged.addListener = jest.fn((cb) => {
+      mockChrome.windows.onFocusChanged.addListener = jest.fn(cb => {
         focusListeners.push(cb);
       });
 
@@ -204,13 +203,10 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       jest.useFakeTimers();
 
       const inactivityDuration = 30000; // 30 seconds of inactivity
-      let portConnected = true;
-      let lastMessageTime = Date.now();
+      const portConnected = true;
 
       const mockPort = {
-        postMessage: jest.fn((message: any) => {
-          lastMessageTime = Date.now();
-        }),
+        postMessage: jest.fn(),
         onDisconnect: {
           addListener: jest.fn(),
         },
@@ -255,9 +251,7 @@ describe('Keep-Alive Integration: Extended Playback', () => {
     it('should support extended playback in Firefox without special handling', async () => {
       jest.useFakeTimers();
 
-      const sessionDuration = 90000; // 90 seconds
-
-      let playbackActive = true;
+      const playbackActive = true;
       let errorCount = 0;
 
       const mockFirefoxScript = {
@@ -290,14 +284,11 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       jest.useFakeTimers();
 
       let connectionAttempts = 0;
-      let failureCount = 0;
-      let recoveryCount = 0;
 
       const mockPort = {
-        postMessage: jest.fn((message: any) => {
+        postMessage: jest.fn((_message: any) => {
           // Simulate occasional failures (30% failure rate)
           if (Math.random() < 0.3) {
-            failureCount++;
             throw new Error('Port disconnected');
           }
         }),
@@ -315,7 +306,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
         } catch (error) {
           // Attempt reconnect
           connectionAttempts++;
-          recoveryCount++;
         }
       };
 
@@ -335,7 +325,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       jest.useFakeTimers();
 
       const backoffDelays: number[] = [];
-      let reconnectAttempts = 0;
 
       const getBackoffDelay = (attemptNumber: number): number => {
         return Math.min(500 * Math.pow(2, attemptNumber), 5000);
@@ -343,7 +332,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
 
       // Simulate 5 failed connection attempts
       for (let i = 0; i < 5; i++) {
-        reconnectAttempts++;
         const delay = getBackoffDelay(i);
         backoffDelays.push(delay);
         jest.advanceTimersByTime(delay);
@@ -395,7 +383,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       const alarmPeriod = 1; // 1 minute
 
       let alarmFired = false;
-      let alarmCount = 0;
 
       const mockAlarms = {
         create: jest.fn((name: string, info: any) => {
@@ -407,7 +394,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
           addListener: jest.fn((callback: (alarm: any) => void) => {
             // Simulate alarm firing every minute
             const interval = setInterval(() => {
-              alarmCount++;
               callback({ name: alarmName });
             }, 60000);
 
@@ -429,7 +415,6 @@ describe('Keep-Alive Integration: Extended Playback', () => {
     it.skip('should handle alarm misses during extended playback', async () => {
       jest.useFakeTimers();
 
-      const alarmIntervalMs = 60000; // 1 minute
       let missCount = 0;
       let lastAlarmTime = Date.now();
 
@@ -491,9 +476,7 @@ describe('Keep-Alive Integration: Extended Playback', () => {
       // Should have logged multiple events
       expect(events.length).toBe(2);
       expect(events[0].event).toBe('HEARTBEAT_SENT');
-      expect(events[1].state?.lastHeartbeatAt).toBeGreaterThan(
-        events[0].state?.lastHeartbeatAt
-      );
+      expect(events[1].state?.lastHeartbeatAt).toBeGreaterThan(events[0].state?.lastHeartbeatAt);
 
       jest.useRealTimers();
     });

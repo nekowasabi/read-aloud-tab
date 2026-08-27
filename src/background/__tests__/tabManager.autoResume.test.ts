@@ -1,6 +1,5 @@
 import { TabManager } from '../tabManager';
 import { QueueStatusPayload } from '../../shared/messages';
-import { StorageManager } from '../../shared/utils/storage';
 
 jest.mock('../../shared/utils/storage', () => {
   const original = jest.requireActual('../../shared/utils/storage');
@@ -129,7 +128,7 @@ describe('TabManager auto-resume behavior', () => {
       const storage = {
         load: jest.fn().mockResolvedValue({
           ...baseQueue,
-          status: 'paused',  // コンテンツ抽出待ちでpausedになった状態
+          status: 'paused', // コンテンツ抽出待ちでpausedになった状態
           currentIndex: 0,
         }),
         save: jest.fn().mockResolvedValue(undefined),
@@ -179,12 +178,12 @@ describe('TabManager auto-resume behavior', () => {
     });
 
     it('should not trigger auto-resume when status is reading', async () => {
-      const { tabManager, playback } = createTabManager();
+      const { tabManager } = createTabManager();
 
       await tabManager.initialize();
 
       const statusUpdates: QueueStatusPayload[] = [];
-      tabManager.addStatusListener((payload) => statusUpdates.push(payload));
+      tabManager.addStatusListener(payload => statusUpdates.push(payload));
 
       // 再生中にコンテンツ更新
       await tabManager.onTabUpdated(1, { content: 'Updated content during reading' });

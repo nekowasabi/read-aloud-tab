@@ -7,7 +7,6 @@
 describe('Keep-Alive Performance Optimization', () => {
   describe('Configurable Heartbeat Interval', () => {
     it('should allow custom heartbeat interval configuration', () => {
-      const defaultInterval = 20000; // 20 seconds
       const customInterval = 15000; // 15 seconds
 
       // Test that interval can be configured
@@ -47,16 +46,12 @@ describe('Keep-Alive Performance Optimization', () => {
 
       // Calculate success rate
       const successRate =
-        (metrics.totalHeartbeatsSent - metrics.failedHeartbeats) /
-        metrics.totalHeartbeatsSent;
+        (metrics.totalHeartbeatsSent - metrics.failedHeartbeats) / metrics.totalHeartbeatsSent;
       expect(successRate).toBe(0); // 1 total, 1 failed = 0% success
     });
 
     it('should calculate optimal interval based on success rate', () => {
-      const calculateOptimalInterval = (
-        successRate: number,
-        currentInterval: number
-      ): number => {
+      const calculateOptimalInterval = (successRate: number, currentInterval: number): number => {
         if (successRate >= 0.95) {
           // High success rate: can increase interval slightly
           return Math.min(currentInterval + 2000, 25000);
@@ -118,10 +113,7 @@ describe('Keep-Alive Performance Optimization', () => {
 
   describe('Adaptive Interval Adjustment', () => {
     it('should adjust interval based on Service Worker activity', () => {
-      const adjustInterval = (
-        lastHeartbeatGap: number,
-        currentInterval: number
-      ): number => {
+      const adjustInterval = (lastHeartbeatGap: number, currentInterval: number): number => {
         // If gap is close to 30s timeout, decrease interval for safety
         if (lastHeartbeatGap > 28000) {
           return Math.max(currentInterval - 3000, 15000);

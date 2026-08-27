@@ -7,18 +7,14 @@
  */
 
 import { BackgroundOrchestrator } from '../service';
-import { TabManager } from '../tabManager';
 import { OffscreenHeartbeatMessage } from '../../shared/messages';
 
 describe('Service Worker Port Handling', () => {
   let mockChrome: any;
   let mockTabManager: any;
   let orchestrator: BackgroundOrchestrator;
-  let connectedPort: any;
 
   beforeEach(() => {
-    connectedPort = null;
-
     mockChrome = {
       runtime: {
         onMessage: {
@@ -101,8 +97,7 @@ describe('Service Worker Port Handling', () => {
     it('should handle offscreen keep-alive port connection', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -128,8 +123,7 @@ describe('Service Worker Port Handling', () => {
     it('should recognize keep-alive port by name', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const keepAlivePort = {
         name: 'offscreen-keepalive',
@@ -150,8 +144,7 @@ describe('Service Worker Port Handling', () => {
     it('should handle regular popup port differently from keep-alive port', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       // Regular popup port
       const popupPort = {
@@ -176,8 +169,7 @@ describe('Service Worker Port Handling', () => {
     it('should receive heartbeat messages from port', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -220,8 +212,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -247,9 +238,7 @@ describe('Service Worker Port Handling', () => {
 
       // Should log heartbeat reception
       expect(logger.info).toHaveBeenCalled();
-      const infoCall = logger.info.mock.calls.find((call) =>
-        call[0]?.includes?.('heartbeat')
-      );
+      const infoCall = logger.info.mock.calls.find(call => call[0]?.includes?.('heartbeat'));
       expect(infoCall).toBeDefined();
     });
 
@@ -269,8 +258,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -306,9 +294,7 @@ describe('Service Worker Port Handling', () => {
       // The implementation tracks lastOffscreenHeartbeatAt internally
       // We verify the logger was called with proper pattern
       if (logger.warn.mock.calls.length > 0) {
-        const warnCall = logger.warn.mock.calls.find((call) =>
-          call[0]?.includes?.('gap')
-        );
+        const warnCall = logger.warn.mock.calls.find(call => call[0]?.includes?.('gap'));
         expect(warnCall).toBeDefined();
       } else {
         // If no warning, verify the info logs contain heartbeat records
@@ -321,8 +307,7 @@ describe('Service Worker Port Handling', () => {
     it('should handle port disconnection', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -336,8 +321,7 @@ describe('Service Worker Port Handling', () => {
 
       onConnectListener(port);
 
-      const disconnectListener =
-        port.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = port.onDisconnect.addListener.mock.calls[0][0];
 
       // Should not throw on disconnect
       expect(() => {
@@ -361,8 +345,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -376,16 +359,13 @@ describe('Service Worker Port Handling', () => {
 
       onConnectListener(port);
 
-      const disconnectListener =
-        port.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = port.onDisconnect.addListener.mock.calls[0][0];
 
       disconnectListener();
 
       // Should log disconnection
       expect(logger.warn).toHaveBeenCalled();
-      const warnCall = logger.warn.mock.calls.find((call) =>
-        call[0]?.includes?.('disconnected')
-      );
+      const warnCall = logger.warn.mock.calls.find(call => call[0]?.includes?.('disconnected'));
       expect(warnCall).toBeDefined();
     });
 
@@ -405,8 +385,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -430,8 +409,7 @@ describe('Service Worker Port Handling', () => {
       logger.info.mockClear();
 
       // Now disconnect
-      const disconnectListener =
-        port.onDisconnect.addListener.mock.calls[0][0];
+      const disconnectListener = port.onDisconnect.addListener.mock.calls[0][0];
       disconnectListener();
 
       // After disconnect, heartbeat timestamp should be reset
@@ -444,9 +422,7 @@ describe('Service Worker Port Handling', () => {
 
       // Should log as "First heartbeat"
       expect(logger.info).toHaveBeenCalled();
-      const infoCall = logger.info.mock.calls.find((call) =>
-        call[0]?.includes?.('First heartbeat')
-      );
+      const infoCall = logger.info.mock.calls.find(call => call[0]?.includes?.('First heartbeat'));
       expect(infoCall).toBeDefined();
     });
   });
@@ -455,8 +431,7 @@ describe('Service Worker Port Handling', () => {
     it('should handle non-heartbeat messages on keep-alive port', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -486,8 +461,7 @@ describe('Service Worker Port Handling', () => {
     it('should handle malformed heartbeat messages', async () => {
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -532,8 +506,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -578,8 +551,7 @@ describe('Service Worker Port Handling', () => {
 
       await orchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -610,9 +582,7 @@ describe('Service Worker Port Handling', () => {
       } as OffscreenHeartbeatMessage);
 
       // Should not warn about normal gap
-      const gapWarning = logger.warn.mock.calls.find((call) =>
-        call[0]?.includes?.('Heartbeat gap')
-      );
+      const gapWarning = logger.warn.mock.calls.find(call => call[0]?.includes?.('Heartbeat gap'));
       expect(gapWarning).toBeUndefined();
     });
   });
@@ -634,8 +604,7 @@ describe('Service Worker Port Handling', () => {
 
       await contractOrchestrator.initialize();
 
-      const onConnectListener =
-        mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
+      const onConnectListener = mockChrome.runtime.onConnect.addListener.mock.calls[0][0];
 
       const port = {
         name: 'offscreen-keepalive',
@@ -666,9 +635,7 @@ describe('Service Worker Port Handling', () => {
       dateSpy.mockRestore();
 
       const gapWarn = logger.warn.mock.calls.find(
-        (call) =>
-          typeof call[0] === 'string' &&
-          (call[0].includes('gap') || call[0].includes('Gap'))
+        call => typeof call[0] === 'string' && (call[0].includes('gap') || call[0].includes('Gap'))
       );
       expect(gapWarn).toBeDefined();
     });

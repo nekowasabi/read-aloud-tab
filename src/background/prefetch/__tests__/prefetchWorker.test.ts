@@ -100,7 +100,7 @@ describe('PrefetchWorker', () => {
   });
 
   it('requests content when missing and retries after fetch', async () => {
-    const tab = makeTab({ tabId: 10, content: undefined });
+    makeTab({ tabId: 10, content: undefined });
     const { worker, fetchTab, requestContent, summarize } = createWorker();
 
     (fetchTab as jest.Mock).mockImplementation(async (tabId: number) => {
