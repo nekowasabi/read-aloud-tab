@@ -72,8 +72,20 @@ export function createContentResolver(deps: ContentResolverDeps) {
 
           const isPrefetchComplete = prefetcher.isPrefetchComplete(tab.tabId);
           if (!isPrefetchComplete) {
-            // Prefetch is in progress — use a bounded wait based on waitMode
-            const boundedTimeout = waitMode === 'wait' ? 120000 : 30000;
+            if (waitMode === 'skip') {
+              const currentTab = tabLookup.getTabById(tab.tabId) ?? tab;
+              logger.debug?.(
+                `[ContentResolver] Skipping AI prefetch wait for tab ${tab.tabId}`,
+              );
+              return {
+                content: currentTab.content,
+                summary: currentTab.summary,
+                translation: currentTab.translation,
+                extractedAt: currentTab.extractedAt,
+              };
+            }
+            // Prefetch is in progress (wait mode) — wait up to 120s
+            const boundedTimeout = 120000;
             const waitResult = await prefetcher.waitForPrefetch(tab.tabId, boundedTimeout, waitMode);
 
             if (waitResult === 'completed') {
