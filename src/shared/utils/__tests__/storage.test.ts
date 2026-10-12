@@ -13,6 +13,10 @@ const mockBrowserStorage = {
     set: jest.fn(),
     remove: jest.fn(),
   },
+  local: {
+    get: jest.fn(),
+    set: jest.fn(),
+  },
 };
 
 jest.mock('../browser', () => ({
@@ -32,6 +36,8 @@ import {
   getIgnoredDomains,
   migrateStorageSchema,
   StorageManager,
+  getPendingAutoQueueTabIds,
+  setPendingAutoQueueTabIds,
 } from '../storage';
 
 // Mock chrome.storage for local storage (not using BrowserAdapter yet)
@@ -218,6 +224,88 @@ describe('Storage Utilities - Developer Mode', () => {
   it('should save developer mode flag to storage', async () => {
     await StorageManager.setDeveloperMode(true);
     expect(getMockBrowserStorage().sync.set).toHaveBeenCalledWith({ developerMode: true });
+  });
+});
+
+describe('StorageManager - Auto Queue New Tabs', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should load a stored auto queue setting', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.sync.get.mockResolvedValue({ autoQueueNewTabs: true });
+
+    await expect(StorageManager.getAutoQueueNewTabs()).resolves.toBe(true);
+    expect(mockStorage.sync.get).toHaveBeenCalledWith('autoQueueNewTabs');
+  });
+
+  it('should return the default when the auto queue setting is missing or invalid', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.sync.get
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ autoQueueNewTabs: 'true' });
+
+    await expect(StorageManager.getAutoQueueNewTabs()).resolves.toBe(false);
+    await expect(StorageManager.getAutoQueueNewTabs()).resolves.toBe(false);
+  });
+
+  it('should return the default when reading the auto queue setting fails', async () => {
+    getMockBrowserStorage().sync.get.mockRejectedValue(new Error('Storage error'));
+
+    await expect(StorageManager.getAutoQueueNewTabs()).resolves.toBe(false);
+  });
+
+  it('should save the auto queue setting and propagate write failures', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.sync.set
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Storage error'));
+
+    await StorageManager.setAutoQueueNewTabs(true);
+    expect(mockStorage.sync.set).toHaveBeenCalledWith({ autoQueueNewTabs: true });
+    await expect(StorageManager.setAutoQueueNewTabs(false)).rejects.toThrow('Storage error');
+  });
+});
+
+describe('Storage Utilities - Pending Auto Queue Tab IDs', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should load pending tab IDs and remove duplicates', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.local.get.mockResolvedValue({ pendingAutoQueueTabIds: [3, 1, 3] });
+
+    await expect(getPendingAutoQueueTabIds()).resolves.toEqual([3, 1]);
+    expect(mockStorage.local.get).toHaveBeenCalledWith('pendingAutoQueueTabIds');
+  });
+
+  it('should return an empty array when pending tab IDs are missing or invalid', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.local.get
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ pendingAutoQueueTabIds: [1, '2'] });
+
+    await expect(getPendingAutoQueueTabIds()).resolves.toEqual([]);
+    await expect(getPendingAutoQueueTabIds()).resolves.toEqual([]);
+  });
+
+  it('should return an empty array when reading pending tab IDs fails', async () => {
+    getMockBrowserStorage().local.get.mockRejectedValue(new Error('Storage error'));
+
+    await expect(getPendingAutoQueueTabIds()).resolves.toEqual([]);
+  });
+
+  it('should save normalized pending tab IDs and propagate write failures', async () => {
+    const mockStorage = getMockBrowserStorage();
+    mockStorage.local.set
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Storage error'));
+
+    await setPendingAutoQueueTabIds([3, 1, 3, Number.NaN]);
+    expect(mockStorage.local.set).toHaveBeenCalledWith({ pendingAutoQueueTabIds: [3, 1] });
+    await expect(setPendingAutoQueueTabIds([1])).rejects.toThrow('Storage error');
   });
 });
 

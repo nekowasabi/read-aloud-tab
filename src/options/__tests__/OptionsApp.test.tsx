@@ -19,6 +19,8 @@ jest.mock('../../shared/utils/storage', () => ({
     })),
     getDeveloperMode: jest.fn(),
     setDeveloperMode: jest.fn(),
+    getAutoQueueNewTabs: jest.fn(),
+    setAutoQueueNewTabs: jest.fn(),
   },
   getIgnoredDomains: jest.fn(),
 }));
@@ -91,6 +93,8 @@ describe('OptionsApp', () => {
     storage.StorageManager.getAiSettings.mockResolvedValue(baseAiSettings);
     storage.StorageManager.getDeveloperMode.mockResolvedValue(false);
     storage.StorageManager.setDeveloperMode.mockResolvedValue(undefined);
+    storage.StorageManager.getAutoQueueNewTabs.mockResolvedValue(false);
+    storage.StorageManager.setAutoQueueNewTabs.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -248,6 +252,51 @@ describe('OptionsApp', () => {
     await waitFor(() => {
       expect(storage.StorageManager.setDeveloperMode).toHaveBeenCalledWith(true);
     });
+  });
+
+  test('新規タブ自動キュー設定を保存し、失敗時に戻す', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+    storage.StorageManager.setAutoQueueNewTabs.mockRejectedValueOnce(new Error('save failed'));
+
+    render(<OptionsApp />);
+
+    const checkbox = await screen.findByLabelText('新しく開いたタブを自動的にキューへ追加する');
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+
+    await waitFor(() =>
+      expect(storage.StorageManager.setAutoQueueNewTabs).toHaveBeenCalledWith(true)
+    );
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    expect(screen.getByText('設定の保存に失敗しました')).toBeInTheDocument();
+  });
+
+  test('新規タブ自動キュー設定の保存成功でcheckboxが一致する', async () => {
+    storage.StorageManager.getSettings.mockResolvedValue({
+      rate: 1,
+      pitch: 1,
+      volume: 1,
+      voice: null,
+    });
+    storage.getIgnoredDomains.mockResolvedValue([]);
+
+    render(<OptionsApp />);
+
+    const checkbox = await screen.findByLabelText('新しく開いたタブを自動的にキューへ追加する');
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+
+    await waitFor(() =>
+      expect(storage.StorageManager.setAutoQueueNewTabs).toHaveBeenCalledWith(true)
+    );
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(screen.getByText('設定を保存しました')).toBeInTheDocument();
   });
 
   test('エクスポートにAI設定が含まれる（APIキーは除外）', async () => {

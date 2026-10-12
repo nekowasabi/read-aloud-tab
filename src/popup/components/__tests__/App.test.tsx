@@ -62,6 +62,11 @@ jest.mock('../../../shared/utils/storage', () => ({
     saveSettings: jest.fn().mockResolvedValue(undefined),
     validateSettings: jest.fn(settings => settings),
     getDeveloperMode: jest.fn().mockResolvedValue(false),
+    getAiSettings: jest.fn().mockResolvedValue({
+      openRouterApiKey: '',
+      enableAiSummary: false,
+      summaryWaitMode: 'wait',
+    }),
   },
   getIgnoredDomains: jest.fn().mockResolvedValue([]),
 }));
