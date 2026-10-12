@@ -277,6 +277,10 @@ export class TabManager {
     }
 
     const wasCurrent = index === this.queue.currentIndex;
+    const currentStatus = this.queue.status;
+    if (wasCurrent && (currentStatus === 'reading' || currentStatus === 'processing')) {
+      await this.playbackStopSafe();
+    }
 
     this.queue.tabs.splice(index, 1);
 
@@ -375,7 +379,13 @@ export class TabManager {
   }
 
   async processNext(startIndex?: number): Promise<void> {
+    const token = this.nextPlaybackToken();
+    this.activePlaybackToken = token;
+
     await this.ensureInitialized();
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
 
     if (this.queue.tabs.length === 0) {
       await this.stopInternal(true);
@@ -398,9 +408,15 @@ export class TabManager {
     this.queue.status = 'processing';
     this.queue.currentIndex = targetIndex;
     await this.persistQueue();
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
     this.emitStatus();
 
     const ready = await this.ensureTabReady(tab);
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
 
     if (!ready) {
       this.queue.status = 'paused';
@@ -437,10 +453,10 @@ export class TabManager {
     this.queue.status = 'reading';
     this.queue.pausedByUser = false;  // 再生開始時にリセット
     await this.persistQueue();
+    if (this.activePlaybackToken !== token) {
+      return;
+    }
     this.emitStatus();
-
-    const token = this.nextPlaybackToken();
-    this.activePlaybackToken = token;
 
     try {
       const playbackTab: TabInfo = {
