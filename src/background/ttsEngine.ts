@@ -516,10 +516,13 @@ export class TTSEngine implements PlaybackController {
       return;
     }
 
-    const previousVoice = this.currentSettings.voice;
+    const previous = this.currentSettings;
     this.currentSettings = settings;
 
-    if (settings.voice !== previousVoice) {
+    if (
+      settings.voice !== previous.voice ||
+      settings.preferredGender !== previous.preferredGender
+    ) {
       const voices =
         this.cachedVoices.length > 0
           ? this.cachedVoices
@@ -1020,6 +1023,11 @@ export class TTSEngine implements PlaybackController {
         .then((voices) => {
           if (voices.length > 0) {
             this.cachedVoices = voices;
+            // The session started on the default voice because the list was
+            // empty (Firefox AMO "male voice"); switch from the next chunk on.
+            if (this.chunks.length > 0 && this.sessionVoice === null) {
+              this.sessionVoice = this.resolveVoiceSync(voices, this.currentSettings?.voice);
+            }
           }
           return voices;
         })

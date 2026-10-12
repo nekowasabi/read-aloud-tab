@@ -646,7 +646,7 @@ describe('TTSEngine (PlaybackController)', () => {
       engine.stop();
     });
 
-    test('セッション中に cachedVoices が埋まっても当該セッションの voice は null のまま', async () => {
+    test('セッション中に音声一覧が届いたら、次に speak するチャンクから日本語音声になる', async () => {
       jest.useFakeTimers();
       let list: SpeechSynthesisVoice[] = [];
       const speech = makeSpeech(() => list);
@@ -669,17 +669,52 @@ describe('TTSEngine (PlaybackController)', () => {
 
       for (let i = 0; i < totalChunks - 1; i++) {
         const current = (engine as unknown as { utterance: SpeechSynthesisUtterance }).utterance;
-        expect(current.voice).toBeNull();
         const onend = current.onend as unknown as (() => void) | null;
         onend?.();
         await jest.advanceTimersByTimeAsync(0);
       }
 
       expect(speech.speak).toHaveBeenCalledTimes(totalChunks);
-      for (const call of speech.speak.mock.calls) {
-        const utt = call[0] as SpeechSynthesisUtterance;
-        expect(utt.voice).toBeNull();
-      }
+      const voices = speech.speak.mock.calls.map(
+        (call) => (call[0] as SpeechSynthesisUtterance).voice,
+      );
+      // chunk0 and the prequeued chunk1 were already spoken on the default voice.
+      expect(voices.slice(0, 2)).toEqual([null, null]);
+      expect(voices.slice(2)).toEqual(Array(totalChunks - 2).fill(kyoko));
+      engine.stop();
+    });
+
+    test('性別の好みだけを変えても、再生中に音声を選び直す', async () => {
+      jest.useFakeTimers();
+      const ichiro = {
+        name: 'Ichiro',
+        lang: 'ja-JP',
+        localService: true,
+        default: false,
+        voiceURI: 'ichiro',
+      } as SpeechSynthesisVoice;
+      const speech = makeSpeech(() => [kyoko, ichiro]);
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis });
+
+      const settings: TTSSettings = { ...defaultSettings, preferredGender: 'female' };
+      const started = engine.start(
+        createTab({ content: 'Hello world. '.repeat(20) }),
+        settings,
+        { onEnd: jest.fn(), onError: jest.fn() },
+      );
+      await jest.advanceTimersByTimeAsync(0);
+      await started;
+      expect((speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance).voice).toBe(kyoko);
+
+      speech.speaking = true;
+      engine.updateSettings({ ...settings, preferredGender: 'male' });
+      await jest.advanceTimersByTimeAsync(0);
+
+      const after = speech.speak.mock.calls
+        .slice(2)
+        .map((call) => (call[0] as SpeechSynthesisUtterance).voice);
+      expect(after.length).toBeGreaterThan(0);
+      expect(after).toEqual(Array(after.length).fill(ichiro));
       engine.stop();
     });
 
