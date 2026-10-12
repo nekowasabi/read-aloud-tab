@@ -1255,4 +1255,197 @@ describe('TTSEngine (PlaybackController)', () => {
       });
     });
   });
+
+  describe('S3 次チャンクの先積み', () => {
+    const longContent = Array.from(
+      { length: 30 },
+      (_, i) => `第${i}文ですあいうえおかきくけこ。`,
+    ).join('');
+
+    type S3Speech = {
+      speak: jest.Mock;
+      cancel: jest.Mock;
+      pause: jest.Mock;
+      resume: jest.Mock;
+      getVoices: jest.Mock;
+      addEventListener: jest.Mock;
+      removeEventListener: jest.Mock;
+      speaking: boolean;
+      pending: boolean;
+      paused: boolean;
+    };
+
+    const createS3Speech = (): S3Speech => {
+      const voice = {
+        name: 'Kyoko',
+        lang: 'ja-JP',
+        localService: true,
+        default: false,
+        voiceURI: 'kyoko',
+      } as SpeechSynthesisVoice;
+      return {
+        speak: jest.fn(),
+        cancel: jest.fn(),
+        pause: jest.fn(),
+        resume: jest.fn(),
+        getVoices: jest.fn(() => [voice]),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        speaking: false,
+        pending: false,
+        paused: false,
+      };
+    };
+
+    const createSilentLogger = () => ({
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+    });
+
+    const getUtteranceAt = (
+      speech: S3Speech,
+      index: number,
+    ): SpeechSynthesisUtterance => {
+      return speech.speak.mock.calls[index][0] as SpeechSynthesisUtterance;
+    };
+
+    const fireOnEnd = (u: SpeechSynthesisUtterance): void => {
+      const handler = u.onend as unknown as (() => void) | null;
+      if (handler) {
+        handler();
+      }
+    };
+
+    const fireOnError = (
+      u: SpeechSynthesisUtterance,
+      errorValue: string,
+    ): void => {
+      type ErrorHandler = (event: { error: string }) => void;
+      const handler = u.onerror as unknown as ErrorHandler | null;
+      if (handler) {
+        handler({ error: errorValue });
+      }
+    };
+
+    const startS3Engine = async (
+      speech: S3Speech,
+    ): Promise<{
+      engine: TTSEngine;
+      hooks: { onEnd: jest.Mock; onError: jest.Mock; onProgress: jest.Mock };
+    }> => {
+      const engine = new TTSEngine({
+        speech: speech as unknown as SpeechSynthesis,
+        logger: createSilentLogger(),
+      });
+      const hooks = {
+        onEnd: jest.fn(),
+        onError: jest.fn(),
+        onProgress: jest.fn(),
+      };
+      await engine.start(
+        createTab({ content: longContent }),
+        defaultSettings,
+        hooks,
+      );
+      return { engine, hooks };
+    };
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test('start 直後は chunk0 と chunk1 の 2 回だけ speak される', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      expect(speech.speak).toHaveBeenCalledTimes(2);
+      const firstText = getUtteranceAt(speech, 0).text;
+      const secondText = getUtteranceAt(speech, 1).text;
+      expect(firstText.length).toBeGreaterThan(0);
+      expect(secondText.length).toBeGreaterThan(0);
+      expect(secondText).not.toBe(firstText);
+      engine.stop();
+    });
+
+    test('最初の utterance の onend で 1 回だけ追加 speak し chunk1 を再送しない', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      const first = getUtteranceAt(speech, 0);
+      const secondText = getUtteranceAt(speech, 1).text;
+      fireOnEnd(first);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(3);
+      const thirdText = getUtteranceAt(speech, 2).text;
+      expect(thirdText.length).toBeGreaterThan(0);
+      expect(thirdText).not.toBe(secondText);
+      engine.stop();
+    });
+
+    test('最初の utterance の onend を二重発火しても speak は増えない', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      const first = getUtteranceAt(speech, 0);
+      fireOnEnd(first);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(3);
+      fireOnEnd(first);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(3);
+      engine.stop();
+    });
+
+    test('pause 後に stop すると cancel され旧 utterance の onend で speak しない', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      speech.speaking = true;
+      speech.pending = false;
+      engine.pause();
+      engine.stop();
+      expect(speech.cancel).toHaveBeenCalled();
+      const countAfterStop = speech.speak.mock.calls.length;
+      const first = getUtteranceAt(speech, 0);
+      const second = getUtteranceAt(speech, 1);
+      fireOnEnd(first);
+      fireOnEnd(second);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak.mock.calls.length).toBe(countAfterStop);
+      engine.stop();
+    });
+
+    test('現行 chunk の onerror は 100ms 後に cancel 先行で N と N+1 を再送する', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      const first = getUtteranceAt(speech, 0);
+      fireOnEnd(first);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(3);
+      const chunkNText = getUtteranceAt(speech, 1).text;
+      const chunkNextText = getUtteranceAt(speech, 2).text;
+      const current = getUtteranceAt(speech, 1);
+      speech.cancel.mockClear();
+      fireOnError(current, 'network');
+      await jest.advanceTimersByTimeAsync(100);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.cancel).toHaveBeenCalled();
+      expect(speech.speak).toHaveBeenCalledTimes(5);
+      const cancelOrder: number =
+        speech.cancel.mock.invocationCallOrder[0];
+      const speakOrders: number[] =
+        speech.speak.mock.invocationCallOrder.slice(-2);
+      expect(cancelOrder).toBeLessThan(speakOrders[0]);
+      const resendFirst = getUtteranceAt(speech, 3).text;
+      const resendSecond = getUtteranceAt(speech, 4).text;
+      expect([resendFirst, resendSecond]).toEqual([
+        chunkNText,
+        chunkNextText,
+      ]);
+      engine.stop();
+    });
+  });
 });
