@@ -719,22 +719,10 @@ export class TabManager {
     const validated = StorageManager.validateSettings(merged);
     this.queue.settings = validated;
 
-    // Update TTSEngine's current settings
-    // If reading, TTSEngine will pause, so update queue status to match
-    if (this.queue.status === 'reading') {
-      this.playback.updateSettings(validated);
-      this.queue.status = 'paused';
-    } else if (this.queue.status === 'paused') {
-      this.playback.updateSettings(validated);
-    }
-
-    // 既存タブのプリフェッチ結果をクリア
-    // (AI設定が変更されたため、再プリフェッチが必要)
-    for (const tab of this.queue.tabs) {
-      tab.summary = undefined;
-      tab.translation = undefined;
-      tab.processedContent = undefined;
-    }
+    // §7: rate/pitch/volume/voice changes apply to the next chunk only.
+    // Do not pause, do not set queue status to paused, and do not clear
+    // summary/translation/processedContent.
+    this.playback.updateSettings(validated);
 
     await Promise.all([this.persistQueue(), StorageManager.saveSettings(validated)]);
 

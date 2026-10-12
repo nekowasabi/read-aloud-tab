@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TTSSettings } from '../../shared/types';
 import IgnoreListManager from './IgnoreListManager';
 // === process5 sub4: UI改善（設定パネルに性別フィルター追加）===
@@ -10,34 +10,37 @@ interface Props {
   onClose: () => void;
 }
 
-// Debounce function to prevent rapid successive calls
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout | null = null;
-  return (...args: Parameters<T>) => {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-    timeoutId = setTimeout(() => {
-      func(...args);
-    }, delay);
-  };
-}
+// Debounce delay for settings changes (single 300ms debounce at the component layer)
+const SETTINGS_DEBOUNCE_MS = 300;
 
 export default function SettingsPanel({ settings, onChange, onClose }: Props) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [localSettings, setLocalSettings] = useState<TTSSettings>(settings);
-
-  // Create debounced onChange handler (300ms delay)
-  const debouncedOnChange = useMemo(() => debounce(onChange, 300), [onChange]);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRef = useRef<TTSSettings>(settings);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     loadVoices();
-    // 親のsettingsが変更された場合、ローカルの状態も更新
+  }, []);
+
+  // Do not let a prop echo overwrite an in-flight local value.
+  useEffect(() => {
+    if (timerRef.current !== null) {
+      return;
+    }
     setLocalSettings(settings);
+    latestRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const loadVoices = () => {
     const loadAvailableVoices = () => {
@@ -54,11 +57,18 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
   };
 
   const handleSettingChange = (key: keyof TTSSettings, value: number | string) => {
-    const newSettings = { ...localSettings, [key]: value };
+    const newSettings = { ...latestRef.current, [key]: value } as TTSSettings;
     // Update local state immediately for instant UI feedback
     setLocalSettings(newSettings);
+    latestRef.current = newSettings;
     // Debounce actual onChange call to prevent race conditions
-    debouncedOnChange(newSettings);
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      onChangeRef.current(latestRef.current);
+    }, SETTINGS_DEBOUNCE_MS);
   };
 
   const formatValue = (value: number, decimals: number = 1): string => {
