@@ -506,6 +506,16 @@ export class TTSEngine implements PlaybackController {
 
     this.currentSettings = settings;
 
+    // speechSynthesis has no per-utterance cancel, so dropping the prequeued
+    // chunk also drops the current one: replay the current chunk with the new
+    // settings, which prequeues the next chunk with them too.
+    if (this.queuedUtterance && this.speech.speaking && !this.isPaused) {
+      this.logger.info("[TTSEngine] Settings changed during playback, replaying current chunk");
+      this.pause();
+      this.resume();
+      return;
+    }
+
     // If currently speaking, pause to let user manually resume with new settings
     if (this.speech && this.speech.speaking && !this.isPaused) {
       this.logger.info(
@@ -642,6 +652,11 @@ export class TTSEngine implements PlaybackController {
     nextIndex: number,
     voiceToCopy: SpeechSynthesisVoice | null,
   ): void {
+    // Firefox's speak queue behaves differently from Chrome's and is not yet
+    // verified on a real device, so keep the old one-utterance-at-a-time path.
+    if (this.isFirefox) {
+      return;
+    }
     if (!this.currentHooks || !this.currentSettings) {
       return;
     }

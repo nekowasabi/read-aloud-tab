@@ -797,6 +797,11 @@ describe('TTSEngine (PlaybackController)', () => {
   describe('process4: Debug Features (Firefox detailed logging, chunk progress, error collection)', () => {
     // ===== sub1: Firefox版詳細ログ出力 =====
     describe('sub1: Firefox detailed logging', () => {
+      // The 'firefox' spy otherwise leaks into every later test in this file.
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
       test('Firefox判定時にログレベルが詳細モードになる', () => {
         // Given: mockedlogger の info/warn/error メソッドのスパイ
         const mockLogger = {
@@ -1446,6 +1451,50 @@ describe('TTSEngine (PlaybackController)', () => {
         chunkNextText,
       ]);
       engine.stop();
+    });
+
+    test('再生中の updateSettings は先積みを cancel し、現行と次のチャンクを新しい設定で積み直す', async () => {
+      jest.useFakeTimers();
+      const speech = createS3Speech();
+      const { engine } = await startS3Engine(speech);
+      const chunk0Text = getUtteranceAt(speech, 0).text;
+      const staleQueued = getUtteranceAt(speech, 1);
+      speech.speaking = true;
+
+      engine.updateSettings({ ...defaultSettings, rate: 2, volume: 0.5 });
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(speech.cancel).toHaveBeenCalledTimes(1);
+      expect(speech.speak).toHaveBeenCalledTimes(4);
+      const replayed = getUtteranceAt(speech, 2);
+      const requeued = getUtteranceAt(speech, 3);
+      expect([replayed.text, requeued.text]).toEqual([chunk0Text, staleQueued.text]);
+      expect([replayed.rate, replayed.volume]).toEqual([2, 0.5]);
+      expect([requeued.rate, requeued.volume]).toEqual([2, 0.5]);
+
+      fireOnEnd(staleQueued);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(4);
+      engine.stop();
+    });
+
+    test('Firefox では次チャンクを先積みしない', async () => {
+      jest.useFakeTimers();
+      const spy = jest
+        .spyOn(BrowserAdapter, 'getBrowserType')
+        .mockReturnValue('firefox');
+      try {
+        const speech = createS3Speech();
+        const { engine } = await startS3Engine(speech);
+        expect(speech.speak).toHaveBeenCalledTimes(1);
+
+        fireOnEnd(getUtteranceAt(speech, 0));
+        await jest.advanceTimersByTimeAsync(0);
+        expect(speech.speak).toHaveBeenCalledTimes(2);
+        engine.stop();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
