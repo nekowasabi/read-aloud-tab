@@ -297,10 +297,7 @@ export class TTSEngine implements PlaybackController {
               }
               this.queuedChunkIndex = null;
               this.queuedUtterance = null;
-              this.prequeueNextChunk(
-                this.currentChunkIndex + 1,
-                reused.voice,
-              );
+              this.prequeueNextChunk(this.currentChunkIndex + 1);
             }),
             map(() => reused),
           );
@@ -677,7 +674,7 @@ export class TTSEngine implements PlaybackController {
 
     this.speech.speak(utterance);
     // S3: 次チャンクを先積みしてチャンク間の無音を短縮する
-    this.prequeueNextChunk(chunkIndex + 1, utterance.voice);
+    this.prequeueNextChunk(chunkIndex + 1);
   }
 
   private clearQueuedChunk(): void {
@@ -685,10 +682,7 @@ export class TTSEngine implements PlaybackController {
     this.queuedUtterance = null;
   }
 
-  private prequeueNextChunk(
-    nextIndex: number,
-    voiceToCopy: SpeechSynthesisVoice | null,
-  ): void {
+  private prequeueNextChunk(nextIndex: number): void {
     // Firefox's speak queue behaves differently from Chrome's and is not yet
     // verified on a real device, so keep the old one-utterance-at-a-time path.
     if (this.isFirefox) {
@@ -708,7 +702,7 @@ export class TTSEngine implements PlaybackController {
     nextUtterance.text = nextChunk.text;
     this.applySettings(nextUtterance, this.currentSettings);
     // S1: セッションで固定した音声（updateSettings で選び直した値）を使う
-    nextUtterance.voice = this.sessionVoice ?? voiceToCopy;
+    nextUtterance.voice = this.sessionVoice;
     this.bindUtteranceEvents(nextUtterance, this.currentHooks, nextChunk);
     this.speech.speak(nextUtterance);
     this.queuedChunkIndex = nextIndex;

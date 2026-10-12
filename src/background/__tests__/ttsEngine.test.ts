@@ -660,14 +660,15 @@ describe('TTSEngine (PlaybackController)', () => {
 
       const totalChunks = (engine as unknown as TestEngineShape).chunks.length;
       expect(totalChunks).toBeGreaterThanOrEqual(2);
-      expect(speech.speak).toHaveBeenCalledTimes(1);
+      // S3: chunk0 と先積みの chunk1
+      expect(speech.speak).toHaveBeenCalledTimes(2);
 
       list = [kyoko];
       await jest.advanceTimersByTimeAsync(10000 + 500);
       expect((engine as unknown as TestEngineShape).cachedVoices).toEqual([kyoko]);
 
       for (let i = 0; i < totalChunks - 1; i++) {
-        const current = speech.speak.mock.calls[i][0] as SpeechSynthesisUtterance;
+        const current = (engine as unknown as { utterance: SpeechSynthesisUtterance }).utterance;
         expect(current.voice).toBeNull();
         const onend = current.onend as unknown as (() => void) | null;
         onend?.();
@@ -704,26 +705,31 @@ describe('TTSEngine (PlaybackController)', () => {
 
       const totalChunks = (engine as unknown as TestEngineShape).chunks.length;
       expect(totalChunks).toBeGreaterThanOrEqual(2);
-      expect(speech.speak).toHaveBeenCalledTimes(1);
-      const first = speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance;
-      expect(first.voice).toBe(kyoko);
+      // S3: chunk0 と先積みの chunk1。どちらも Kyoko
+      expect(speech.speak).toHaveBeenCalledTimes(2);
+      for (const call of speech.speak.mock.calls) {
+        expect((call[0] as SpeechSynthesisUtterance).voice).toBe(kyoko);
+      }
 
       speech.speaking = true;
       engine.updateSettings({ ...settings, voice: 'Otoya' });
       engine.resume();
       await jest.advanceTimersByTimeAsync(0);
 
-      expect(speech.speak).toHaveBeenCalledTimes(2);
-      const second = speech.speak.mock.calls[1][0] as SpeechSynthesisUtterance;
-      expect(second.voice).toBe(otoya);
+      // resume は今のチャンクを Otoya で送り直す（次チャンクの先積みも入りうる）
+      expect(speech.speak.mock.calls.length).toBeGreaterThanOrEqual(3);
+      const resumed = speech.speak.mock.calls[2][0] as SpeechSynthesisUtterance;
+      expect(resumed.voice).toBe(otoya);
 
-      const secondOnEnd = second.onend as unknown as (() => void) | null;
-      secondOnEnd?.();
+      const resumedOnEnd = resumed.onend as unknown as (() => void) | null;
+      resumedOnEnd?.();
       await jest.advanceTimersByTimeAsync(0);
 
-      expect(speech.speak).toHaveBeenCalledTimes(3);
-      const third = speech.speak.mock.calls[2][0] as SpeechSynthesisUtterance;
-      expect(third.voice).toBe(otoya);
+      // 以降のチャンク（先積み分も含む）はすべて Otoya
+      expect(speech.speak.mock.calls.length).toBeGreaterThan(3);
+      for (const call of speech.speak.mock.calls.slice(2)) {
+        expect((call[0] as SpeechSynthesisUtterance).voice).toBe(otoya);
+      }
       engine.stop();
     });
   });
