@@ -34,11 +34,20 @@ export default function SettingsPanel({ settings, onChange, onClose }: Props) {
     latestRef.current = settings;
   }, [settings]);
 
+  // Flush the pending change on unmount and on pagehide: closing the Chrome
+  // popup destroys the page without running React cleanup or the timer.
   useEffect(() => {
-    return () => {
+    const flush = (): void => {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
+        timerRef.current = null;
+        onChangeRef.current(latestRef.current);
       }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
     };
   }, []);
 

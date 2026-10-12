@@ -70,6 +70,44 @@ describe('QuickControls input (§7)', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ rate: 2.0 }));
   });
+
+  test('unmount within 300ms sends the pending value once', () => {
+    const onChange = jest.fn();
+    const { unmount } = render(<QuickControls settings={baseSettings} onChange={onChange} />);
+
+    fireEvent.change(screen.getAllByRole('slider')[1], { target: { value: '2.5' } });
+    act(() => {
+      jest.advanceTimersByTime(100);
+    });
+    unmount();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ ...baseSettings, rate: 2.5 });
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test('pagehide within 300ms sends the pending value once', () => {
+    const onChange = jest.fn();
+    const { unmount } = render(<QuickControls settings={baseSettings} onChange={onChange} />);
+
+    fireEvent.change(screen.getAllByRole('slider')[0], { target: { value: '0.3' } });
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ ...baseSettings, volume: 0.3 });
+    unmount();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test('unmount with nothing pending sends nothing', () => {
+    const onChange = jest.fn();
+    const { unmount } = render(<QuickControls settings={baseSettings} onChange={onChange} />);
+    unmount();
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
 
 describe('SettingsPanel pending guard (§7)', () => {
@@ -114,5 +152,18 @@ describe('SettingsPanel pending guard (§7)', () => {
     });
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ rate: 2.0 }));
+  });
+
+  test('unmount within 300ms sends the pending value once', () => {
+    const onChange = jest.fn();
+    const { unmount } = render(
+      <SettingsPanel settings={baseSettings} onChange={onChange} onClose={jest.fn()} />
+    );
+
+    fireEvent.change(screen.getAllByRole('slider')[0], { target: { value: '2.5' } });
+    unmount();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ rate: 2.5 }));
   });
 });
