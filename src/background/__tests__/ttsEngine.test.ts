@@ -681,6 +681,51 @@ describe('TTSEngine (PlaybackController)', () => {
       }
       engine.stop();
     });
+
+    test('再生中の voice 変更は resume 後のチャンクに反映される', async () => {
+      jest.useFakeTimers();
+      const otoya = {
+        name: 'Otoya',
+        lang: 'ja-JP',
+        localService: true,
+        default: false,
+        voiceURI: 'otoya',
+      } as SpeechSynthesisVoice;
+      const voices: SpeechSynthesisVoice[] = [kyoko, otoya];
+      const speech = makeSpeech(() => voices);
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis });
+
+      const settings: TTSSettings = { ...defaultSettings, voice: 'Kyoko' };
+      const longText = 'Hello world. '.repeat(20);
+      const hooks = { onEnd: jest.fn(), onError: jest.fn() };
+      const started = engine.start(createTab({ content: longText }), settings, hooks);
+      await jest.advanceTimersByTimeAsync(0);
+      await started;
+
+      const totalChunks = (engine as unknown as TestEngineShape).chunks.length;
+      expect(totalChunks).toBeGreaterThanOrEqual(2);
+      expect(speech.speak).toHaveBeenCalledTimes(1);
+      const first = speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance;
+      expect(first.voice).toBe(kyoko);
+
+      speech.speaking = true;
+      engine.updateSettings({ ...settings, voice: 'Otoya' });
+      engine.resume();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(speech.speak).toHaveBeenCalledTimes(2);
+      const second = speech.speak.mock.calls[1][0] as SpeechSynthesisUtterance;
+      expect(second.voice).toBe(otoya);
+
+      const secondOnEnd = second.onend as unknown as (() => void) | null;
+      secondOnEnd?.();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(speech.speak).toHaveBeenCalledTimes(3);
+      const third = speech.speak.mock.calls[2][0] as SpeechSynthesisUtterance;
+      expect(third.voice).toBe(otoya);
+      engine.stop();
+    });
   });
 
   // process2: チャンクサイズの最適化

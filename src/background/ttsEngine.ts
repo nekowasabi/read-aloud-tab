@@ -519,7 +519,19 @@ export class TTSEngine implements PlaybackController {
       return;
     }
 
+    const previousVoice = this.currentSettings.voice;
     this.currentSettings = settings;
+
+    if (settings.voice !== previousVoice) {
+      const voices =
+        this.cachedVoices.length > 0
+          ? this.cachedVoices
+          : this.speech.getVoices();
+      if (this.cachedVoices.length === 0 && voices.length > 0) {
+        this.cachedVoices = voices;
+      }
+      this.sessionVoice = this.resolveVoiceSync(voices, settings.voice);
+    }
 
     // speechSynthesis has no per-utterance cancel, so dropping the prequeued
     // chunk also drops the current one: replay the current chunk with the new
@@ -577,6 +589,20 @@ export class TTSEngine implements PlaybackController {
     return voices.find((voice) => this.isJapaneseVoice(voice));
   }
 
+  private resolveVoiceSync(
+    voices: SpeechSynthesisVoice[],
+    voiceName: string | null | undefined,
+  ): SpeechSynthesisVoice | null {
+    if (voiceName) {
+      const exact = voices.find((voice) => voice.name === voiceName);
+      if (exact) {
+        return exact;
+      }
+    }
+    const preferredGender = this.currentSettings?.preferredGender || 'female';
+    return selectBestVoice(voices, preferredGender, 'ja') ?? null;
+  }
+
   private async applyVoice(
     utterance: SpeechSynthesisUtterance,
     voiceName: string | null | undefined,
@@ -584,12 +610,10 @@ export class TTSEngine implements PlaybackController {
     try {
       const voices = await this.getVoicesForSpeak();
 
-      // === process5 sub5: デフォルト音声選択ロジックの改善 ===
-      // 指定音声がある場合、それを検索
+      const picked = this.resolveVoiceSync(voices, voiceName);
       if (voiceName) {
-        const selectedVoice = voices.find((voice) => voice.name === voiceName);
-        if (selectedVoice) {
-          utterance.voice = selectedVoice;
+        if (picked && picked.name === voiceName) {
+          utterance.voice = picked;
           return;
         }
         // 指定音声が見つからない場合、ログ出力
@@ -599,13 +623,11 @@ export class TTSEngine implements PlaybackController {
       }
 
       // 指定音声がない場合、または見つからない場合は最適な音声を自動選択
-      const preferredGender = this.currentSettings?.preferredGender || 'female';
-      const bestVoice = selectBestVoice(voices, preferredGender, 'ja');
-
-      if (bestVoice) {
-        utterance.voice = bestVoice;
+      if (picked) {
+        utterance.voice = picked;
+        const preferredGender = this.currentSettings?.preferredGender || 'female';
         this.logger.info(
-          `TTSEngine: selected best voice "${bestVoice.name}" (lang: ${bestVoice.lang}, gender: ${preferredGender})`
+          `TTSEngine: selected best voice "${picked.name}" (lang: ${picked.lang}, gender: ${preferredGender})`
         );
       } else {
         this.logger.warn(
