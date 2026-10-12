@@ -1,7 +1,7 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
-import { Subject, Subscription, EMPTY, from } from 'rxjs';
+import { Subject, Subscription, EMPTY, from, of } from 'rxjs';
 import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
 import { BrowserAdapter } from "../shared/utils/browser";
 // === process5 sub5: デフォルト音声選択ロジックの改善 ===
@@ -49,6 +49,10 @@ export class TTSEngine implements PlaybackController {
   // === process3 sub1: チャンク遷移リトライ回数の増加（2→5）===
   // === process100 sub1: 定数参照に変更 ===
   private readonly maxChunkRetries: number = MAX_CHUNK_RETRIES;
+
+  // S3: 次チャンク先積み用（現在再生中の次に speak 済みのチャンク）
+  private queuedChunkIndex: number | null = null;
+  private queuedUtterance: SpeechSynthesisUtterance | null = null;
 
   // Observable-based chunk transition (process1-7)
   private chunkTransition$ = new Subject<'next' | 'complete'>();
@@ -157,6 +161,7 @@ export class TTSEngine implements PlaybackController {
     this.chunks = chunkResult.chunks;
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
+    this.clearQueuedChunk();
 
     // === process2 sub2: Chunk count warning ===
     if (chunkResult.totalChunks > CHUNK_COUNT_WARNING_THRESHOLD) {
@@ -254,6 +259,38 @@ export class TTSEngine implements PlaybackController {
       filter(() => this.currentChunkIndex < this.chunks.length),
       switchMap(() => {
         const chunk = this.chunks[this.currentChunkIndex];
+        // S3: 既に先積み済みのチャンクは再 speak しない
+        if (
+          this.queuedChunkIndex === this.currentChunkIndex &&
+          this.queuedUtterance
+        ) {
+          const reused = this.queuedUtterance;
+          return of(reused).pipe(
+            tap(() => {
+              this.utterance = reused;
+              this.currentText = chunk.text;
+              this.chunkRetryCount = 0;
+              this._chunkStartTime = Date.now();
+              if (this.debugLoggingEnabled) {
+                this.logger.debug(
+                  `[TTSEngine] [Firefox] Starting chunk ${this.currentChunkIndex + 1}/${this.chunks.length}`,
+                  {
+                    chunkStartTime: this._chunkStartTime,
+                    chunkLength: chunk.text.length,
+                    textPreview: chunk.text.substring(0, 40),
+                  },
+                );
+              }
+              this.queuedChunkIndex = null;
+              this.queuedUtterance = null;
+              this.prequeueNextChunk(
+                this.currentChunkIndex + 1,
+                reused.voice,
+              );
+            }),
+            map(() => reused),
+          );
+        }
         const utterance = this.createUtteranceFn(chunk.text);
         utterance.text = chunk.text;
 
@@ -366,6 +403,7 @@ export class TTSEngine implements PlaybackController {
 
       // Use cancel() instead of pause() for Firefox compatibility
       this.speech.cancel();
+      this.clearQueuedChunk();
     } catch (error) {
       this.logger.warn("[TTSEngine] pause failed during cancel()", error);
       this.isPaused = false; // Reset on error
@@ -450,6 +488,7 @@ export class TTSEngine implements PlaybackController {
   }
 
   stop(): void {
+    this.clearQueuedChunk();
     if (this.speech && (this.speech.speaking || this.speech.pending)) {
       try {
         this.speech.cancel();
@@ -466,6 +505,16 @@ export class TTSEngine implements PlaybackController {
     }
 
     this.currentSettings = settings;
+
+    // speechSynthesis has no per-utterance cancel, so dropping the prequeued
+    // chunk also drops the current one: replay the current chunk with the new
+    // settings, which prequeues the next chunk with them too.
+    if (this.queuedUtterance && this.speech.speaking && !this.isPaused) {
+      this.logger.info("[TTSEngine] Settings changed during playback, replaying current chunk");
+      this.pause();
+      this.resume();
+      return;
+    }
 
     // If currently speaking, pause to let user manually resume with new settings
     if (this.speech && this.speech.speaking && !this.isPaused) {
@@ -582,6 +631,7 @@ export class TTSEngine implements PlaybackController {
     const utterance = this.createUtteranceFn(chunk.text);
     utterance.text = chunk.text;
     this.utterance = utterance;
+    this.clearQueuedChunk();
 
     this.applySettings(utterance, this.currentSettings);
     await this.applyVoice(utterance, this.currentSettings.voice);
@@ -589,6 +639,42 @@ export class TTSEngine implements PlaybackController {
     this.bindUtteranceEvents(utterance, this.currentHooks, chunk);
 
     this.speech.speak(utterance);
+    // S3: 次チャンクを先積みしてチャンク間の無音を短縮する
+    this.prequeueNextChunk(chunkIndex + 1, utterance.voice);
+  }
+
+  private clearQueuedChunk(): void {
+    this.queuedChunkIndex = null;
+    this.queuedUtterance = null;
+  }
+
+  private prequeueNextChunk(
+    nextIndex: number,
+    voiceToCopy: SpeechSynthesisVoice | null,
+  ): void {
+    // Firefox's speak queue behaves differently from Chrome's and is not yet
+    // verified on a real device, so keep the old one-utterance-at-a-time path.
+    if (this.isFirefox) {
+      return;
+    }
+    if (!this.currentHooks || !this.currentSettings) {
+      return;
+    }
+    if (nextIndex < 0 || nextIndex >= this.chunks.length) {
+      return;
+    }
+    if (this.queuedChunkIndex === nextIndex) {
+      return;
+    }
+    const nextChunk = this.chunks[nextIndex];
+    const nextUtterance = this.createUtteranceFn(nextChunk.text);
+    nextUtterance.text = nextChunk.text;
+    this.applySettings(nextUtterance, this.currentSettings);
+    nextUtterance.voice = voiceToCopy;
+    this.bindUtteranceEvents(nextUtterance, this.currentHooks, nextChunk);
+    this.speech.speak(nextUtterance);
+    this.queuedChunkIndex = nextIndex;
+    this.queuedUtterance = nextUtterance;
   }
 
   /**
@@ -611,6 +697,14 @@ export class TTSEngine implements PlaybackController {
     this.logger.warn(
       `[TTSEngine] Retrying chunk ${this.currentChunkIndex} (attempt ${this.chunkRetryCount}/${this.maxChunkRetries})`,
     );
+
+    // S3: 先積み済みの次チャンクを破棄するため cancel してから再送する
+    this.clearQueuedChunk();
+    try {
+      this.speech.cancel();
+    } catch (error) {
+      this.logger.warn("TTSEngine: cancel before retry failed", error);
+    }
 
     // === process3 sub1: リトライ時の待機時間（100ms）===
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -655,6 +749,13 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onend = () => {
+      // S3: 現在のチャンク以外の utterance の onend は無視する（二重 speak 防止）
+      if (chunk.index !== this.currentChunkIndex) {
+        return;
+      }
+      if (utterance !== this.utterance) {
+        return;
+      }
       // === process3 sub3: チャンク実行時間の記録 ===
       // 各チャンクの読み上げ実行時間を記録してログ出力
       const chunkStartTime = (utterance as any)._chunkStartTime;
@@ -684,6 +785,13 @@ export class TTSEngine implements PlaybackController {
     };
 
     utterance.onerror = (event: any) => {
+      // S3: 現在のチャンク以外の utterance のエラーは無視する
+      if (chunk.index !== this.currentChunkIndex) {
+        return;
+      }
+      if (utterance !== this.utterance) {
+        return;
+      }
       // === process3 sub2: エラー発生時に詳細ログを出力 ===
       const errorType = typeof event?.error === "string" ? event.error : "unknown";
 
@@ -848,6 +956,7 @@ export class TTSEngine implements PlaybackController {
     }
 
     this.utterance = null;
+    this.clearQueuedChunk();
     this.isPaused = false;
     this.currentText = "";
     this.currentPosition = 0;
