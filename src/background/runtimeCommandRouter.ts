@@ -38,6 +38,7 @@ export function createRuntimeCommandRouter(deps: RuntimeCommandRouterDeps) {
         await deps.handleAddCommand(message.payload);
         return { success: true };
       case 'QUEUE_REMOVE':
+        deps.prefetcher?.cancelWait(message.payload.tabId);
         await deps.tabManager.removeTab(message.payload.tabId);
         return { success: true };
       case 'QUEUE_REORDER':

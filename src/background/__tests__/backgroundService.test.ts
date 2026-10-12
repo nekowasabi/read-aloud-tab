@@ -551,6 +551,42 @@ describe('BackgroundOrchestrator', () => {
       expect(stub.skipTab).toHaveBeenCalledWith('next');
       expect(result).toEqual({ success: true });
     });
+
+    test('QUEUE_REMOVE を router 経由でルーティングすると prefetcher.cancelWait が呼ばれる', async () => {
+      const { stub } = createTabManagerStub();
+      const { createRuntimeCommandRouter } = await import('../runtimeCommandRouter');
+      const cancelWait = jest.fn();
+      const routeCommand = createRuntimeCommandRouter({
+        tabManager: stub,
+        handleAddCommand: jest.fn().mockResolvedValue(undefined),
+        handleControlCommand: jest.fn().mockResolvedValue(undefined),
+        handleUpdateSettings: jest.fn().mockResolvedValue(undefined),
+        prefetcher: { cancelWait },
+      });
+
+      const result = await routeCommand({ type: 'QUEUE_REMOVE', payload: { tabId: 42 } });
+
+      expect(cancelWait).toHaveBeenCalledWith(42);
+      expect(stub.removeTab).toHaveBeenCalledWith(42);
+      expect(result).toEqual({ success: true });
+    });
+
+    test('QUEUE_REMOVE は prefetcher がなくても動作する', async () => {
+      const { stub } = createTabManagerStub();
+      const { createRuntimeCommandRouter } = await import('../runtimeCommandRouter');
+      const routeCommand = createRuntimeCommandRouter({
+        tabManager: stub,
+        handleAddCommand: jest.fn().mockResolvedValue(undefined),
+        handleControlCommand: jest.fn().mockResolvedValue(undefined),
+        handleUpdateSettings: jest.fn().mockResolvedValue(undefined),
+        prefetcher: null,
+      });
+
+      const result = await routeCommand({ type: 'QUEUE_REMOVE', payload: { tabId: 7 } });
+
+      expect(stub.removeTab).toHaveBeenCalledWith(7);
+      expect(result).toEqual({ success: true });
+    });
   });
 
   test('background index still forwards loading and complete updates to TabManager', () => {
