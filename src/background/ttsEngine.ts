@@ -1,7 +1,7 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
-import { Subject, Subscription, EMPTY, from, of } from 'rxjs';
+import { Subject, Subscription, EMPTY, of } from 'rxjs';
 import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
 import { BrowserAdapter } from "../shared/utils/browser";
 // === process5 sub5: デフォルト音声選択ロジックの改善 ===
@@ -83,6 +83,8 @@ export class TTSEngine implements PlaybackController {
   // 背景で取得した音声一覧（同じエンジンの後続チャンクで再利用）
   private cachedVoices: SpeechSynthesisVoice[] = [];
   private voiceFill: Promise<SpeechSynthesisVoice[]> | null = null;
+  // セッションごとに固定する音声。start() で一度だけ解決する。
+  private sessionVoice: SpeechSynthesisVoice | null = null;
 
   constructor(options: TTSEngineOptions = {}) {
     this.speech = options.speech ||
@@ -217,6 +219,14 @@ export class TTSEngine implements PlaybackController {
     // Setup Observable pipeline for chunk transitions (process3)
     this.setupChunkTransitionPipeline(hooks);
 
+    // セッションの音声を一度だけ解決して固定する。
+    // applyVoice/getVoicesForSpeak の既存ロジックを使い、以降のチャンクは再取得しない。
+    // セッション途中で cachedVoices が埋まっても、このセッションには適用せず次回 start() から使う。
+    this.sessionVoice = null;
+    const voiceProbe = { voice: null } as SpeechSynthesisUtterance;
+    await this.applyVoice(voiceProbe, settings.voice);
+    this.sessionVoice = voiceProbe.voice ?? null;
+
     // Start playing first chunk
     await this.playChunkAt(0);
   }
@@ -301,8 +311,9 @@ export class TTSEngine implements PlaybackController {
         // Apply settings
         this.applySettings(utterance, this.currentSettings!);
 
-        // Convert async applyVoice to Observable
-        return from(this.applyVoice(utterance, this.currentSettings!.voice)).pipe(
+        // セッションで固定した音声を使い、再取得しない
+        utterance.voice = this.sessionVoice;
+        return of(utterance).pipe(
           tap(() => {
             // Bind events
             this.bindUtteranceEvents(utterance, hooks, chunk);
@@ -473,7 +484,7 @@ export class TTSEngine implements PlaybackController {
 
         // Apply settings
         this.applySettings(utterance, this.currentSettings!);
-        await this.applyVoice(utterance, this.currentSettings!.voice);
+        utterance.voice = this.sessionVoice;
 
         // Bind events with offset for correct position tracking
         this.bindUtteranceEventsWithOffset(
@@ -638,7 +649,7 @@ export class TTSEngine implements PlaybackController {
     this.clearQueuedChunk();
 
     this.applySettings(utterance, this.currentSettings);
-    await this.applyVoice(utterance, this.currentSettings.voice);
+    utterance.voice = this.sessionVoice;
     // Bind events with Observable-based chunk transition (process2)
     this.bindUtteranceEvents(utterance, this.currentHooks, chunk);
 
@@ -674,7 +685,8 @@ export class TTSEngine implements PlaybackController {
     const nextUtterance = this.createUtteranceFn(nextChunk.text);
     nextUtterance.text = nextChunk.text;
     this.applySettings(nextUtterance, this.currentSettings);
-    nextUtterance.voice = voiceToCopy;
+    // S1: セッションで固定した音声（updateSettings で選び直した値）を使う
+    nextUtterance.voice = this.sessionVoice ?? voiceToCopy;
     this.bindUtteranceEvents(nextUtterance, this.currentHooks, nextChunk);
     this.speech.speak(nextUtterance);
     this.queuedChunkIndex = nextIndex;
@@ -970,6 +982,7 @@ export class TTSEngine implements PlaybackController {
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
     this.lastChunkEndTime = 0;
+    this.sessionVoice = null;
   }
 
   /**

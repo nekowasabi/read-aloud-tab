@@ -588,12 +588,19 @@ describe('TTSEngine (PlaybackController)', () => {
     });
     const kyoko = { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' } as SpeechSynthesisVoice;
 
+    type TestEngineShape = {
+      cachedVoices: SpeechSynthesisVoice[];
+      defaultLang: string;
+      chunks: { text: string }[];
+      calculateChunkConfig: (s: TTSSettings) => { maxChunkSize: number; minChunkSize: number };
+    };
+
     afterEach(() => jest.useRealTimers());
 
     test('voices が空でも 200ms 進めれば speak が呼ばれ、lang は既定値', async () => {
       jest.useFakeTimers();
       const speech = makeSpeech(() => []);
-      const engine = new TTSEngine({ speech: speech as any });
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis });
 
       const t0 = Date.now();
       const started = engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
@@ -603,8 +610,9 @@ describe('TTSEngine (PlaybackController)', () => {
       expect(speech.speak).toHaveBeenCalledTimes(1);
       const speakAt = Date.now() - t0;
       expect(speakAt).toBeLessThanOrEqual(200);
-      const utterance = speech.speak.mock.calls[0][0];
-      expect(utterance.lang).toBeTruthy();
+      const utterance = speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance;
+      expect(utterance.voice).toBeNull();
+      expect(utterance.lang).toBe((engine as unknown as TestEngineShape).defaultLang);
       await started;
       engine.stop();
     });
@@ -613,7 +621,7 @@ describe('TTSEngine (PlaybackController)', () => {
       jest.useFakeTimers();
       let list: SpeechSynthesisVoice[] = [];
       const speech = makeSpeech(() => list);
-      const engine = new TTSEngine({ speech: speech as any });
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis });
 
       const first = engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
       await jest.advanceTimersByTimeAsync(200);
@@ -624,7 +632,7 @@ describe('TTSEngine (PlaybackController)', () => {
       // 背景取得のリトライ中に音声が見つかる
       list = [kyoko];
       await jest.advanceTimersByTimeAsync(10000 + 500);
-      expect((engine as any).cachedVoices).toEqual([kyoko]);
+      expect((engine as unknown as TestEngineShape).cachedVoices).toEqual([kyoko]);
 
       speech.getVoices.mockClear();
       const timersBefore = jest.getTimerCount();
@@ -635,6 +643,42 @@ describe('TTSEngine (PlaybackController)', () => {
       expect(speech.getVoices).not.toHaveBeenCalled();
       expect(jest.getTimerCount()).toBeLessThanOrEqual(timersBefore);
       await second;
+      engine.stop();
+    });
+
+    test('セッション中に cachedVoices が埋まっても当該セッションの voice は null のまま', async () => {
+      jest.useFakeTimers();
+      let list: SpeechSynthesisVoice[] = [];
+      const speech = makeSpeech(() => list);
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis });
+
+      const longText = 'Hello world. '.repeat(20);
+      const hooks = { onEnd: jest.fn(), onError: jest.fn() };
+      const started = engine.start(createTab({ content: longText }), defaultSettings, hooks);
+      await jest.advanceTimersByTimeAsync(200);
+      await started;
+
+      const totalChunks = (engine as unknown as TestEngineShape).chunks.length;
+      expect(totalChunks).toBeGreaterThanOrEqual(2);
+      expect(speech.speak).toHaveBeenCalledTimes(1);
+
+      list = [kyoko];
+      await jest.advanceTimersByTimeAsync(10000 + 500);
+      expect((engine as unknown as TestEngineShape).cachedVoices).toEqual([kyoko]);
+
+      for (let i = 0; i < totalChunks - 1; i++) {
+        const current = speech.speak.mock.calls[i][0] as SpeechSynthesisUtterance;
+        expect(current.voice).toBeNull();
+        const onend = current.onend as unknown as (() => void) | null;
+        onend?.();
+        await jest.advanceTimersByTimeAsync(0);
+      }
+
+      expect(speech.speak).toHaveBeenCalledTimes(totalChunks);
+      for (const call of speech.speak.mock.calls) {
+        const utt = call[0] as SpeechSynthesisUtterance;
+        expect(utt.voice).toBeNull();
+      }
       engine.stop();
     });
   });
