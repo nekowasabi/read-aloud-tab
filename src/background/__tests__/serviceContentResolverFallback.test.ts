@@ -185,6 +185,7 @@ describe('createContentResolver fallback', () => {
   });
 
   it('should not trigger on-demand summarization when prefetch fails explicitly in skip mode', async () => {
+    mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
     mockPrefetcher.waitForPrefetch.mockResolvedValue('failed');
     const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
     mockTabLookup.getTabById.mockReturnValue(tabNoSummary);
@@ -196,6 +197,8 @@ describe('createContentResolver fallback', () => {
     const resolver = makeResolver();
     const result = await resolver(tabNoSummary);
 
+    expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
+    expect(mockPrefetcher.getResultFromStore).not.toHaveBeenCalled();
     expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
     expect(result?.summary).toBeUndefined();
     expect(result?.content).toBe(baseTab.content);
@@ -206,14 +209,29 @@ describe('createContentResolver fallback', () => {
     mockTabLookup.getTabById.mockReturnValue(tabWithSummary);
     const settingsWithWaitMode: AiSettings = {
       ...aiSettingsEnabled,
-      summaryWaitMode: 'skip',
+      summaryWaitMode: 'wait',
     };
     StorageManager.getAiSettings.mockResolvedValue(settingsWithWaitMode);
 
     const resolver = makeResolver();
     await resolver(tabWithSummary);
 
-    expect(mockPrefetcher.waitForPrefetch).toHaveBeenCalledWith(42, expect.any(Number), 'skip');
+    expect(mockPrefetcher.waitForPrefetch).toHaveBeenCalledWith(42, expect.any(Number), 'wait');
+  });
+
+  it('should not call waitForPrefetch in skip mode', async () => {
+    mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    mockTabLookup.getTabById.mockReturnValue(tabNoSummary);
+    StorageManager.getAiSettings.mockResolvedValue({
+      ...aiSettingsEnabled,
+      summaryWaitMode: 'skip',
+    });
+
+    const resolver = makeResolver();
+    await resolver(tabNoSummary);
+
+    expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
   });
 
   it('should default to wait mode when summaryWaitMode is not set', async () => {
@@ -227,7 +245,7 @@ describe('createContentResolver fallback', () => {
     expect(mockPrefetcher.waitForPrefetch).toHaveBeenCalledWith(42, expect.any(Number), 'wait');
   });
 
-  it('should use wait timeout=120000 and skip timeout=30000', async () => {
+  it('should use wait timeout=120000 and skip without waiting', async () => {
     const tab = { ...baseTab, summary: 'Prefetched summary' };
     mockTabLookup.getTabById.mockReturnValue(tab);
 
@@ -237,9 +255,10 @@ describe('createContentResolver fallback', () => {
     expect(mockPrefetcher.waitForPrefetch).toHaveBeenLastCalledWith(42, 120000, 'wait');
 
     mockPrefetcher.waitForPrefetch.mockClear();
+    mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
     StorageManager.getAiSettings.mockResolvedValue({ ...aiSettingsEnabled, summaryWaitMode: 'skip' });
     await resolver(tab);
-    expect(mockPrefetcher.waitForPrefetch).toHaveBeenLastCalledWith(42, 30000, 'skip');
+    expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
   });
 
   it('should treat missing summaryWaitMode as wait for failed prefetch fallback', async () => {
@@ -272,5 +291,72 @@ describe('createContentResolver fallback', () => {
     expect(mockPrefetcher.consumeCancelledWait).toHaveBeenCalledWith(42);
     expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
     expect(result?.summary).toBeUndefined();
+  });
+
+  it('should return content immediately without waiting in skip mode when prefetch is in-flight', async () => {
+    mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
+    const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+    mockTabLookup.getTabById.mockReturnValue(null);
+    StorageManager.getAiSettings.mockResolvedValue({
+      ...aiSettingsEnabled,
+      summaryWaitMode: 'skip',
+    });
+
+    const resolver = makeResolver();
+    const result = await resolver(tabNoSummary);
+
+    expect(result?.content).toBe(baseTab.content);
+    expect(result?.summary).toBeUndefined();
+    expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
+    expect(mockPrefetcher.getResultFromStore).not.toHaveBeenCalled();
+    expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
+  });
+
+  it('should return existing summary and translation in skip mode when prefetch is in-flight', async () => {
+    mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
+    const storedTab = {
+      ...baseTab,
+      summary: 'Existing summary',
+      translation: 'Existing translation',
+    };
+    mockTabLookup.getTabById.mockReturnValue(storedTab);
+    StorageManager.getAiSettings.mockResolvedValue({
+      ...aiSettingsEnabled,
+      summaryWaitMode: 'skip',
+    });
+
+    const resolver = makeResolver();
+    const result = await resolver({ ...baseTab, summary: undefined });
+
+    expect(result?.summary).toBe('Existing summary');
+    expect(result?.translation).toBe('Existing translation');
+    expect(result?.content).toBe(baseTab.content);
+    expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
+    expect(mockPrefetcher.getResultFromStore).not.toHaveBeenCalled();
+    expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
+  });
+
+  it('should settle skip mode in-flight resolver with only microtasks and no timer advance', async () => {
+    jest.useFakeTimers();
+    try {
+      mockPrefetcher.isPrefetchComplete.mockReturnValue(false);
+      const tabNoSummary = { ...baseTab, summary: undefined, translation: undefined };
+      mockTabLookup.getTabById.mockReturnValue(tabNoSummary);
+      StorageManager.getAiSettings.mockResolvedValue({
+        ...aiSettingsEnabled,
+        summaryWaitMode: 'skip',
+      });
+
+      const resolver = makeResolver();
+      const pending = resolver(tabNoSummary);
+      const result = await jest.advanceTimersByTimeAsync(0).then(() => pending);
+
+      expect(result?.content).toBe(baseTab.content);
+      expect(result?.summary).toBeUndefined();
+      expect(mockPrefetcher.waitForPrefetch).not.toHaveBeenCalled();
+      expect(mockAiProcessor.processContent).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
