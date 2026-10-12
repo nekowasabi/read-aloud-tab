@@ -12,6 +12,8 @@ type AddResult = 'added' | 'ignored' | 'failed';
 
 export class AutoQueueManager {
   private chain: Promise<void> = Promise.resolve();
+  private startupTabIds = new Set<number>();
+  private tabGenerations = new Map<number, number>();
 
   constructor(
     private readonly tabManager: TabManager,
@@ -19,21 +21,22 @@ export class AutoQueueManager {
   ) {}
 
   onCreated(tab: any): void {
-    this.enqueue(() => this.handleCreated(tab));
+    if (typeof tab?.id === 'number' && this.startupTabIds.has(tab.id)) return;
+    const generation = this.nextGeneration(tab?.id);
+    this.enqueue(() => this.handleCreated(tab, generation));
   }
   onUpdated(tabId: number, tab: any): void {
-    this.enqueue(() => this.handleUpdated(tabId, tab));
+    const generation = this.tabGenerations.get(tabId) ?? 0;
+    this.enqueue(() => this.handleUpdated(tabId, tab, generation));
   }
   onRemoved(tabId: number): void {
-    this.enqueue(async () => {
-      try {
-        await this.removePending(tabId);
-      } finally {
-        await this.tabManager.onTabClosed(tabId);
-      }
-    });
+    this.startupTabIds.delete(tabId);
+    this.nextGeneration(tabId);
+    this.enqueue(() => this.removePending(tabId));
+    this.tabManager.onTabClosed(tabId).catch(error => console.warn('Failed to close tab', error));
   }
-  onStartup(): void {
+  onStartup(tabIds: number[] = []): void {
+    this.startupTabIds = new Set(tabIds);
     this.enqueue(() => setPendingAutoQueueTabIds([]));
   }
   onSettingChanged(enabled: boolean): void {
@@ -46,10 +49,12 @@ export class AutoQueueManager {
       .catch(error => console.warn('Auto queue event failed', error));
   }
 
-  private async handleCreated(tab: any): Promise<void> {
+  private async handleCreated(tab: any, generation: number): Promise<void> {
     if (!(await StorageManager.getAutoQueueNewTabs()) || typeof tab?.id !== 'number') return;
+    if (!this.isCurrentGeneration(tab.id, generation)) return;
     tab = { ...tab, url: tab.pendingUrl ?? tab.url };
     const pending = await getPendingAutoQueueTabIds();
+    if (!this.isCurrentGeneration(tab.id, generation)) return;
     if (this.isNormal(tab)) {
       if ((await this.addIfNeeded(tab)) === 'failed')
         await setPendingAutoQueueTabIds([...pending, tab.id]);
@@ -58,20 +63,30 @@ export class AutoQueueManager {
     if (!pending.includes(tab.id)) await setPendingAutoQueueTabIds([...pending, tab.id]);
   }
 
-  private async handleUpdated(tabId: number, tab: any): Promise<void> {
+  private async handleUpdated(tabId: number, tab: any, generation: number): Promise<void> {
+    if ((this.tabGenerations.get(tabId) ?? 0) !== generation) return;
     if (!(await StorageManager.getAutoQueueNewTabs())) return;
     tab = { ...tab, url: tab.pendingUrl ?? tab.url };
     const pending = await getPendingAutoQueueTabIds();
+    if ((this.tabGenerations.get(tabId) ?? 0) !== generation) return;
     if (!pending.includes(tabId)) return;
     if (!this.isNormal(tab)) return;
     const result = await this.addIfNeeded({ ...tab, id: tabId });
+    if ((this.tabGenerations.get(tabId) ?? 0) !== generation) return;
     if (result !== 'failed' && this.isValidUrl(tab?.url))
       await setPendingAutoQueueTabIds(pending.filter(id => id !== tabId));
   }
 
+  private async isAlreadyQueued(tabId: number): Promise<boolean> {
+    if (typeof this.tabManager.hasQueuedTab === 'function') {
+      return this.tabManager.hasQueuedTab(tabId);
+    }
+    return Boolean(this.tabManager.getTabById(tabId));
+  }
+
   private async addIfNeeded(tab: any): Promise<AddResult> {
     if (!this.isValidUrl(tab?.url)) return 'failed';
-    if (this.tabManager.getTabById(tab.id)) return 'added';
+    if (await this.isAlreadyQueued(tab.id)) return 'added';
     let ignored: Set<string>;
     try {
       ignored = new Set((await getIgnoredDomains()).map(domain => domain.toLowerCase()));
@@ -79,7 +94,7 @@ export class AutoQueueManager {
       return 'failed';
     }
     if (!this.isCandidate(tab, ignored)) return 'ignored';
-    if (this.tabManager.getTabById(tab.id)) return 'added';
+    if (await this.isAlreadyQueued(tab.id)) return 'added';
     const tabInfo: TabInfo = {
       tabId: tab.id,
       url: tab.url,
@@ -98,9 +113,14 @@ export class AutoQueueManager {
   private isNormal(tab: any): boolean {
     return (
       this.isValidUrl(tab?.url) &&
-      !['chrome://', 'chrome-extension://', 'about:', 'edge://', 'moz-extension://'].some(prefix =>
-        tab.url.startsWith(prefix)
-      )
+      ![
+        'chrome://',
+        'chrome-error://',
+        'chrome-extension://',
+        'about:',
+        'edge://',
+        'moz-extension://',
+      ].some(prefix => tab.url.startsWith(prefix))
     );
   }
 
@@ -118,5 +138,16 @@ export class AutoQueueManager {
     const pending = await getPendingAutoQueueTabIds();
     if (pending.includes(tabId))
       await setPendingAutoQueueTabIds(pending.filter(id => id !== tabId));
+  }
+
+  private nextGeneration(tabId: unknown): number {
+    if (typeof tabId !== 'number') return 0;
+    const generation = (this.tabGenerations.get(tabId) ?? 0) + 1;
+    this.tabGenerations.set(tabId, generation);
+    return generation;
+  }
+
+  private isCurrentGeneration(tabId: number, generation: number): boolean {
+    return this.tabGenerations.get(tabId) === generation;
   }
 }

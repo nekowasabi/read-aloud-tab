@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { QueueCommandMessage, QueueStatusPayload } from '../../shared/messages';
 import { getIgnoredDomains } from '../../shared/utils/storage';
 
@@ -549,5 +551,14 @@ describe('BackgroundOrchestrator', () => {
       expect(stub.skipTab).toHaveBeenCalledWith('next');
       expect(result).toEqual({ success: true });
     });
+  });
+
+  test('background index still forwards loading and complete updates to TabManager', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../index.ts'), 'utf8');
+    expect(source).toMatch(/autoQueueManager\.onUpdated\(tabId/);
+    expect(source).toMatch(/tabManager\.onTabLoading\(tabId\)/);
+    expect(source).toMatch(/tabManager\.onTabUpdated\(tabId, update\)/);
+    expect(source).toMatch(/changeInfo\.status === 'loading'/);
+    expect(source).toMatch(/changeInfo\.status === 'complete'/);
   });
 });

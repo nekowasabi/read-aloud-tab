@@ -41,7 +41,13 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 if (chrome.runtime.onStartup)
-  chrome.runtime.onStartup.addListener(() => autoQueueManager.onStartup());
+  chrome.runtime.onStartup.addListener(() => {
+    chrome.tabs.query({}, tabs =>
+      autoQueueManager.onStartup(
+        tabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number')
+      )
+    );
+  });
 
 // Listen for storage changes to refresh ignored domains (Chrome/Firefox)
 const handleStorageChange = (changes: any, areaName: string) => {
