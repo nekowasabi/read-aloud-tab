@@ -11,6 +11,7 @@ import { selectBestVoice } from "../shared/utils/voiceSelector";
 // 定数を共通化ファイルから導入
 import {
   VOICES_TIMEOUT_MS,
+  VOICE_SPEAK_WAIT_MS,
   MAX_VOICE_RETRIES,
   VOICE_RETRY_DELAYS,
   SAFE_READING_TIME_SEC,
@@ -79,6 +80,9 @@ export class TTSEngine implements PlaybackController {
   ) => SpeechSynthesisUtterance;
   private readonly logger: LoggerLike;
   private readonly defaultLang: string;
+  // 背景で取得した音声一覧（同じエンジンの後続チャンクで再利用）
+  private cachedVoices: SpeechSynthesisVoice[] = [];
+  private voiceFill: Promise<SpeechSynthesisVoice[]> | null = null;
 
   constructor(options: TTSEngineOptions = {}) {
     this.speech = options.speech ||
@@ -567,7 +571,7 @@ export class TTSEngine implements PlaybackController {
     voiceName: string | null | undefined,
   ): Promise<void> {
     try {
-      const voices = await this.getVoices();
+      const voices = await this.getVoicesForSpeak();
 
       // === process5 sub5: デフォルト音声選択ロジックの改善 ===
       // 指定音声がある場合、それを検索
@@ -966,6 +970,45 @@ export class TTSEngine implements PlaybackController {
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
     this.lastChunkEndTime = 0;
+  }
+
+  /**
+   * speak 経路用の音声一覧取得。最大 VOICE_SPEAK_WAIT_MS だけ待ち、
+   * 10秒タイムアウト＋リトライ（getVoices）は背景で走らせて結果を保存する。
+   */
+  private async getVoicesForSpeak(): Promise<SpeechSynthesisVoice[]> {
+    if (this.cachedVoices.length > 0) {
+      return this.cachedVoices;
+    }
+    const existing = this.speech.getVoices();
+    if (existing.length > 0) {
+      this.cachedVoices = existing;
+      return existing;
+    }
+
+    if (!this.voiceFill) {
+      this.voiceFill = this.getVoices()
+        .then((voices) => {
+          if (voices.length > 0) {
+            this.cachedVoices = voices;
+          }
+          return voices;
+        })
+        .catch(() => [] as SpeechSynthesisVoice[])
+        .finally(() => {
+          this.voiceFill = null;
+        });
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const capped = new Promise<SpeechSynthesisVoice[]>((resolve) => {
+      timer = setTimeout(() => resolve(this.cachedVoices), VOICE_SPEAK_WAIT_MS);
+    });
+    try {
+      return await Promise.race([this.voiceFill, capped]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {

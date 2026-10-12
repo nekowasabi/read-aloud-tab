@@ -23,6 +23,8 @@ describe('TTSEngine (PlaybackController)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // 前のテストの mockReturnValue を持ち越さない
+    (speechSynthesis.getVoices as jest.Mock).mockReturnValue([]);
     (speechSynthesis as any).speaking = false;
     (speechSynthesis as any).pending = false;
   });
@@ -185,25 +187,28 @@ describe('TTSEngine (PlaybackController)', () => {
   // process1: 音声設定の初期化改善
   describe('音声設定の初期化改善 (process1)', () => {
     describe('sub1: タイムアウト延長', () => {
-      test('getVoices()は10秒のタイムアウトで待機する', async () => {
-        const engine = new TTSEngine();
-        const startTime = Date.now();
+      test('getVoices()は10秒のタイムアウトで待機する（背景取得用）', async () => {
+        jest.useFakeTimers();
+        try {
+          const engine = new TTSEngine();
+          (speechSynthesis.getVoices as jest.Mock).mockReturnValue([]);
 
-        // 初期状態では空配列を返す
-        (speechSynthesis.getVoices as jest.Mock).mockReturnValue([]);
+          let resolved = false;
+          const voicesPromise = (engine as any).getVoices().then((v: unknown) => {
+            resolved = true;
+            return v;
+          });
 
-        // voiceschangedイベントは発火しない（タイムアウトをテスト）
-        const voicesPromise = (engine as any).getVoices();
+          await jest.advanceTimersByTimeAsync(9999);
+          expect(resolved).toBe(false);
 
-        // 10秒のタイムアウトを待つ
-        await voicesPromise;
-
-        const elapsedTime = Date.now() - startTime;
-
-        // タイムアウト値は約10秒（最初の1回のタイムアウト検証）
-        // リトライがあるため、より長くなる可能性があるので、緩いチェック
-        expect(elapsedTime).toBeGreaterThanOrEqual(9000);
-      }, 60000);
+          // 10s ×3 + 500 + 1000 + 2000 で確定
+          await jest.advanceTimersByTimeAsync(30000 + 3500);
+          await expect(voicesPromise).resolves.toEqual([]);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
 
       test('voiceschangedイベント発火時はタイムアウト前に解決する', async () => {
         const mockVoices: SpeechSynthesisVoice[] = [
@@ -542,32 +547,95 @@ describe('TTSEngine (PlaybackController)', () => {
       }, 60000);
 
       test('最大3回までリトライしてから最終結果を返す', async () => {
-        const mockLogger = {
-          info: jest.fn(),
-          warn: jest.fn(),
-          error: jest.fn(),
-          debug: jest.fn(),
-        };
+        jest.useFakeTimers();
+        try {
+          const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+          const mockGetVoices = jest.fn(() => []);
+          const mockSpeechSynthesis = {
+            getVoices: mockGetVoices,
+            addEventListener: jest.fn(),
+            removeEventListener: jest.fn(),
+          };
 
-        const mockSpeechSynthesis = {
-          getVoices: jest.fn(() => []), // 常に空配列を返す（失敗をシミュレート）
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
-        };
+          const engine = new TTSEngine({ speech: mockSpeechSynthesis as any, logger: mockLogger });
+          const voicesPromise = (engine as any).getVoices();
+          await jest.advanceTimersByTimeAsync(3 * 10000 + 500 + 1000 + 2000);
 
-        const engine = new TTSEngine({ speech: mockSpeechSynthesis as any, logger: mockLogger });
-        const startTime = Date.now();
-        const voices = await (engine as any).getVoices();
-        const elapsedTime = Date.now() - startTime;
+          await expect(voicesPromise).resolves.toEqual([]);
+          expect(mockSpeechSynthesis.addEventListener).toHaveBeenCalledTimes(3);
+          expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('after 3 retries'),
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+    });
+  });
 
-        // 最大3回までリトライした後、空配列を返す
-        expect(voices).toEqual([]);
-        // リトライが実行されたことを確認（ログ出力で確認）
-        expect(mockLogger.warn).toHaveBeenCalled();
-        // 最初の10秒タイムアウト + 500ms + 1s + 2s = 13.5秒以上待つはず
-        // ただし、テスト環境の遅延を考慮して、10秒以上であることを確認
-        expect(elapsedTime).toBeGreaterThan(9000);
-      }, 120000);
+  describe('最初の speak 前の voice 待ち上限 (S1)', () => {
+    const makeSpeech = (voices: () => SpeechSynthesisVoice[]) => ({
+      speak: jest.fn(),
+      cancel: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      getVoices: jest.fn(voices),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      speaking: false,
+      pending: false,
+      paused: false,
+    });
+    const kyoko = { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'kyoko' } as SpeechSynthesisVoice;
+
+    afterEach(() => jest.useRealTimers());
+
+    test('voices が空でも 200ms 進めれば speak が呼ばれ、lang は既定値', async () => {
+      jest.useFakeTimers();
+      const speech = makeSpeech(() => []);
+      const engine = new TTSEngine({ speech: speech as any });
+
+      const t0 = Date.now();
+      const started = engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
+      await jest.advanceTimersByTimeAsync(199);
+      expect(speech.speak).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(speech.speak).toHaveBeenCalledTimes(1);
+      const speakAt = Date.now() - t0;
+      expect(speakAt).toBeLessThanOrEqual(200);
+      const utterance = speech.speak.mock.calls[0][0];
+      expect(utterance.lang).toBeTruthy();
+      await started;
+      engine.stop();
+    });
+
+    test('背景で音声を取得した後の start は待たずに speak する', async () => {
+      jest.useFakeTimers();
+      let list: SpeechSynthesisVoice[] = [];
+      const speech = makeSpeech(() => list);
+      const engine = new TTSEngine({ speech: speech as any });
+
+      const first = engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
+      await jest.advanceTimersByTimeAsync(200);
+      expect(speech.speak).toHaveBeenCalledTimes(1);
+      await first;
+      engine.stop();
+
+      // 背景取得のリトライ中に音声が見つかる
+      list = [kyoko];
+      await jest.advanceTimersByTimeAsync(10000 + 500);
+      expect((engine as any).cachedVoices).toEqual([kyoko]);
+
+      speech.getVoices.mockClear();
+      const timersBefore = jest.getTimerCount();
+      const second = engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(speech.speak).toHaveBeenCalledTimes(2);
+      expect(speech.speak.mock.calls[1][0].voice).toBe(kyoko);
+      expect(speech.getVoices).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBeLessThanOrEqual(timersBefore);
+      await second;
+      engine.stop();
     });
   });
 
