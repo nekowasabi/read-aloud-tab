@@ -166,7 +166,15 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
   });
 
   describe('waitForPrefetch', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    // Fake timers: with real timers, an event-loop stall longer than the
+    // deadline (e.g. concurrent jest runs) lets the poll timer hit the deadline
+    // before the status-setting timer runs, so the test returned 'timed_out'.
     it('should continue polling until status becomes completed', async () => {
+      jest.useFakeTimers();
       const prefetcher = new AiPrefetcher({
         tabManager: tabManagerMock as TabManager,
         broadcast: broadcastMock,
@@ -184,8 +192,9 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
         });
       }, 200);
 
-      const result = await prefetcher.waitForPrefetch(42, 2000);
-      expect(result).toBe('completed');
+      const resultPromise = prefetcher.waitForPrefetch(42, 2000);
+      await jest.advanceTimersByTimeAsync(300);
+      await expect(resultPromise).resolves.toBe('completed');
     });
 
     it('should wait until timeout when status is still unavailable', async () => {
@@ -207,6 +216,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
     });
 
     it('should return failed when worker reports an explicit failure', async () => {
+      jest.useFakeTimers();
       const prefetcher = new AiPrefetcher({
         tabManager: tabManagerMock as TabManager,
         broadcast: broadcastMock,
@@ -223,9 +233,9 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
         });
       }, 100);
 
-      const result = await prefetcher.waitForPrefetch(42, 2000);
-
-      expect(result).toBe('failed');
+      const resultPromise = prefetcher.waitForPrefetch(42, 2000);
+      await jest.advanceTimersByTimeAsync(200);
+      await expect(resultPromise).resolves.toBe('failed');
     });
 
     it('should use extended timeout (120s) when waitMode is "wait"', async () => {
@@ -241,18 +251,20 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       // statusMap is empty → should time out at 120s (not 30s)
       const resultPromise = prefetcher.waitForPrefetch(42, 30000, 'wait');
+      let settled = false;
+      void resultPromise.then(() => {
+        settled = true;
+      });
 
-      // Advance 30s: should NOT have resolved yet (default timeout would expire here)
-      await jest.advanceTimersByTimeAsync(30000);
-      // Still pending
+      await jest.advanceTimersByTimeAsync(30100);
+      expect(settled).toBe(false);
 
-      // Advance remaining 90s to reach 120s
-      await jest.advanceTimersByTimeAsync(90000);
+      // Jump the clock instead of ticking 900 more 100ms polls: ticking every
+      // poll made this test take >5s under CPU contention.
+      jest.setSystemTime(Date.now() + 90000);
+      await jest.advanceTimersByTimeAsync(100);
 
-      const result = await resultPromise;
-      expect(result).toBe('timed_out');
-
-      jest.useRealTimers();
+      await expect(resultPromise).resolves.toBe('timed_out');
     });
 
     it('should use default timeout (30s) when waitMode is "skip"', async () => {
@@ -274,8 +286,6 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       const result = await resultPromise;
       expect(result).toBe('timed_out');
-
-      jest.useRealTimers();
     });
 
     it('should honor cancelWait even when the skip request arrives before waiting starts', async () => {
@@ -309,7 +319,7 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
       const resultPromise = prefetcher.waitForPrefetch(42, 30000, 'wait');
 
       // Set completed status after 60s (within 120s extended timeout)
-      await jest.advanceTimersByTimeAsync(60000);
+      jest.setSystemTime(Date.now() + 60000);
       (prefetcher as any).statusMap.set(42, {
         tabId: 42,
         state: 'completed',
@@ -319,8 +329,6 @@ describe('AiPrefetcher (prefetch coordinator)', () => {
 
       const result = await resultPromise;
       expect(result).toBe('completed');
-
-      jest.useRealTimers();
     });
   });
 
