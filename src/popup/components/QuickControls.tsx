@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TTSSettings } from '../../shared/types';
 
 interface Props {
@@ -6,42 +6,76 @@ interface Props {
   onChange: (settings: TTSSettings) => void;
 }
 
-// Debounce function to prevent rapid successive calls
-function debounce<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout | null = null;
-  return (...args: Parameters<T>) => {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-    timeoutId = setTimeout(() => {
-      func(...args);
-    }, delay);
-  };
-}
+const DEBOUNCE_MS = 300;
 
 export default function QuickControls({ settings, onChange }: Props) {
-  // Create debounced onChange handler (300ms delay, same as SettingsPanel)
-  const debouncedOnChange = useMemo(() => debounce(onChange, 300), [onChange]);
+  const [localRate, setLocalRate] = useState(settings.rate);
+  const [localVolume, setLocalVolume] = useState(settings.volume);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRef = useRef<TTSSettings>(settings);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const handleSettingChange = (key: keyof TTSSettings, value: number) => {
-    const newSettings = { ...settings, [key]: value };
-    debouncedOnChange(newSettings);
+  // Ignore parent prop echoes while a local change is pending.
+  useEffect(() => {
+    if (timerRef.current !== null) {
+      return;
+    }
+    setLocalRate(settings.rate);
+    setLocalVolume(settings.volume);
+    latestRef.current = settings;
+  }, [settings]);
+
+  // Flush the pending change on unmount and on pagehide: closing the Chrome
+  // popup destroys the page without running React cleanup or the timer.
+  useEffect(() => {
+    const flush = (): void => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+        onChangeRef.current(latestRef.current);
+      }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
+
+  const schedule = (next: TTSSettings): void => {
+    latestRef.current = next;
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      onChangeRef.current(latestRef.current);
+    }, DEBOUNCE_MS);
+  };
+
+  const handleRateChange = (value: number): void => {
+    setLocalRate(value);
+    schedule({ ...latestRef.current, rate: value });
+  };
+
+  const handleVolumeChange = (value: number): void => {
+    setLocalVolume(value);
+    schedule({ ...latestRef.current, volume: value });
   };
 
   return (
     <div className="quick-controls">
       <div className="quick-control-item">
         <label>
-          <span className="quick-control-label">
-            🔊 音量: {Math.round(settings.volume * 100)}%
-          </span>
+          <span className="quick-control-label">🔊 音量: {Math.round(localVolume * 100)}%</span>
           <input
             type="range"
             min="0"
             max="1"
             step="0.1"
-            value={settings.volume}
-            onChange={(e) => handleSettingChange('volume', parseFloat(e.target.value))}
+            value={localVolume}
+            onChange={e => handleVolumeChange(parseFloat(e.target.value))}
             className="range-input"
           />
         </label>
@@ -49,16 +83,14 @@ export default function QuickControls({ settings, onChange }: Props) {
 
       <div className="quick-control-item">
         <label>
-          <span className="quick-control-label">
-            ⚡ 速度: {settings.rate.toFixed(1)}x
-          </span>
+          <span className="quick-control-label">⚡ 速度: {localRate.toFixed(1)}x</span>
           <input
             type="range"
             min="0.5"
             max="3"
             step="0.1"
-            value={settings.rate}
-            onChange={(e) => handleSettingChange('rate', parseFloat(e.target.value))}
+            value={localRate}
+            onChange={e => handleRateChange(parseFloat(e.target.value))}
             className="range-input"
           />
         </label>

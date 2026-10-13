@@ -512,16 +512,13 @@ export class TTSEngine implements PlaybackController {
   }
 
   updateSettings(settings: TTSSettings): void {
-    if (!this.currentSettings) {
-      return;
-    }
-
     const previous = this.currentSettings;
     this.currentSettings = settings;
 
     if (
-      settings.voice !== previous.voice ||
-      settings.preferredGender !== previous.preferredGender
+      previous &&
+      (settings.voice !== previous.voice ||
+        settings.preferredGender !== previous.preferredGender)
     ) {
       const voices =
         this.cachedVoices.length > 0
@@ -540,15 +537,6 @@ export class TTSEngine implements PlaybackController {
       this.logger.info("[TTSEngine] Settings changed during playback, replaying current chunk");
       this.pause();
       this.resume();
-      return;
-    }
-
-    // If currently speaking, pause to let user manually resume with new settings
-    if (this.speech && this.speech.speaking && !this.isPaused) {
-      this.logger.info(
-        "[TTSEngine] Settings changed during playback, pausing for user to resume",
-      );
-      this.pause();
     }
   }
 

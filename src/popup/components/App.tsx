@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { TTSSettings } from '../../shared/types';
 import { StorageManager } from '../../shared/utils/storage';
 import { BrowserAdapter } from '../../shared/utils/browser';
@@ -14,9 +14,6 @@ import { SerializedTabInfo } from '../../shared/messages';
 import { usePopupBootstrap } from '../hooks/usePopupBootstrap';
 import { usePopupSettingsSync } from '../hooks/usePopupSettingsSync';
 import { useAddTabsActions } from '../hooks/useAddTabsActions';
-
-// Additional debounce for settings changes (insurance layer)
-const SETTINGS_DEBOUNCE_MS = 300;
 
 export default function App() {
   const {
@@ -55,8 +52,7 @@ export default function App() {
     if (initError) setError(initError);
   }, [initError]);
 
-  // Debounce timer for settings changes (insurance layer)
-  const settingsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Debounced value from QuickControls/SettingsPanel is sent straight through.
   const { statuses: prefetchStatuses, diagnostics: prefetchDiagnostics } = usePrefetchStatus();
 
   // Sync storage changes to local state
@@ -148,24 +144,15 @@ export default function App() {
         const validated = StorageManager.validateSettings(newSettings);
         // Update local state immediately for UI feedback
         setSettings(validated);
-
-        // Clear existing timer
-        if (settingsTimerRef.current) {
-          clearTimeout(settingsTimerRef.current);
+        try {
+          await StorageManager.saveSettings(validated);
+          await updateSettings(validated);
+        } catch (saveError) {
+          console.error('Failed to save settings:', saveError);
+          const message =
+            saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
+          setError(message);
         }
-
-        // Debounce actual save and background update (insurance layer)
-        settingsTimerRef.current = setTimeout(async () => {
-          try {
-            await StorageManager.saveSettings(validated);
-            await updateSettings(validated);
-          } catch (saveError) {
-            console.error('Failed to save settings:', saveError);
-            const message =
-              saveError instanceof Error ? saveError.message : '設定の保存に失敗しました';
-            setError(message);
-          }
-        }, SETTINGS_DEBOUNCE_MS);
       } catch (validationError) {
         console.error('Failed to validate settings:', validationError);
         const message =

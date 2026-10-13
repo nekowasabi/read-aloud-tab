@@ -1695,4 +1695,69 @@ describe('TTSEngine (PlaybackController)', () => {
       }
     });
   });
+
+  describe('updateSettings (§7, currentSettings ガード削除後)', () => {
+    const kyoko = {
+      name: 'Kyoko',
+      lang: 'ja-JP',
+      localService: true,
+      default: false,
+      voiceURI: 'kyoko',
+    } as SpeechSynthesisVoice;
+    const makeSpeech = () => ({
+      speak: jest.fn(),
+      cancel: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      getVoices: jest.fn(() => [kyoko]),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      speaking: false,
+      pending: false,
+      paused: false,
+    });
+    const silentLogger = () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() });
+
+    test('start 前に呼んでも例外を出さず、speak も cancel もしない', () => {
+      const speech = makeSpeech();
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis, logger: silentLogger() });
+
+      expect(() => engine.updateSettings({ ...defaultSettings, rate: 2 })).not.toThrow();
+      engine.resume();
+
+      expect(speech.speak).not.toHaveBeenCalled();
+      expect(speech.cancel).not.toHaveBeenCalled();
+    });
+
+    test('start 前の値は start の設定で上書きされる', async () => {
+      const speech = makeSpeech();
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis, logger: silentLogger() });
+
+      engine.updateSettings({ ...defaultSettings, rate: 2 });
+      await engine.start(createTab(), defaultSettings, { onEnd: jest.fn(), onError: jest.fn() });
+
+      expect((speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance).rate).toBe(1);
+      engine.stop();
+    });
+
+    test('再生中に呼ぶと、先積み済みのチャンクも含めて新しい速度で積み直される', async () => {
+      const speech = makeSpeech();
+      const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis, logger: silentLogger() });
+      await engine.start(
+        createTab({ content: 'Hello world. '.repeat(20) }),
+        defaultSettings,
+        { onEnd: jest.fn(), onError: jest.fn() },
+      );
+      speech.speaking = true;
+
+      const before = speech.speak.mock.calls.length;
+      engine.updateSettings({ ...defaultSettings, rate: 2 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const after = speech.speak.mock.calls.slice(before) as unknown as [SpeechSynthesisUtterance][];
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.every(([u]) => u.rate === 2)).toBe(true);
+      engine.stop();
+    });
+  });
 });

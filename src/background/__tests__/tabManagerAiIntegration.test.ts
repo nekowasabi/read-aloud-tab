@@ -439,7 +439,8 @@ describe('TabManager AI統合', () => {
       await manager.initialize();
     });
 
-    test('設定変更時、既存タブのプリフェッチ結果がクリアされる', async () => {
+    test('速度変更では要約を消さない (§7)', async () => {
+      // §7: 速度変更では要約を消さない
       // Arrange
       const prefetchedSummary = 'Summarized content';
       const mockResolveContent = jest.fn().mockResolvedValue({
@@ -472,18 +473,21 @@ describe('TabManager AI統合', () => {
 
       let snapshot = newManager.getSnapshot();
       expect(snapshot.tabs[0].summary).toBe(prefetchedSummary);
+      expect(snapshot.status).toBe('reading');
 
-      // Act - 設定を変更
+      // Act - 速度を変更
       const newSettings: Partial<TTSSettings> = {
         rate: 1.5,
       };
       await newManager.updateSettings(newSettings);
 
-      // Assert - summaryと translationがクリアされる
+      // Assert - statusはreadingのまま、summaryは保持され、pauseされない
       snapshot = newManager.getSnapshot();
-      expect(snapshot.tabs[0].summary).toBeUndefined();
-      expect(snapshot.tabs[0].translation).toBeUndefined();
-      expect(snapshot.tabs[0].processedContent).toBeUndefined();
+      expect(snapshot.status).toBe('reading');
+      expect(snapshot.tabs[0].summary).toBe(prefetchedSummary);
+      expect(mockPlayback.pause).not.toHaveBeenCalled();
+      expect(mockPlayback.updateSettings).toHaveBeenCalled();
+      expect(snapshot.settings.rate).toBe(1.5);
     });
   });
 
