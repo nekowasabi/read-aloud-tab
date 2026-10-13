@@ -37,6 +37,9 @@ export const OPENROUTER_ERROR_MESSAGES = {
 /** 音声リスト取得のタイムアウト（ミリ秒） */
 export const VOICES_TIMEOUT_MS = 10000; // 3秒→10秒に延長
 
+/** 最初の speak 前に voiceschanged を待つ上限（ミリ秒）。超えたら既定音声で読み始める */
+export const VOICE_SPEAK_WAIT_MS = 200;
+
 /** 音声リスト取得のリトライ最大回数 */
 export const MAX_VOICE_RETRIES = 3;
 

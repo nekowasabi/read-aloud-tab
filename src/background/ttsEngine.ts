@@ -1,7 +1,7 @@
 import { TabInfo, TTSSettings } from "../shared/types";
 import { LoggerLike, PlaybackController, PlaybackHooks } from "./tabManager";
 import { chunkText, TextChunk, ChunkConfig } from "../shared/utils/textChunker";
-import { Subject, Subscription, EMPTY, from, of } from 'rxjs';
+import { Subject, Subscription, EMPTY, of } from 'rxjs';
 import { tap, filter, switchMap, catchError, map } from 'rxjs/operators';
 import { BrowserAdapter } from "../shared/utils/browser";
 // === process5 sub5: デフォルト音声選択ロジックの改善 ===
@@ -11,6 +11,7 @@ import { selectBestVoice } from "../shared/utils/voiceSelector";
 // 定数を共通化ファイルから導入
 import {
   VOICES_TIMEOUT_MS,
+  VOICE_SPEAK_WAIT_MS,
   MAX_VOICE_RETRIES,
   VOICE_RETRY_DELAYS,
   SAFE_READING_TIME_SEC,
@@ -79,6 +80,11 @@ export class TTSEngine implements PlaybackController {
   ) => SpeechSynthesisUtterance;
   private readonly logger: LoggerLike;
   private readonly defaultLang: string;
+  // 背景で取得した音声一覧（同じエンジンの後続チャンクで再利用）
+  private cachedVoices: SpeechSynthesisVoice[] = [];
+  private voiceFill: Promise<SpeechSynthesisVoice[]> | null = null;
+  // セッションごとに固定する音声。start() で一度だけ解決する。
+  private sessionVoice: SpeechSynthesisVoice | null = null;
 
   constructor(options: TTSEngineOptions = {}) {
     this.speech = options.speech ||
@@ -213,6 +219,14 @@ export class TTSEngine implements PlaybackController {
     // Setup Observable pipeline for chunk transitions (process3)
     this.setupChunkTransitionPipeline(hooks);
 
+    // セッションの音声を一度だけ解決して固定する。
+    // applyVoice/getVoicesForSpeak の既存ロジックを使い、以降のチャンクは再取得しない。
+    // セッション途中で cachedVoices が埋まっても、このセッションには適用せず次回 start() から使う。
+    this.sessionVoice = null;
+    const voiceProbe = { voice: null } as SpeechSynthesisUtterance;
+    await this.applyVoice(voiceProbe, settings.voice);
+    this.sessionVoice = voiceProbe.voice ?? null;
+
     // Start playing first chunk
     await this.playChunkAt(0);
   }
@@ -283,10 +297,7 @@ export class TTSEngine implements PlaybackController {
               }
               this.queuedChunkIndex = null;
               this.queuedUtterance = null;
-              this.prequeueNextChunk(
-                this.currentChunkIndex + 1,
-                reused.voice,
-              );
+              this.prequeueNextChunk(this.currentChunkIndex + 1);
             }),
             map(() => reused),
           );
@@ -297,8 +308,9 @@ export class TTSEngine implements PlaybackController {
         // Apply settings
         this.applySettings(utterance, this.currentSettings!);
 
-        // Convert async applyVoice to Observable
-        return from(this.applyVoice(utterance, this.currentSettings!.voice)).pipe(
+        // セッションで固定した音声を使い、再取得しない
+        utterance.voice = this.sessionVoice;
+        return of(utterance).pipe(
           tap(() => {
             // Bind events
             this.bindUtteranceEvents(utterance, hooks, chunk);
@@ -469,7 +481,7 @@ export class TTSEngine implements PlaybackController {
 
         // Apply settings
         this.applySettings(utterance, this.currentSettings!);
-        await this.applyVoice(utterance, this.currentSettings!.voice);
+        utterance.voice = this.sessionVoice;
 
         // Bind events with offset for correct position tracking
         this.bindUtteranceEventsWithOffset(
@@ -504,7 +516,22 @@ export class TTSEngine implements PlaybackController {
       return;
     }
 
+    const previous = this.currentSettings;
     this.currentSettings = settings;
+
+    if (
+      settings.voice !== previous.voice ||
+      settings.preferredGender !== previous.preferredGender
+    ) {
+      const voices =
+        this.cachedVoices.length > 0
+          ? this.cachedVoices
+          : this.speech.getVoices();
+      if (this.cachedVoices.length === 0 && voices.length > 0) {
+        this.cachedVoices = voices;
+      }
+      this.sessionVoice = this.resolveVoiceSync(voices, settings.voice);
+    }
 
     // speechSynthesis has no per-utterance cancel, so dropping the prequeued
     // chunk also drops the current one: replay the current chunk with the new
@@ -562,19 +589,31 @@ export class TTSEngine implements PlaybackController {
     return voices.find((voice) => this.isJapaneseVoice(voice));
   }
 
+  private resolveVoiceSync(
+    voices: SpeechSynthesisVoice[],
+    voiceName: string | null | undefined,
+  ): SpeechSynthesisVoice | null {
+    if (voiceName) {
+      const exact = voices.find((voice) => voice.name === voiceName);
+      if (exact) {
+        return exact;
+      }
+    }
+    const preferredGender = this.currentSettings?.preferredGender || 'female';
+    return selectBestVoice(voices, preferredGender, 'ja') ?? null;
+  }
+
   private async applyVoice(
     utterance: SpeechSynthesisUtterance,
     voiceName: string | null | undefined,
   ): Promise<void> {
     try {
-      const voices = await this.getVoices();
+      const voices = await this.getVoicesForSpeak();
 
-      // === process5 sub5: デフォルト音声選択ロジックの改善 ===
-      // 指定音声がある場合、それを検索
+      const picked = this.resolveVoiceSync(voices, voiceName);
       if (voiceName) {
-        const selectedVoice = voices.find((voice) => voice.name === voiceName);
-        if (selectedVoice) {
-          utterance.voice = selectedVoice;
+        if (picked && picked.name === voiceName) {
+          utterance.voice = picked;
           return;
         }
         // 指定音声が見つからない場合、ログ出力
@@ -584,13 +623,11 @@ export class TTSEngine implements PlaybackController {
       }
 
       // 指定音声がない場合、または見つからない場合は最適な音声を自動選択
-      const preferredGender = this.currentSettings?.preferredGender || 'female';
-      const bestVoice = selectBestVoice(voices, preferredGender, 'ja');
-
-      if (bestVoice) {
-        utterance.voice = bestVoice;
+      if (picked) {
+        utterance.voice = picked;
+        const preferredGender = this.currentSettings?.preferredGender || 'female';
         this.logger.info(
-          `TTSEngine: selected best voice "${bestVoice.name}" (lang: ${bestVoice.lang}, gender: ${preferredGender})`
+          `TTSEngine: selected best voice "${picked.name}" (lang: ${picked.lang}, gender: ${preferredGender})`
         );
       } else {
         this.logger.warn(
@@ -634,13 +671,13 @@ export class TTSEngine implements PlaybackController {
     this.clearQueuedChunk();
 
     this.applySettings(utterance, this.currentSettings);
-    await this.applyVoice(utterance, this.currentSettings.voice);
+    utterance.voice = this.sessionVoice;
     // Bind events with Observable-based chunk transition (process2)
     this.bindUtteranceEvents(utterance, this.currentHooks, chunk);
 
     this.speech.speak(utterance);
     // S3: 次チャンクを先積みしてチャンク間の無音を短縮する
-    this.prequeueNextChunk(chunkIndex + 1, utterance.voice);
+    this.prequeueNextChunk(chunkIndex + 1);
   }
 
   private clearQueuedChunk(): void {
@@ -648,10 +685,7 @@ export class TTSEngine implements PlaybackController {
     this.queuedUtterance = null;
   }
 
-  private prequeueNextChunk(
-    nextIndex: number,
-    voiceToCopy: SpeechSynthesisVoice | null,
-  ): void {
+  private prequeueNextChunk(nextIndex: number): void {
     // Firefox's speak queue behaves differently from Chrome's and is not yet
     // verified on a real device, so keep the old one-utterance-at-a-time path.
     if (this.isFirefox) {
@@ -670,7 +704,8 @@ export class TTSEngine implements PlaybackController {
     const nextUtterance = this.createUtteranceFn(nextChunk.text);
     nextUtterance.text = nextChunk.text;
     this.applySettings(nextUtterance, this.currentSettings);
-    nextUtterance.voice = voiceToCopy;
+    // S1: セッションで固定した音声（updateSettings で選び直した値）を使う
+    nextUtterance.voice = this.sessionVoice;
     this.bindUtteranceEvents(nextUtterance, this.currentHooks, nextChunk);
     this.speech.speak(nextUtterance);
     this.queuedChunkIndex = nextIndex;
@@ -966,6 +1001,51 @@ export class TTSEngine implements PlaybackController {
     this.currentChunkIndex = 0;
     this.chunkRetryCount = 0;
     this.lastChunkEndTime = 0;
+    this.sessionVoice = null;
+  }
+
+  /**
+   * speak 経路用の音声一覧取得。最大 VOICE_SPEAK_WAIT_MS だけ待ち、
+   * 10秒タイムアウト＋リトライ（getVoices）は背景で走らせて結果を保存する。
+   */
+  private async getVoicesForSpeak(): Promise<SpeechSynthesisVoice[]> {
+    if (this.cachedVoices.length > 0) {
+      return this.cachedVoices;
+    }
+    const existing = this.speech.getVoices();
+    if (existing.length > 0) {
+      this.cachedVoices = existing;
+      return existing;
+    }
+
+    if (!this.voiceFill) {
+      this.voiceFill = this.getVoices()
+        .then((voices) => {
+          if (voices.length > 0) {
+            this.cachedVoices = voices;
+            // The session started on the default voice because the list was
+            // empty (Firefox AMO "male voice"); switch from the next chunk on.
+            if (this.chunks.length > 0 && this.sessionVoice === null) {
+              this.sessionVoice = this.resolveVoiceSync(voices, this.currentSettings?.voice);
+            }
+          }
+          return voices;
+        })
+        .catch(() => [] as SpeechSynthesisVoice[])
+        .finally(() => {
+          this.voiceFill = null;
+        });
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const capped = new Promise<SpeechSynthesisVoice[]>((resolve) => {
+      timer = setTimeout(() => resolve(this.cachedVoices), VOICE_SPEAK_WAIT_MS);
+    });
+    try {
+      return await Promise.race([this.voiceFill, capped]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async getVoices(): Promise<SpeechSynthesisVoice[]> {
