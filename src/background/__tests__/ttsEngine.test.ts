@@ -1740,7 +1740,7 @@ describe('TTSEngine (PlaybackController)', () => {
       engine.stop();
     });
 
-    test('再生中に呼ぶと一時停止せず、次のチャンクから新しい速度になる', async () => {
+    test('再生中に呼ぶと、先積み済みのチャンクも含めて新しい速度で積み直される', async () => {
       const speech = makeSpeech();
       const engine = new TTSEngine({ speech: speech as unknown as SpeechSynthesis, logger: silentLogger() });
       await engine.start(
@@ -1750,15 +1750,13 @@ describe('TTSEngine (PlaybackController)', () => {
       );
       speech.speaking = true;
 
+      const before = speech.speak.mock.calls.length;
       engine.updateSettings({ ...defaultSettings, rate: 2 });
-      expect(speech.cancel).not.toHaveBeenCalled();
-
-      const first = speech.speak.mock.calls[0][0] as SpeechSynthesisUtterance;
-      (first.onend as unknown as () => void)();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(speech.speak).toHaveBeenCalledTimes(2);
-      expect((speech.speak.mock.calls[1][0] as SpeechSynthesisUtterance).rate).toBe(2);
+      const after = speech.speak.mock.calls.slice(before) as unknown as [SpeechSynthesisUtterance][];
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.every(([u]) => u.rate === 2)).toBe(true);
       engine.stop();
     });
   });
